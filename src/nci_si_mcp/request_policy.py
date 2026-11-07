@@ -33,7 +33,11 @@ class Exchange:
     body_state: BodyState = "complete"
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
+        # HTTP fields are case-insensitive; retain the first occurrence, as HTTPMessage.get does.
+        headers: dict[str, str] = {}
+        for name, value in self.headers.items():
+            headers.setdefault(name.lower(), value)
+        object.__setattr__(self, "headers", MappingProxyType(headers))
 
 
 class ControlledRequest(Protocol):

@@ -476,12 +476,14 @@ class HttpClient:
             ) from None
         finally:
             exc.close()
-        return self._status_failure(exc.code, dict(exc.headers), path, detail, empty_body, attempt)
+        return self._status_failure(
+            exc.code, exc.headers.get("Retry-After"), path, detail, empty_body, attempt
+        )
 
     def _status_failure(
         self,
         status: int,
-        headers: Mapping[str, str],
+        retry_after: str | None,
         path: str,
         detail: str,
         empty_body: bool,
@@ -489,7 +491,6 @@ class HttpClient:
     ) -> Exception:
         reason = " ".join(part for part in (f"HTTP {status}", _status_reason(status)) if part)
         message = self._redact(f"{self.label} request failed for {path}: {reason}")
-        retry_after = headers.get("Retry-After")
         if status == HTTPStatus.TOO_MANY_REQUESTS or status >= HTTPStatus.INTERNAL_SERVER_ERROR:
             return _Transient(message, status=status, retry_after=retry_after)
         return UpstreamRejectedError(
@@ -521,7 +522,7 @@ class HttpClient:
                     attempts=attempt.number,
                 ) from None
             raise self._status_failure(
-                exchange.status, exchange.headers, path, detail, empty, attempt
+                exchange.status, exchange.headers.get("retry-after"), path, detail, empty, attempt
             )
         return exchange.body
 
@@ -734,11 +735,11 @@ class HttpClient:
         self,
         request: Request,
         path: str,
-        reject: Callable[[Any], str | None] | None,
+        reject: Callable[[object], str | None] | None,
         json_response: bool,
         interpret: Callable[[bytes, int | None], None] | None,
         controlled: ControlledRequest | None,
-    ) -> Any:
+    ) -> object:
         attempts = timeouts = 0
         last_http: dict[str, Any] = {}
         while True:

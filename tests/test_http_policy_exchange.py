@@ -158,5 +158,5 @@ class BufferedPolicyTest(ServerTestCase):
         headers = {"X-Private": "canary"}
         exchange = Exchange(200, headers, b"private content")
         headers["X-Private"] = "changed"
-        self.assertEqual(dict(exchange.headers), {"X-Private": "canary"})
+        self.assertEqual(dict(exchange.headers), {"x-private": "canary"})
         self.assertEqual(repr(exchange), "Exchange(status=200, body_state='complete')")
