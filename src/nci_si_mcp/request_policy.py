@@ -5,22 +5,10 @@ from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Literal, Protocol
+from typing import Protocol
 from urllib.request import Request
 
-type PolicyReason = Literal[
-    "authorization",
-    "logical_limit",
-    "attempt_limit",
-    "concurrency_limit",
-    "deadline",
-    "response_limit",
-    "byte_limit",
-    "accounting",
-    "closed",
-    "transport",
-]
-type BodyState = Literal["complete", "proven_empty", "unreadable"]
+from .validation import BodyState
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +39,7 @@ class ControlledRequest(Protocol):
         """Reserve, enter transport, read bounded bytes and release the attempt lease.
 
         Call on_start exactly at transport entry, before I/O; if it raises, do not send.
-        Error bodies are at most4096 bytes; success bodies at most response_limit+1.
+        Error bodies are at most 4096 bytes; success bodies at most response_limit+1.
         Refusals must not be normalized into retriable transport exceptions.
         """
         ...

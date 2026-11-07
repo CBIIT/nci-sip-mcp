@@ -37,7 +37,6 @@ from .errors import PlatformError, current_correlation_id
 from .request_policy import (
     ControlledRequest,
     Exchange,
-    PolicyReason,
     RequestPolicy,
     current_request_policy,
 )
@@ -45,6 +44,7 @@ from .request_policy import (
     using_request_policy as _using_request_policy,
 )
 from .upstream import parse_upstream_json
+from .validation import PolicyReason
 
 using_request_policy = _using_request_policy
 

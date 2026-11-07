@@ -886,6 +886,17 @@ class HttpPolicyTest(ServerTestCase):
             self.assertEqual(call("read", lambda: inherited.get_json("/x")), DENIED)
         self.assertEqual(len(server.seen), 1)
 
+    def test_empty_scope_cannot_clear_the_outer_denying_policy(self):
+        server = self.serve()
+        with using_request_policy(DeniedPolicy()):
+            with self.assertRaises(ValueError) as refused, using_request_policy(None):
+                self.client(server).get_json("/x")
+            self.assertEqual(str(refused.exception), "an explicit request policy is required")
+            captured = self.client(server)
+        with correlated("policy-test"):
+            self.assertEqual(call("read", lambda: captured.get_json("/x")), DENIED)
+        self.assertEqual(server.seen, [])
+
     def test_exceptional_inner_scope_restores_its_outer_policy(self):
         server = self.serve()
         with using_request_policy(DeniedPolicy()):
