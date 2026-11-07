@@ -103,6 +103,20 @@ The acceptance suite and its self-tests use pytest directly.
 The unit tests ignore the developer's `NCI_SI_*` variables (`tests/conftest.py` removes them); a
 test that needs a setting sets it with `monkeypatch` or `patch.dict`.
 
+### Explicit controlled request integration
+
+`HttpClient(request_policy=...)` captures an explicit policy at construction; callers that
+construct platform clients can use `nci_si_mcp.request_policy.using_request_policy` around
+construction instead. Nested scopes restore their parent and do not activate another caller's
+policy. Without either opt-in, production transport behavior is unchanged. A policy owns exact
+request admission, each bounded raw exchange and retry-wait admission. Its terminal refusal is
+`upstream_unavailable`, without cache fallback or policy counters in public error details.
+
+The reusable controlled-run implementation is being delivered under #463. Furnished harness,
+prepare, selected stdio benchmark and direct-citation adoption remains #448; recorder adoption
+remains #449. This interface alone provides no protection claim for those callers and grants
+no live access. Diagnostic policy evidence is separate from native and benchmark reports.
+
 ## Test levels
 
 The [behavioural story catalogue](docs/behavioural-tests.md) documents every MCP acceptance
