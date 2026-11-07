@@ -1037,12 +1037,72 @@ class BufferedPolicyTest(ServerTestCase):
     def test_existing_budget_and_deadline_gate_do_not_record_unsent_attempts(self):
         server = self.serve()
         client, _ = self.guarded(server)
-        for scope in (budgeted(Budget(requests=0)), deadline_scope(0)):
-            with self.subTest(scope=scope), scope, audited("read", {}, {}, ()) as record:
-                result = call("read", lambda: client.get_json("/x"))
-                self.assertIn(result["error"]["code"], ("bound_exceeded", "upstream_unavailable"))
-                self.assertEqual(record.outbound_requests, 0)
+        cases = (
+            (
+                budgeted(Budget(requests=0)),
+                {
+                    "code": "bound_exceeded",
+                    "message": "The traversal exhausted its outbound request allowance. "
+                    "Ask for fewer start codes or a smaller traversal.",
+                    "details": {"bound": "requests", "limit": 0, "reached": 0},
+                    "correlationId": "policy-test",
+                },
+            ),
+            (
+                deadline_scope(0),
+                {
+                    "code": "upstream_unavailable",
+                    "message": "The call exhausted its elapsed-time budget. "
+                    "Retry later or ask for less work.",
+                    "details": {"attempts": 0},
+                    "correlationId": "policy-test",
+                },
+            ),
+        )
+        for scope, expected in cases:
+            with (
+                self.subTest(expected=expected),
+                scope,
+                correlated("policy-test"),
+                self.assertLogs("nci_si_mcp", level="INFO") as logs,
+            ):
+                with audited("read", {}, {}, ()) as record:
+                    result = call("read", lambda: client.get_json("/x"))
+                    record.result = result
+                self.assertEqual(result, {"error": expected})
+                completed = [
+                    row
+                    for entry in logs.records
+                    if (row := json.loads(entry.getMessage())).get("event") == "call_completed"
+                ]
+                self.assertEqual(len(completed), 1)
+                self.assertEqual(completed[0]["outboundRequests"], 0)
+                self.assertEqual(completed[0]["responseCode"], expected["code"])
                 self.assertEqual(server.seen, [])
+
+    def test_duplicate_retry_after_keeps_the_first_physical_field(self):
+        for controlled in (False, True):
+            with self.subTest(controlled=controlled):
+                server = self.serve(
+                    Reply(429, headers={"retry-after": "2", "Retry-After": "9"}), Reply()
+                )
+                client = self.guarded(server)[0] if controlled else self.client(server)
+                self.assertEqual(client.get_json("/x"), {"ok": True})
+                self.assertEqual(self.waits, [2.0])
+                self.assertEqual(len(server.seen), 2)
+        exchange = Exchange(429, {"retry-after": "2", "Retry-After": "9"}, b"")
+        self.assertEqual(dict(exchange.headers), {"retry-after": "2"})
+
+    def test_controlled_redirect_does_not_contact_its_target(self):
+        target = self.serve()
+        server = self.serve(Reply(302, headers={"Location": target.url + "/x"}))
+        client, _ = self.guarded(server)
+        with correlated("policy-test"), audited("read", {}, {}, ()) as record:
+            result = call("read", lambda: client.get_json("/x"))
+        self.assertEqual(result, DENIED)
+        self.assertEqual(record.outbound_requests, 1)
+        self.assertEqual(len(server.seen), 1)
+        self.assertEqual(target.seen, [])
 
     def test_masked_success_and_form_absence_use_existing_consumers(self):
         server = self.serve(Reply(body=b'{"apiResponse":{"type":"E"}}'))
