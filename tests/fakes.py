@@ -345,3 +345,20 @@ def vm_row(**extra):
 
 def vm_response(name="Q", matches=None):
     return {"matchResults": [{"name": name, "matches": [] if matches is None else matches}]}
+
+
+def selected_environment():
+    """Independent recorded policy input shared by benchmark record and evidence contracts."""
+    return {
+        "name": "evs-only",
+        "origins": {
+            "evs": "https://example.test/api",
+            "evs-fhir": "https://example.test/fhir/r4",
+            "cadsr": None,
+            "cadsr-ftp": None,
+            "cadsr-contracts": None,
+            "ssis": None,
+            "ssis-sparql": None,
+        },
+        "policy_sha256": "a" * 64,
+    }

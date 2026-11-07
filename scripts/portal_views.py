@@ -8,6 +8,8 @@ from typing import Any, Literal
 from scripts.evidence_benchmark import comparable
 from scripts.site_assets import STYLESHEETS, FooterLink, load_footer
 
+from nci_si_acceptance.environments import EnvironmentRecord
+
 # Read once at start-up: a missing or malformed table stops the portal rather than render an
 # empty footer.
 FOOTER = load_footer()
@@ -242,6 +244,20 @@ def _latency(value: float | None) -> str:
     return "unknown" if value is None else f"{value:.2f}"
 
 
+def _environment_table(environment: EnvironmentRecord) -> str:
+    rows = [
+        ["name", environment["name"]],
+        *[
+            [name, "disabled" if value is None else value]
+            for name, value in environment["origins"].items()
+        ],
+        ["policy_sha256", environment["policy_sha256"]],
+    ]
+    return "<p>Recorded configuration; not access approval.</p>" + table(
+        "Live environment", ["Field", "Recorded value"], rows
+    )
+
+
 def run_page(record: dict[str, Any], *, tool: str = "", story: str = "") -> str:
     evidence = record["evidence"]
     body = "<p>Origin unverified: imported locally. Checksums bind bytes; they do not authenticate "
@@ -265,6 +281,8 @@ def run_page(record: dict[str, Any], *, tool: str = "", story: str = "") -> str:
             }.items()
         ],
     )
+    if "environment" in evidence:
+        body += _environment_table(evidence["environment"])
     body += f"<p>Local sequence {record['sequence']}; bundle SHA-256 "
     body += f"<code>{text(record['checksum'])}</code>.</p>"
     if evidence["state"] == "unverified":

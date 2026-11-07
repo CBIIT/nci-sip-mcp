@@ -11,10 +11,25 @@ a requested future platform contract.
 pdm run python -m scripts.benchmark --repetitions 20 --output tmp/benchmark-fixture.json
 ```
 
-Live stdio benchmarking, including with a selection, refuses with
-`live stdio benchmarking is disabled pending the environment follow-up` before child/request/report creation, preserving existing output.
-The managed producer and provenance consumers follow [#453](https://github.com/CBIIT/nci-sip-mcp/issues/453); fixture benchmarking, historical parsing and HTTP execution are unchanged.
-This grants no upstream access or live-workflow enablement.
+For separately authorized live measurements, select a reviewed environment and an EVS case:
+
+```bash
+NCI_SI_ACCEPTANCE_ENVIRONMENT=evs-only pdm run python -m scripts.benchmark --mode live --case get_concept --repetitions 1 --output tmp/benchmark-live.json
+```
+
+Live stdio uses the [managed environment policy](../acceptance/README.md#managed-live-environments),
+the furnished isolated launcher and an owned refusal endpoint for disabled surfaces. Unsupported
+selection, runtime/target overrides and preparation fail before children or report creation,
+preserving prior output. This benchmark is index-free. Fixture benchmarking always uses its
+furnished unified stdio server: acceptance-only mode, server, profile, prepare and URL selectors
+do not configure it. Choose execution with the benchmark's own `--mode` argument.
+
+Current live stdio reports record the environment name, all seven origins (null means disabled)
+and exact policy-byte hash. Imports validate these fields, bind their canonical fingerprint and
+reject comparisons across different policies. Historical omission stays absent and unknown;
+explicit null or malformed/private/unknown fields are refused without echoing their values.
+Other unknown comparison dimensions remain unknown. Recorded configuration and hashes establish
+neither access approval nor producer authenticity; HTTP benchmark execution is unchanged.
 
 Run these sequentially. `--case TOOL` selects a case; `--repetitions 1` is an orchestration
 smoke test, not the published measurement. Each run exercises the actual MCP stdio boundary

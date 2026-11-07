@@ -51,10 +51,12 @@ Live caDSR citation comparison fails before transport with
 Native/evidence reports preserve the frozen name, all origins and exact policy-byte SHA-256,
 without credentials or local paths. Workers must agree with the controller at report time;
 historical omission stays unknown. The hash identifies configuration rather than approval or
-authenticity. Fixture reports/outcomes are unchanged; combined/portal display follows [#453](https://github.com/CBIIT/nci-sip-mcp/issues/453).
+authenticity. Combined reports and the [local portal](../docs/local-validation.md) display the
+recorded name, origins and hash; null origins are labelled disabled and historical absence adds
+no table. Combined CLI input is validated before rendering. Fixture reports/outcomes are unchanged.
 
-Live stdio benchmarking is temporarily disabled; [Benchmark](../docs/benchmark.md) documents its
-refusal and preserved-output contract. Its producer/consumers follow #453; fixtures and historical parsing remain available.
+Selected-environment stdio benchmarking reuses this managed launcher and refusal lifecycle;
+[Benchmark](../docs/benchmark.md) owns its commands, selector boundary and measurement limits.
 
 ## Writing a test
 

@@ -13,12 +13,66 @@ from scripts.benchmark_report import Report
 from scripts.evidence_benchmark import project_benchmark
 from scripts.evidence_envelope import EvidenceError
 
+from fakes import selected_environment
 from test_evidence_benchmark import benchmark, project, selected_projection
 from test_evidence_envelope import envelope
 from test_evidence_http import http_report, project_http
 
 
 class BenchmarkRecordTest(unittest.TestCase):
+    def test_recorded_environment_roundtrips_and_binds_the_canonical_input(self):
+        historical = benchmark() | {"mode": "live"}
+        self.assertEqual(Report.from_dict(historical, "completed").to_dict(), historical)
+        environment = selected_environment()
+        current = historical | {"environment": environment}
+        failure = None
+        parsed = None
+        try:
+            parsed = Report.from_dict(current, "completed")
+        except EvidenceError as error:
+            failure = str(error)
+        self.assertIsNone(failure, "a valid recorded live environment must be accepted")
+        self.assertEqual(parsed.to_dict(), current)
+        canonical = json.dumps(environment, sort_keys=True, separators=(",", ":")).encode()
+        self.assertEqual(parsed.fingerprint().environment, hashlib.sha256(canonical).hexdigest())
+        self.assertIsNone(Report.from_dict(historical, "completed").fingerprint().environment)
+
+    def test_environment_presence_is_strict_and_does_not_relax_other_fields(self):
+        environment = selected_environment()
+        bad = [None, {}, environment | {"private-marker": "private-marker"}]
+        bad += [
+            environment | {key: value}
+            for key, value in (
+                ("name", None),
+                ("policy_sha256", "private-marker"),
+                ("origins", None),
+                ("origins", environment["origins"] | {"evs": True}),
+                ("origins", {"evs": "https://private-marker@example.test"}),
+                (
+                    "origins",
+                    environment["origins"] | {"evs": "https://private-marker@example.test"},
+                ),
+            )
+        ]
+        inputs = [benchmark() | {"mode": "live", "environment": item} for item in bad]
+        inputs += [benchmark() | {"environment": item} for item in (None, environment)]
+        inputs += [http_report() | {"mode": "live", "environment": environment}]
+        for native in inputs:
+            with self.subTest(native=native):
+                with self.assertRaises(EvidenceError) as caught:
+                    Report.from_dict(native, "completed")
+                self.assertEqual(str(caught.exception), "Invalid benchmark field: environment")
+                self.assertNotIn("private-marker", str(caught.exception))
+        for field in ("sourceSha256",):
+            missing = benchmark() | {"mode": "live", "environment": environment}
+            missing.pop(field)
+            with self.assertRaises(EvidenceError) as caught:
+                Report.from_dict(missing, "completed")
+            self.assertEqual(str(caught.exception), f"Invalid benchmark field: {field}")
+        with self.assertRaises(EvidenceError) as caught:
+            Report.from_dict(benchmark() | {"private-marker": "secret"}, "completed")
+        self.assertEqual(str(caught.exception), "Invalid benchmark field: report")
+
     def test_source_identity_covers_extracted_measurement_records(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

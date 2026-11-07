@@ -41,6 +41,7 @@ import sys
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
 from enum import Enum
+from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeIs, get_args
 
@@ -536,6 +537,8 @@ def render(
     combined: dict[str, tuple[str, list[str]]],
     modes: str,
     approved: Path = APPROVED,
+    *,
+    live_environment: EnvironmentRecord | None = None,
 ) -> str:
     """The report as Markdown: the suite's identity, which says whether this is an acceptance
     report or MODIFIED (suite_identity.py), then the per-tool table and the tools whose tests
@@ -544,6 +547,7 @@ def render(
     lines = [
         *heading(report["suite"], approved_digests(approved)),
         f"Run modes: {modes}.",
+        *_environment_lines(live_environment),
         "",
         "| Tool | Group | Outcome | Tests passed / failed / no fixture / not run "
         "| Upstream limitation |",
@@ -564,6 +568,30 @@ def render(
         f"Size of the tools/list result: {_size(report['tools_list_bytes'])}.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _markdown_cell(value: str | None) -> str:
+    # Entities survive Markdown parsing as literal text, including image/link delimiters.
+    delimiters = str.maketrans({character: f"&#{ord(character)};" for character in r"\`*_{}[]()!|"})
+    return escape("disabled" if value is None else value).translate(delimiters)
+
+
+def _environment_lines(environment: EnvironmentRecord | None) -> list[str]:
+    if environment is None:
+        return []
+    rows = [
+        ("name", environment["name"]),
+        *environment["origins"].items(),
+        ("policy_sha256", environment["policy_sha256"]),
+    ]
+    return [
+        "",
+        "Live environment (recorded configuration; not access approval):",
+        "",
+        "| Field | Recorded value |",
+        "|---|---|",
+        *[f"| {escape(name)} | {_markdown_cell(value)} |" for name, value in rows],
+    ]
 
 
 # ---- pytest plugin
@@ -751,8 +779,11 @@ def main(arguments: Iterable[str] | None = None) -> int:
 
 
 def _render_options(options: argparse.Namespace, fixture: dict[str, Any]) -> int:
+    environment = None
     if options.live:
         live = _live_report(fixture, options.live)
+        if "environment" in live:
+            environment = _report_environment(live["environment"], "live")
         if options.drift:
             return drift(fixture, live)
         limitations = {}
@@ -766,7 +797,7 @@ def _render_options(options: argparse.Namespace, fixture: dict[str, Any]) -> int
             f"fixture ({fixture['transport']}) only; "
             "the live run is not included, so no outcome here is final"
         )
-    sys.stdout.write(render(fixture, combined, modes))
+    sys.stdout.write(render(fixture, combined, modes, live_environment=environment))
     return 0
 
 

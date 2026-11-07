@@ -10,7 +10,7 @@ import pytest
 
 from conftest import REVIEWED_ORIGINS, STAND_IN
 from nci_si_acceptance import environments
-from nci_si_acceptance.report import Collector, NativeReport, ReportFieldError, complete
+from nci_si_acceptance.report import Collector, NativeReport, ReportFieldError, complete, main
 
 pytest_plugins = ["pytester"]
 
@@ -142,3 +142,104 @@ def test_workers_cannot_omit_required_or_report_unexpected_provenance(selected, 
     with pytest.raises(ReportFieldError) as failure:
         collector.report("live" if selected else "fixture")
     assert str(failure.value) == "Invalid acceptance field: environment"
+
+
+def combined_inputs(tmp_path, environment):
+    fixture = native() | {
+        "mode": "fixture",
+        "run": {"exit_status": 0, "selected": 0, "finished": 0, "worker_crashes": 0},
+    }
+    live = fixture | {"mode": "live"}
+    if environment != "absent":
+        live["environment"] = environment
+    first, second = tmp_path / "fixture.json", tmp_path / "live.json"
+    first.write_text(json.dumps(fixture))
+    second.write_text(json.dumps(live))
+    return first, second
+
+
+def test_combined_cli_displays_only_supplied_live_environment_and_escapes_fields(tmp_path, capsys):
+    environment = deepcopy(ENVIRONMENT)
+    environment["origins"]["evs"] = "https://example.test/<script>private-marker</script>|edge"
+    first, second = combined_inputs(tmp_path, environment)
+    original = first.read_bytes(), second.read_bytes()
+    assert main([str(first), "--live", str(second)]) == 0
+    displayed = capsys.readouterr().out
+    expected = (
+        "Live environment (recorded configuration; not access approval):\n\n"
+        "| Field | Recorded value |\n|---|---|\n"
+        "| name | evs-only |\n"
+        "| evs | https://example.test/&lt;script&gt;private-marker&lt;/script&gt;&#124;edge |\n"
+        "| evs-fhir | https://api-evsrest.nci.nih.gov/fhir/r4 |\n"
+        "| cadsr | disabled |\n| cadsr-ftp | disabled |\n| cadsr-contracts | disabled |\n"
+        "| ssis | disabled |\n| ssis-sparql | disabled |\n"
+        f"| policy_sha256 | {'a' * 64} |\n"
+    )
+    assert expected in displayed
+    assert "<script>" not in displayed
+    assert (first.read_bytes(), second.read_bytes()) == original
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        None,
+        {},
+        ENVIRONMENT | {"name": None},
+        ENVIRONMENT | {"origins": None},
+        ENVIRONMENT | {"policy_sha256": "private-marker"},
+        ENVIRONMENT | {"private-marker": "private-marker"},
+        ENVIRONMENT
+        | {"origins": ENVIRONMENT["origins"] | {"evs": "https://private-marker@example.test"}},
+    ],
+)
+def test_combined_cli_rejects_invalid_present_metadata_before_output(tmp_path, capsys, environment):
+    first, second = combined_inputs(tmp_path, environment)
+    with pytest.raises(ReportFieldError) as caught:
+        main([str(first), "--live", str(second)])
+    assert str(caught.value) == "Invalid acceptance field: environment"
+    assert capsys.readouterr().out == ""
+    assert "private-marker" not in str(caught.value)
+
+
+def test_combined_cli_does_not_invent_environment_for_historical_or_fixture_input(tmp_path, capsys):
+    first, second = combined_inputs(tmp_path, "absent")
+    fixture = json.loads(first.read_text()) | {"environment": ENVIRONMENT}
+    first.write_text(json.dumps(fixture))
+    assert main([str(first), "--live", str(second)]) == 0
+    assert "Live environment" not in capsys.readouterr().out
+    assert main([str(first)]) == 0
+    assert "Live environment" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "suffix,encoded",
+    [
+        ("**recorded**", "&#42;&#42;recorded&#42;&#42;"),
+        (
+            "![label](https://destination.invalid/image.png)",
+            "&#33;&#91;label&#93;&#40;https://destination.invalid/image.png&#41;",
+        ),
+        (
+            "[label](https://destination.invalid/)",
+            "&#91;label&#93;&#40;https://destination.invalid/&#41;",
+        ),
+        ("`recorded`", "&#96;recorded&#96;"),
+        ("\\recorded\\path", "&#92;recorded&#92;path"),
+        ("_recorded_", "&#95;recorded&#95;"),
+        ("{recorded}", "&#123;recorded&#125;"),
+    ],
+)
+def test_combined_cli_preserves_markdown_delimiters_as_literal_origin(
+    tmp_path, capsys, suffix, encoded
+):
+    environment = deepcopy(ENVIRONMENT)
+    origin = "https://example.test/" + suffix
+    environment["origins"]["evs"] = origin
+    first, second = combined_inputs(tmp_path, environment)
+    original = second.read_bytes()
+    assert main([str(first), "--live", str(second)]) == 0
+    displayed = capsys.readouterr().out
+    assert f"| evs | https://example.test/{encoded} |\n" in displayed
+    assert json.loads(second.read_text())["environment"]["origins"]["evs"] == origin
+    assert second.read_bytes() == original

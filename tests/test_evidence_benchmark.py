@@ -9,6 +9,7 @@ from scripts.benchmark_records import summarize
 from scripts.evidence_benchmark import comparable, project_benchmark
 from scripts.evidence_envelope import EvidenceError
 
+from fakes import selected_environment
 from test_evidence_envelope import envelope
 
 
@@ -95,6 +96,37 @@ def selected_projection(native=None, change_selection=None, selected_from=None, 
 
 
 class BenchmarkProjectionTest(unittest.TestCase):
+    def test_recorded_environment_projects_without_inventing_historical_metadata(self):
+        historical = benchmark() | {"mode": "live"}
+        self.assertNotIn("environment", project(historical))
+        environment = selected_environment()
+        current = historical | {"environment": environment}
+        failure = None
+        projected = None
+        try:
+            projected = project(current)
+        except EvidenceError as error:
+            failure = str(error)
+        self.assertIsNone(failure, "recorded live metadata must reach the evidence interface")
+        self.assertEqual(projected["environment"], environment)
+        self.assertFalse(projected["comparison_ready"])
+
+    def test_different_recorded_policy_rejects_comparison_and_selection_substitution(self):
+        original = benchmark() | {"mode": "live", "environment": selected_environment()}
+        changed = original | {"environment": selected_environment() | {"policy_sha256": "b" * 64}}
+        left, right = selected_projection(original), selected_projection(changed)
+        for first, second in ((left, right), (right, left)):
+            with self.subTest(first=first):
+                allowed, reasons = comparable(first, second)
+                self.assertFalse(allowed)
+                self.assertIn("environment", reasons)
+        self.assertNotEqual(left["fingerprint"]["environment"], right["fingerprint"]["environment"])
+        with self.assertRaises(EvidenceError) as caught:
+            selected_projection(changed, selected_from=original)
+        self.assertEqual(
+            str(caught.exception), "Invalid benchmark field: selection.fingerprint.environment"
+        )
+
     def test_complete_and_interrupted_runs_cannot_be_compared_in_either_order(self):
         complete = selected_projection()
         interrupted = selected_projection(state="interrupted", exit_code=None)

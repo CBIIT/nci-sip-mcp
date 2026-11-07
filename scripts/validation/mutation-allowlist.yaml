@@ -357,3 +357,13 @@
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Release identity consumers read named fields and do not inspect layout, serialize __dict__, add attributes or use weak references. Removing slots changes storage only."
+
+# Approved: #453 comment 6710567911; fresh SURVIVED at 6f5de13.
+- file: "scripts/benchmark_report.py"
+  qualname: "Report"
+  operator: "string:key-mode-setting"
+  site: "/body/19/value/0/keywords/1/value/0/keys/0"
+  context: "b7a4acfba6be9061a2586cf08d5f8eb31687f394af8ba45a82e542c6c7dfb563"
+  original: "3315e6d2c5104f495d71a18268520c34050b923cedbae24598a7aaaf979ef2f2"
+  mutated: "179e3d338a3176f86639c2b9d42b1de2afe4e82315487135736d0bc90a8ec48a"
+  reason: "Supported stdio producers/parsers retain environment with either metadata key; HTTP producers leave Absent.FIELD, excluded independently by serialization, and HTTP imports carrying environment are rejected by _environment before shape handling. Historical omission independently removes the required field. No supported caller depends on excluding a manually constructed invalid HTTP record."

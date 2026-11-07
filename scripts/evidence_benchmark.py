@@ -6,7 +6,7 @@ from dataclasses import asdict
 from typing import Any
 
 from scripts.benchmark_records import PHASE_LABELS, require
-from scripts.benchmark_report import Fingerprint, Report, selection_fingerprint
+from scripts.benchmark_report import Absent, Fingerprint, Report, selection_fingerprint
 from scripts.evidence_benchmark_common import comparable
 from scripts.evidence_envelope import decode_json, validate_envelope
 
@@ -41,6 +41,8 @@ def project_benchmark(
         "selection_verified": selection is not None,
         "fingerprint": asdict(selection_fingerprint(selection, record["selection_sha256"], native)),
     }
+    if native.environment != Absent.FIELD:
+        result["environment"] = native.environment
     if native.transport == "streamable-http":
         result["phase_labels"] = PHASE_LABELS
     result["comparison_ready"] = comparable(result, result)[0]

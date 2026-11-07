@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Any, Literal, cast
 
 from scripts.benchmark_limits import Limits
@@ -25,6 +25,9 @@ from scripts.benchmark_records import (
 )
 from scripts.evidence_envelope import EvidenceError, decode_json, timestamp
 from scripts.vocabulary import RUN_STATES, HttpStop, RunState, RunStop, is_run_stop
+
+from nci_si_acceptance.environments import EnvironmentRecord, environment_record
+from nci_si_acceptance.report import Absent
 
 MAX_REPETITIONS = 10_000
 
@@ -117,11 +120,15 @@ class Report:
     suite: Suite | None = field(default=None, metadata={"transport": "stdio"})
     repetitions: int | None = field(default=None, metadata={"transport": "stdio"})
 
+    environment: EnvironmentRecord | Absent = field(
+        default=Absent.FIELD, metadata={"transport": "stdio"}
+    )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             key: value
             for key, value in asdict(self).items()
-            if key in wire_fields(type(self), self.transport)
+            if key in wire_fields(type(self), self.transport) and value != Absent.FIELD
         } | {"cases": [case.to_dict(self.transport) for case in self.cases]}
 
     @classmethod
@@ -129,7 +136,8 @@ class Report:
         require(isinstance(value, dict), "report")
         transport = value.get("transport")
         require(transport in ("stdio", "streamable-http"), "transport")
-        shape(value, wire_fields(cls, transport), "")
+        environment = _environment(value)
+        shape(value, _report_fields(value, transport), "")
         require(value["mode"] in ("fixture", "live"), "mode")
         require(type(value["complete"]) is bool, "complete")
         converted = (
@@ -153,7 +161,7 @@ class Report:
             )
             for index, row in enumerate(value["cases"])
         ]
-        report = cls(**(value | converted | {"cases": cases}))
+        report = cls(**(value | converted | {"cases": cases, "environment": environment}))
         report.missing()
         if limits:
             _totals(report)
@@ -178,7 +186,7 @@ class Report:
             asdict(self.conditions) if isinstance(self.conditions, Conditions) else self.conditions
         )
         repetitions = self.limits.repetitions if self.limits else self.repetitions
-        return fingerprint(
+        measured = fingerprint(
             self.mode,
             self.transport,
             conditions,
@@ -186,6 +194,27 @@ class Report:
             cast("int", repetitions),
             self.limits,
         )
+
+        if self.environment != Absent.FIELD:
+            return replace(measured, environment=fingerprint_value(self.environment))
+        return measured
+
+
+def _report_fields(value: dict[str, object], transport: Transport) -> set[str]:
+    expected = wire_fields(Report, transport)
+    if "environment" not in value:
+        expected.discard("environment")
+    return expected
+
+
+def _environment(value: dict[str, object]) -> EnvironmentRecord | Absent:
+    if "environment" not in value:
+        return Absent.FIELD
+    require(value.get("mode") == "live" and value.get("transport") == "stdio", "environment")
+    try:
+        return environment_record(value["environment"])
+    except ValueError:
+        raise EvidenceError("Invalid benchmark field: environment") from None
 
 
 def _stdio_header(value: dict[str, Any]) -> dict[str, Any]:

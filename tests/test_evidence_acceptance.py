@@ -7,6 +7,7 @@ from copy import deepcopy
 
 from scripts.evidence_acceptance import project_acceptance
 from scripts.evidence_envelope import EvidenceError
+from scripts.portal_views import run_page
 
 from test_evidence_envelope import envelope
 
@@ -98,6 +99,33 @@ class AcceptanceProjectionTest(unittest.TestCase):
         self.assertNotIn("environment", project(historical))
         current = project(historical | {"environment": deepcopy(ENVIRONMENT)})
         self.assertEqual(current.get("environment"), ENVIRONMENT)
+
+    def test_portal_displays_recorded_fields_escaped_and_omits_historical_environment(self):
+        environment = deepcopy(ENVIRONMENT)
+        environment["origins"]["evs"] = "https://example.test/<script>private-marker</script>|edge"
+        record = {"sequence": 1, "checksum": "a" * 64, "origin": "local-import-unverified"}
+        historical = project(report() | {"mode": "live"})
+        self.assertNotIn(
+            "<caption>Live environment</caption>", run_page(record | {"evidence": historical})
+        )
+        current = project(report() | {"mode": "live", "environment": environment})
+        displayed = run_page(record | {"evidence": current})
+        expected = (
+            '<caption>Live environment</caption><thead><tr><th scope="col">Field</th>'
+            '<th scope="col">Recorded value</th></tr></thead><tbody>'
+            "<tr><td>name</td><td>evs-only</td></tr>"
+            "<tr><td>evs</td><td>https://example.test/&lt;script&gt;private-marker&lt;/script&gt;|edge</td></tr>"
+            "<tr><td>evs-fhir</td><td>https://example.test/fhir/r4</td></tr>"
+            "<tr><td>cadsr</td><td>disabled</td></tr>"
+            "<tr><td>cadsr-ftp</td><td>disabled</td></tr>"
+            "<tr><td>cadsr-contracts</td><td>disabled</td></tr>"
+            "<tr><td>ssis</td><td>disabled</td></tr>"
+            "<tr><td>ssis-sparql</td><td>disabled</td></tr>"
+            f"<tr><td>policy_sha256</td><td>{'a' * 64}</td></tr></tbody>"
+        )
+        self.assertIn(expected, displayed)
+        self.assertNotIn("<script>", displayed)
+        self.assertIn("Recorded configuration; not access approval.", displayed)
 
     def test_additive_live_skip_evidence_preserves_the_strict_companion_projection(self):
         native = report()

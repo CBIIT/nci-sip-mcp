@@ -45,6 +45,11 @@ Only those fixed filenames are read, symlinks are rejected, and total input is b
 Hashes validate byte bindings, not producer identity. Imported origin and declared server
 identity remain unverified. Importing does not execute tests.
 
+**View run** shows a read-only environment table when acceptance or stdio benchmark evidence
+records one: its name, each origin or disabled surface, and policy hash. Historical omission
+adds no table. These are recorded configuration, not access approval; see the
+[benchmark provenance limits](benchmark.md#reproduce-the-benchmark).
+
 Envelope validation errors name a field, for example `Invalid envelope field: report_sha256`,
 without echoing its value. Unknown keys name only the envelope. An invalid persisted job names
 its field, such as `jobs[0].exit_code`; startup leaves `jobs.json` unchanged for inspection and

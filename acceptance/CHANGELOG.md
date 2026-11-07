@@ -14,8 +14,15 @@ Changes until then are development under the plan and need no approval reference
 under construction: the per-tool tests, the protocol gates, the prompts and resources, and the
 fixture set pinned to NCIt 26.09d.
 
+- #453 (§5 recorded-run provenance): selected-environment stdio benchmarking reuses the managed
+  policy/isolated launcher, preserves strict recorded identity through benchmark evidence and
+  comparison, and displays supplied-live provenance in combined reports and the local portal.
+  Historical omission and all fixture outcomes remain unchanged; recorded policy grants no access.
+  Plan approval/corrections: [6708070839](https://github.com/CBIIT/nci-sip-mcp/issues/453#issuecomment-6708070839),
+  fixture compatibility: [6708189332](https://github.com/CBIIT/nci-sip-mcp/issues/453#issuecomment-6708189332).
 - #447: require the reviewed named environment for managed live execution and preserve its
-  immutable, credential-free provenance through native/evidence reports. Live stdio benchmarking is temporarily disabled pending #453.
+  immutable, credential-free provenance through native/evidence reports. Its temporary live
+  benchmark refusal was superseded by #453.
   Block caDSR
   citation transport pending #448; preserve fixture comparison and all fixture expectations.
   Plan approval: [6678764601](https://github.com/CBIIT/nci-sip-mcp/issues/447#issuecomment-6678764601),
