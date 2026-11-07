@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -83,12 +84,15 @@ client = HttpClient(
     request_policy=policy,
 )
 accepted, refused = 0, []
-for _ in range(2):
+for round_number in range(2):
     try:
         client.get_json("/api/v1/version")
         accepted += 1
     except RequestPolicyError as error:
         refused.append(error.reason)
+    if round_number == 0 and settings.get("barrier", False):
+        Path(sys.argv[1]).with_suffix(".round1").write_text("finished")
+        sys.stdin.readline()
 print(json.dumps({
     "accepted": accepted, "refused": refused, "interpreter": sys.executable,
     "package": nci_si_acceptance.__file__, "tempdir": tempfile.gettempdir(),
@@ -147,11 +151,24 @@ def launch_actor(actor, directory, number, settings, run):
     return child
 
 
-def release_and_collect(children):
+def wait_for_first_round(markers):
+    deadline = time.monotonic() + 10
+    while not all(path.is_file() for path in markers):
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Owned actors did not finish their first round")
+        time.sleep(0.01)
+
+
+def release_and_collect(children, markers=()):
     # Release both registered children before waiting, so requests genuinely compete.
     for child in children:
         child.stdin.write(b"ready\n")
         child.stdin.flush()
+    if markers:
+        wait_for_first_round(markers)
+        for child in children:
+            child.stdin.write(b"exhaustion\n")
+            child.stdin.flush()
     results = []
     for child in children:
         output, error = child.communicate(timeout=10)
@@ -175,12 +192,18 @@ def test_real_children_share_the_logical_request_ceiling(tmp_path):
     children, results = [], []
     with FixtureServer(load_fixtures(FIXTURES)) as upstream:
         base = upstream.base_url("evs")
-        settings = {"base": base, "url": base + "/api/v1/version", "limits": limits}
+        settings = {
+            "base": base,
+            "url": base + "/api/v1/version",
+            "limits": limits,
+            "barrier": True,
+        }
         try:
             with run_context(optional_budget(), base, tmp_path, limits) as run:
                 for number in range(2):
                     children.append(launch_actor(actor, tmp_path, number, settings, run))
-                results = release_and_collect(children)
+                markers = [tmp_path / f"child-{number}.round1" for number in range(2)]
+                results = release_and_collect(children, markers)
         except RequestPolicyError:
             # Exhaustion remains a failed diagnostic run even if a child handled its refusal.
             pass
