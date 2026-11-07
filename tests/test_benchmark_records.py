@@ -58,10 +58,11 @@ class BenchmarkRecordTest(unittest.TestCase):
         inputs += [benchmark() | {"environment": item} for item in (None, environment)]
         inputs += [http_report() | {"mode": "live", "environment": environment}]
         for native in inputs:
-            with self.subTest(native=native), self.assertRaises(EvidenceError) as caught:
-                Report.from_dict(native, "completed")
-            self.assertEqual(str(caught.exception), "Invalid benchmark field: environment")
-            self.assertNotIn("private-marker", str(caught.exception))
+            with self.subTest(native=native):
+                with self.assertRaises(EvidenceError) as caught:
+                    Report.from_dict(native, "completed")
+                self.assertEqual(str(caught.exception), "Invalid benchmark field: environment")
+                self.assertNotIn("private-marker", str(caught.exception))
         for field in ("sourceSha256",):
             missing = benchmark() | {"mode": "live", "environment": environment}
             missing.pop(field)
