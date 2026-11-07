@@ -159,6 +159,11 @@ class _Attempt:
     entered: bool = False
 
 
+def _require_transport_entry(controlled: ControlledRequest | None, attempt: _Attempt) -> None:
+    if controlled is not None and not attempt.entered:
+        raise RequestPolicyError("transport") from None
+
+
 def _origin(url: str) -> tuple[str, str]:
     parts = urlsplit(url)
     return parts.scheme, parts.netloc.lower()
@@ -462,10 +467,17 @@ class HttpClient:
         # worded it: a platform can echo a header in its message.
         raise redacted
 
-    def _http_failure(self, exc: HTTPError, path: str, attempt: _Attempt) -> Exception:
+    def _http_failure(
+        self,
+        exc: HTTPError,
+        path: str,
+        attempt: _Attempt,
+        controlled: ControlledRequest | None = None,
+    ) -> Exception:
         """The failure an HTTP error status stands for: to retry, or to report as it is."""
 
         try:
+            _require_transport_entry(controlled, attempt)
             detail, empty_body = _error_detail(exc)
         except UpstreamUnavailableError:
             raise UpstreamUnavailableError(
@@ -552,14 +564,16 @@ class HttpClient:
                 return self._read(response, path, attempt)
         except HTTPError as exc:
             attempt.status, attempt.failure = exc.code, "http_status"
-            failure = self._http_failure(exc, path, attempt)
+            failure = self._http_failure(exc, path, attempt, controlled)
         except HTTPException as exc:
+            _require_transport_entry(controlled, attempt)
             attempt.failure = _transport_failure(exc)
             failure = _Transient(
                 self._redact(f"{self.label} request failed for {path}: invalid HTTP response"),
                 timed_out=_timed_out(exc),
             )
         except OSError as exc:
+            _require_transport_entry(controlled, attempt)
             attempt.failure = _transport_failure(exc)
             failure = _Transient(
                 self._redact(f"{self.label} request failed for {path}: transport failure"),
