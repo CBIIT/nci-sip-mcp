@@ -3,6 +3,7 @@
 A request the server saw is a request the client made: the attempt counts are checked against it.
 """
 
+import io
 import json
 import socket
 import tempfile
@@ -16,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import formatdate
 from http import HTTPStatus
+from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Barrier
@@ -874,6 +876,30 @@ class HttpPolicyTest(ServerTestCase):
             self.assertEqual(self.client(server).get_json("/x"), {"ok": True})
         self.assertEqual(len(server.seen), 3)
 
+    def test_explicit_constructor_policy_overrides_the_scoped_default(self):
+        server = self.serve()
+        with using_request_policy(DeniedPolicy()):
+            explicit = self.client(server, request_policy=BufferedPolicy(server.url + "/x"))
+            inherited = self.client(server)
+        with correlated("policy-test"):
+            self.assertEqual(explicit.get_json("/x"), {"ok": True})
+            self.assertEqual(call("read", lambda: inherited.get_json("/x")), DENIED)
+        self.assertEqual(len(server.seen), 1)
+
+    def test_exceptional_inner_scope_restores_its_outer_policy(self):
+        server = self.serve()
+        with using_request_policy(DeniedPolicy()):
+            with (
+                self.assertRaisesRegex(LookupError, "scope interrupted"),
+                using_request_policy(BufferedPolicy(server.url + "/x")),
+            ):
+                raise LookupError("scope interrupted")
+            captured = self.client(server)
+        with correlated("policy-test"):
+            self.assertEqual(call("read", lambda: captured.get_json("/x")), DENIED)
+        self.assertEqual(self.client(server).get_json("/x"), {"ok": True})
+        self.assertEqual(len(server.seen), 1)
+
     def test_concurrent_scopes_do_not_grant_another_callers_authority(self):
         server = self.serve()
         barrier = Barrier(2)
@@ -965,12 +991,75 @@ class BufferedPolicy:
             return Exchange(response.status, dict(response.headers), payload, state)
 
 
+class FailingPolicy(BufferedPolicy):
+    def __init__(self, url, factory, *, after_entry=False):
+        super().__init__(url)
+        self.factory, self.after_entry = factory, after_entry
+        self.failures = []
+
+    def exchange(self, *, timeout_seconds, response_limit, on_start):
+        if self.after_entry:
+            on_start()
+        failure = self.factory()
+        self.failures.append(failure)
+        raise failure
+
+
 class BufferedPolicyTest(ServerTestCase):
     def guarded(self, server, **policy_options):
         policy = BufferedPolicy(server.url + "/x", **policy_options)
         with using_request_policy(policy):
             client = self.client(server)
         return client, policy
+
+    def test_pre_entry_io_failure_is_terminal_without_fictitious_attempts(self):
+        server = self.serve()
+        marker = "policy-input-canary"
+        factories = (
+            lambda: OSError(marker),
+            lambda: HTTPException(marker),
+            lambda: TimeoutError(marker),
+            lambda: HTTPError(server.url + "/x?" + marker, 403, marker, {}, io.BytesIO(b"private")),
+        )
+        for factory in factories:
+            with self.subTest(factory=factory):
+                policy = FailingPolicy(server.url + "/x", factory)
+                client = self.client(server, request_policy=policy)
+                with audited("read", {}, {}, (), correlation_id="policy-test") as record:
+                    result = call("read", lambda client=client: client.get_json("/x"))
+                    record.result = result
+                self.assertEqual(result, DENIED)
+                self.assertEqual(record.outbound_requests, 0)
+                self.assertEqual(self.waits, [])
+                self.assertEqual(server.seen, [])
+                failure = policy.failures[0]
+                if isinstance(failure, HTTPError):
+                    self.assertTrue(failure.fp.closed)
+
+    def test_entered_transport_failures_preserve_retry_counts_and_privacy(self):
+        server = self.serve()
+        marker = "policy-input-canary"
+        cases = (
+            (TimeoutError, "timeout", {"seconds": 5}),
+            (HTTPException, "upstream_unavailable", {}),
+            (OSError, "upstream_unavailable", {}),
+        )
+        for failure, code, extra in cases:
+            with self.subTest(failure=failure):
+                policy = FailingPolicy(
+                    server.url + "/x", lambda failure=failure: failure(marker), after_entry=True
+                )
+                client = self.client(server, request_policy=policy, max_attempts=2)
+                with audited("read", {}, {}, ()) as record:
+                    result = call("read", lambda client=client: client.get_json("/x"))
+                    record.result = result
+                self.assertEqual(result["error"]["code"], code)
+                self.assertEqual(
+                    result["error"]["details"], {"surface": "evs", "attempts": 2} | extra
+                )
+                self.assertEqual(record.outbound_requests, 2)
+                self.assertNotIn(marker, json.dumps(result))
+                self.assertEqual(server.seen, [])
 
     def test_retry_after_case_preserves_wait(self):
         for header in ("retry-after", "rEtRy-AfTeR"):
