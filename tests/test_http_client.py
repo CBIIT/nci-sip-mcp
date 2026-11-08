@@ -1002,6 +1002,17 @@ class BufferedPolicy:
             return Exchange(response.status, dict(response.headers), payload, state)
 
 
+class RepeatedStartPolicy(BufferedPolicy):
+    def exchange(self, *, timeout_seconds, response_limit, on_start):
+        options = {
+            "timeout_seconds": timeout_seconds,
+            "response_limit": response_limit,
+            "on_start": on_start,
+        }
+        super().exchange(**options)
+        return super().exchange(**options)
+
+
 class FailingPolicy(BufferedPolicy):
     def __init__(self, url, factory, *, after_entry=False):
         super().__init__(url)
@@ -1022,6 +1033,27 @@ class BufferedPolicyTest(ServerTestCase):
         with using_request_policy(policy):
             client = self.client(server)
         return client, policy
+
+    def test_repeated_entry_refuses_a_second_send_and_records_one_attempt(self):
+        server = self.serve()
+        client = self.client(server, request_policy=RepeatedStartPolicy(server.url + "/x"))
+        with (
+            self.assertLogs("nci_si_mcp", level="INFO") as logs,
+            audited("read", {}, {}, (), correlation_id="policy-test") as record,
+        ):
+            result = call("read", lambda: client.get_json("/x"))
+            record.result = result
+        self.assertEqual(result, DENIED)
+        self.assertEqual([row[0] for row in server.seen], ["/x"])
+        completed = [
+            row
+            for entry in logs.records
+            if (row := json.loads(entry.getMessage())).get("event") == "call_completed"
+        ]
+        self.assertEqual(
+            [(row["outboundRequests"], row["responseCode"]) for row in completed],
+            [(1, "upstream_unavailable")],
+        )
 
     def test_pre_entry_io_failure_is_terminal_without_fictitious_attempts(self):
         server = self.serve()
