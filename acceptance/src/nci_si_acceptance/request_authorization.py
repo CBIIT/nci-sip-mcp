@@ -51,8 +51,14 @@ def _digest(value: object) -> str:
     return text
 
 
+def _control(char: str) -> bool:
+    # URL/origin and header values share the same ASCII control classification.
+    value = ord(char)
+    return value < CONTROL_START or value == CONTROL_END
+
+
 def _url_text(url: str) -> None:
-    _require(not any(char.isspace() or ord(char) < CONTROL_START for char in url))
+    _require(not any(char.isspace() or _control(char) for char in url))
     _require("#" not in url)
 
 
@@ -81,9 +87,7 @@ def destination(url: str) -> tuple[str, str, int]:
 
 
 def _header_valid(name: str, value: str) -> bool:
-    return bool(re.fullmatch(r"[a-z0-9-]+", name)) and not any(
-        ord(char) < CONTROL_START or ord(char) == CONTROL_END for char in value
-    )
+    return bool(re.fullmatch(r"[a-z0-9-]+", name)) and not any(_control(char) for char in value)
 
 
 def _pair(row: HeaderRow) -> tuple[str, str]:
