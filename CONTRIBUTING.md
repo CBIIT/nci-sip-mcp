@@ -119,8 +119,8 @@ the callback checks the call's existing budget/deadline. Returned exchanges hide
 and headers in their representation. Core classification alone proves none of the provider's
 I/O guarantees. The `on_request` observer is not an enforcement boundary.
 
-Explicit authorization values are described below; shared accounting remains #468, owned-run
-supervision and sanitized summaries #467, and the production provider #465. Furnished harness,
+Explicit authorization and shared accounting are described below; owned-run supervision and
+sanitized summaries remain #467, and the production provider #465. Furnished harness,
 prepare, selected stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
 activates no caller protection or live access and changes no native/benchmark report schema.
 
@@ -139,10 +139,24 @@ public policy identity separately; this API validates its format and does not de
 credentials or the binding. Descriptor records are private IPC, including their local path;
 keep them and the binding out of public reports.
 
-These values enforce no request/byte/time budget and supply no running ledger, transport,
-process supervisor or public summary. Shared ledger/admission/receipts remain #468, supervision
-and summaries #467, production transport #465 and actual caller adoption #448/#449. The core's
-existing explicit policy boundary is separate. No furnished caller or live access is activated.
+These values alone enforce no budget; explicit shared accounting is described below.
+Supervision/summaries remain #467, production transport #465 and actual caller adoption
+#448/#449. No furnished caller or live access is activated.
+
+### Explicit shared request accounting
+
+`nci_si_acceptance.request_budget.ControlledRun` owns a private SQLite ledger for explicitly
+cooperating callers. `create` starts with admission closed; the controller opens once,
+authorizes participant identities and terminally closes. `attach` opens existing state only.
+`logical` and `attempt` reserve shared call/attempt/concurrency and response-plus-sentinel
+capacity before the caller declares actual entry and reads through its lease. A reservation,
+local transport entry, committed byte receipt and independently observed receiver contact
+are different observations. Known bytes remain recorded after a later admission refusal;
+unknown read/receipt progress retains capacity. Only known unused body allowance is refunded.
+Snapshots are private typed accounting records, not public summaries or proof of upstream work.
+Callers own, join and reap their children and retain needed private ledger evidence outside
+managed scratch before pruning. This API supplies no automatic supervisor, owner-death
+observation, production transport or furnished-caller protection; those successors remain above.
 
 ## Test levels
 
