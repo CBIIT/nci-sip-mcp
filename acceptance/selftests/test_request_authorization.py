@@ -4,7 +4,7 @@ import math
 import sqlite3
 import time
 from contextlib import closing
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -477,3 +477,47 @@ def test_https_default_destination_preserves_exact_private_request_identity():
     authority = Authorization((grant,), Limits(), "a" * 64)
     explicit = replace(authority, grants=(replace(grant, url=explicit_url),))
     assert authority.binding(b"k" * 32) != explicit.binding(b"k" * 32)
+
+
+@dataclass(frozen=True, slots=True)
+class ExtendedGrant(RequestGrant):
+    _extra: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class ExtendedLimits(Limits):
+    _extra: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class ExtendedAuthorization(Authorization):
+    _extra: int = 1
+
+
+@pytest.mark.parametrize(
+    "construct",
+    [
+        pytest.param(
+            lambda: Authorization(
+                (ExtendedGrant("GET", "http://127.0.0.1:9/owned", ()),), Limits(), "a" * 64
+            ),
+            id="grant-admission",
+        ),
+        pytest.param(
+            lambda: Authorization(binding_authorization().grants, ExtendedLimits(), "a" * 64),
+            id="limits-admission",
+        ),
+        pytest.param(
+            lambda: ExtendedAuthorization(
+                binding_authorization().grants, Limits(), "a" * 64
+            ).binding(b"k" * 32),
+            id="authorization-binding",
+        ),
+    ],
+)
+def test_authorization_refuses_extended_record_shapes(construct):
+    assert refusal(construct) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
