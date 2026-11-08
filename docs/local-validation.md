@@ -192,3 +192,12 @@ for **30 days**. It neither uploads the store nor imports UAT/PROD results. No P
 promoted to a release or deployed by this job. Existing public engineering CI remains unchanged
 in visibility. [Government website assurance](government-site-assurance.md) records the Section
 508 and deployment applicability checks required in #196.
+
+### Explicit diagnostic request accounting
+
+The [cooperative accounting API](../CONTRIBUTING.md#explicit-shared-accounting) is available to
+explicit local diagnostic callers. It does not protect dashboard jobs automatically or replace
+their native reports. Callers retain ownership of children, response closure and private ledger
+evidence. Reservations, observed transport entry, known read bytes and receiver contacts are
+different observations; unresolved progress is retained conservatively. Automatic run supervision
+and sanitized summaries remain a separate delivery (#467), before transport and caller adoption.

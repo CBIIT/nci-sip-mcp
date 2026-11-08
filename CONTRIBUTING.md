@@ -119,9 +119,27 @@ the callback checks the call's existing budget/deadline. Returned exchanges hide
 and headers in their representation. Core classification alone proves none of the provider's
 I/O guarantees. The `on_request` observer is not an enforcement boundary.
 
-Shared accounting is #464; the production provider is #465. Furnished harness, prepare, selected
+The explicit accounting API is described below; owned-run supervision and sanitized summaries
+remain #467, and the production provider is #465. Furnished harness, prepare, selected
 stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
 activates no caller protection or live access and changes no native/benchmark report schema.
+
+### Explicit shared accounting
+
+`nci_si_acceptance.request_budget.ControlledRun` is a cooperative diagnostic accounting API.
+Create frozen exact `RequestGrant`/`Authorization` values and finite `Limits`, then call
+`ControlledRun.create`, controller `open` and `authorize_participant`. Children explicitly
+`attach` using the private descriptor and the same complete authorization. A logical context
+admits a grant; `attempt(response_limit=...)` reserves shared attempts, concurrency and body
+capacity before transport. The provider calls the delivered core `on_start` gate at its
+transport entry, records `entered`, and reads through the lease. Controller `close` is terminal.
+
+The caller owns and joins its children and closes its responses. The ledger supplies no process
+supervisor, owner-death observation, transport or public summary. The internal `snapshot()`
+separates reservations, observed entries and committed body bytes; none proves target contact.
+Known receipts can finish after admission closes. Unknown read progress retains capacity and
+marks observation incomplete. Private descriptors, keys and ledger files are retained evidence;
+do not copy them into public reports. This API activates no furnished caller or live access.
 
 ## Test levels
 

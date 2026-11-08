@@ -1,0 +1,216 @@
+"""Immutable exact local-run authorization; its private canonical bytes are never diagnostics."""
+
+import base64
+import hashlib
+import hmac
+import json
+import math
+import re
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Self, TypedDict
+from urllib.parse import unquote, urlsplit
+
+from nci_si_mcp.http_client import RequestPolicyError
+
+# ASCII control characters cannot identify an HTTP destination.
+CONTROL_START = 32
+# SQLite INTEGER counters are signed 64-bit; remeasure if the storage representation changes.
+MAX_COUNTER = (1 << 63) - 1
+# Explicit diagnostic ceilings, not measured upstream capacity. Revisit with approved run evidence.
+DEFAULT_LOGICAL = 256
+DEFAULT_ATTEMPTS = 768
+DEFAULT_PER_LOGICAL = 3
+DEFAULT_CONCURRENT = 4
+DEFAULT_SECONDS = 1800
+DEFAULT_RESPONSE_BYTES = 1048576
+DEFAULT_TOTAL_BYTES = 67108864
+
+
+def _require(condition: bool) -> None:
+    if not condition:
+        raise RequestPolicyError("authorization")
+
+
+def _text(value: object) -> str:
+    if not isinstance(value, str):
+        raise RequestPolicyError("authorization")
+    return value
+
+
+def _url_text(url: str) -> None:
+    _require(not any(char.isspace() or ord(char) < CONTROL_START for char in url))
+    _require("#" not in url)
+
+
+def _url_path(path: str) -> None:
+    _require(not any(part in (".", "..") for part in unquote(path).split("/")))
+    _require(not re.search(r"%2f|%5c|%25", path, re.IGNORECASE))
+    _require("\\" not in path)
+
+
+def destination(url: str) -> tuple[str, str, int]:
+    try:
+        parts = urlsplit(url)
+        port = (
+            parts.port
+            if parts.port is not None
+            else {"https": 443, "http": 80}.get(parts.scheme, 0)
+        )
+    except ValueError:
+        raise RequestPolicyError("authorization") from None
+    _require(parts.scheme in ("http", "https") and bool(parts.hostname))
+    _require(parts.username is None and parts.password is None and port > 0)
+    _url_text(url)
+    _url_path(parts.path)
+    return parts.scheme, parts.hostname or "", port
+
+
+def _header_valid(name: str, value: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9-]+", name)) and "\r" not in value and "\n" not in value
+
+
+def _headers(values: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
+    _require(all(isinstance(name, str) and isinstance(value, str) for name, value in values))
+    headers = tuple((name.lower(), value) for name, value in values)
+    _require(len({name for name, _ in headers}) == len(headers))
+    _require(all(_header_valid(name, value) for name, value in headers))
+    return tuple(sorted(headers))
+
+
+def _credential_destination(url: str, base: str) -> bool:
+    path, prefix = urlsplit(url).path, urlsplit(base).path.rstrip("/")
+    return (
+        destination(url) == destination(base)
+        and not urlsplit(base).query
+        and (path == prefix or path.startswith(prefix + "/"))
+    )
+
+
+def _seconds(value: float) -> float:
+    _require(isinstance(value, (int, float)) and not isinstance(value, bool))
+    try:
+        seconds = float(value)
+    except OverflowError:
+        raise RequestPolicyError("authorization") from None
+    _require(math.isfinite(seconds) and seconds > 0)
+    return seconds
+
+
+@dataclass(frozen=True, slots=True)
+class Limits:
+    logical: int = DEFAULT_LOGICAL
+    attempts: int = DEFAULT_ATTEMPTS
+    per_logical: int = DEFAULT_PER_LOGICAL
+    concurrent: int = DEFAULT_CONCURRENT
+    seconds: float = DEFAULT_SECONDS
+    response_bytes: int = DEFAULT_RESPONSE_BYTES
+    total_bytes: int = DEFAULT_TOTAL_BYTES
+
+    def __post_init__(self) -> None:
+        integers = (
+            self.logical,
+            self.attempts,
+            self.per_logical,
+            self.concurrent,
+            self.response_bytes,
+            self.total_bytes,
+        )
+        _require(
+            all(
+                isinstance(value, int) and not isinstance(value, bool) and 0 < value <= MAX_COUNTER
+                for value in integers
+            )
+        )
+        seconds = _seconds(self.seconds)
+        _require(self.per_logical <= self.attempts and self.concurrent <= self.attempts)
+        _require(self.response_bytes + 1 <= self.total_bytes)
+        object.__setattr__(self, "seconds", seconds)
+
+
+@dataclass(frozen=True, slots=True)
+class RequestGrant:
+    method: str
+    url: str = field(repr=False)
+    headers: tuple[tuple[str, str], ...] = field(repr=False)
+    body: bytes | None = field(default=None, repr=False)
+    credential_origin: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        destination(self.url)
+        _require(self.method in ("GET", "POST"))
+        _require(self.body is None or isinstance(self.body, bytes))
+        try:
+            headers = _headers(self.headers)
+        except TypeError, ValueError, AttributeError:
+            raise RequestPolicyError("authorization") from None
+        sensitive = {"authorization", "x-evsrestapi-license-key"} & {name for name, _ in headers}
+        if sensitive and self.credential_origin is None:
+            raise RequestPolicyError("authorization")
+        if self.credential_origin is not None:
+            _require(_credential_destination(self.url, self.credential_origin))
+        object.__setattr__(self, "headers", headers)
+
+
+def _private_bytes(value: object) -> str:
+    if not isinstance(value, bytes):
+        raise RequestPolicyError("authorization")
+    return base64.b64encode(value).decode("ascii")
+
+
+@dataclass(frozen=True, slots=True)
+class Authorization:
+    grants: tuple[RequestGrant, ...] = field(repr=False)
+    limits: Limits
+    policy_sha256: str
+
+    def __post_init__(self) -> None:
+        _require(
+            bool(self.grants) and all(isinstance(grant, RequestGrant) for grant in self.grants)
+        )
+        _require(isinstance(self.limits, Limits))
+        _require(re.fullmatch(r"[a-f0-9]{64}", self.policy_sha256) is not None)
+        object.__setattr__(self, "grants", tuple(self.grants))
+
+    def binding(self, key: bytes) -> bytes:
+        canonical = json.dumps(
+            asdict(self),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+            default=_private_bytes,
+        ).encode()
+        return hmac.digest(key, canonical, hashlib.sha256)
+
+
+class DescriptorRecord(TypedDict):
+    run_id: str
+    policy_sha256: str
+    directory: str
+
+
+@dataclass(frozen=True, slots=True)
+class RunDescriptor:
+    run_id: str
+    policy_sha256: str
+    directory: Path = field(repr=False)
+
+    def __post_init__(self) -> None:
+        _require(re.fullmatch(r"[a-f0-9]{32}", self.run_id) is not None)
+        _require(re.fullmatch(r"[a-f0-9]{64}", self.policy_sha256) is not None)
+        _require(self.directory.is_absolute())
+
+    def to_record(self) -> DescriptorRecord:
+        return {
+            "run_id": self.run_id,
+            "policy_sha256": self.policy_sha256,
+            "directory": str(self.directory),
+        }
+
+    @classmethod
+    def from_record(cls, value: object) -> Self:
+        if not isinstance(value, dict) or set(value) != {"run_id", "policy_sha256", "directory"}:
+            raise RequestPolicyError("authorization")
+        return cls(
+            _text(value["run_id"]), _text(value["policy_sha256"]), Path(_text(value["directory"]))
+        )
