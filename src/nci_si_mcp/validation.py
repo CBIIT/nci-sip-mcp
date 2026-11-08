@@ -23,7 +23,6 @@ type PolicyReason = Literal[
     "transport",
 ]
 type BodyState = Literal["complete", "proven_empty", "unreadable"]
-type LedgerState = Literal["created", "open", "closed", "failed"]
 
 SearchMode = Literal["hybrid", "bm25", "vector"]
 UnresolvedConceptReason = Literal["compound_code", "missing_source", "non_ncit_source"]

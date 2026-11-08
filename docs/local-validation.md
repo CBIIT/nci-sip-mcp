@@ -193,11 +193,10 @@ promoted to a release or deployed by this job. Existing public engineering CI re
 in visibility. [Government website assurance](government-site-assurance.md) records the Section
 508 and deployment applicability checks required in #196.
 
-### Explicit diagnostic request accounting
+### Explicit diagnostic request authorization
 
-The [cooperative accounting API](../CONTRIBUTING.md#explicit-shared-accounting) is available to
-explicit local diagnostic callers. It does not protect dashboard jobs automatically or replace
-their native reports. Callers retain ownership of children, response closure and private ledger
-evidence. Reservations, observed transport entry, known read bytes and receiver contacts are
-different observations; unresolved progress is retained conservatively. Automatic run supervision
-and sanitized summaries remain a separate delivery (#467), before transport and caller adoption.
+The [authorization value API](../CONTRIBUTING.md#explicit-request-authorization) validates and
+snapshots exact private request grants, finite limits and descriptor records. These values do
+not enforce dashboard request budgets or replace native reports. Shared ledger enforcement is
+#468, supervision/sanitized summaries #467, transport #465 and caller adoption #448/#449.
+Callers retain ownership of private binding/descriptor evidence. No live access is activated.

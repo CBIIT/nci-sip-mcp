@@ -119,27 +119,25 @@ the callback checks the call's existing budget/deadline. Returned exchanges hide
 and headers in their representation. Core classification alone proves none of the provider's
 I/O guarantees. The `on_request` observer is not an enforcement boundary.
 
-The explicit accounting API is described below; owned-run supervision and sanitized summaries
-remain #467, and the production provider is #465. Furnished harness, prepare, selected
+Explicit authorization values are described below; shared accounting remains #468, owned-run
+supervision and sanitized summaries #467, and the production provider #465. Furnished harness, prepare, selected
 stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
 activates no caller protection or live access and changes no native/benchmark report schema.
 
-### Explicit shared accounting
+### Explicit request authorization
 
-`nci_si_acceptance.request_budget.ControlledRun` is a cooperative diagnostic accounting API.
-Create frozen exact `RequestGrant`/`Authorization` values and finite `Limits`, then call
-`ControlledRun.create`, controller `open` and `authorize_participant`. Children explicitly
-`attach` using the private descriptor and the same complete authorization. A logical context
-admits a grant; `attempt(response_limit=...)` reserves shared attempts, concurrency and body
-capacity before transport. The provider calls the delivered core `on_start` gate at its
-transport entry, records `entered`, and reads through the lease. Controller `close` is terminal.
+`nci_si_acceptance.request_authorization` supplies frozen exact `RequestGrant`, `Limits`,
+`Authorization` and private `RunDescriptor` values for explicitly cooperating diagnostic callers.
+Grants describe one exact method/URL/header/body and credential destination. Constructors validate
+and retain immutable snapshots. `Authorization.binding` binds the complete private authorization
+with a caller-supplied private byte key; the separately supplied public policy identity contains
+no credential-derived binding. Descriptor records are private IPC, including their local path;
+keep them and the binding out of public reports.
 
-The caller owns and joins its children and closes its responses. The ledger supplies no process
-supervisor, owner-death observation, transport or public summary. The internal `snapshot()`
-separates reservations, observed entries and committed body bytes; none proves target contact.
-Known receipts can finish after admission closes. Unknown read progress retains capacity and
-marks observation incomplete. Private descriptors, keys and ledger files are retained evidence;
-do not copy them into public reports. This API activates no furnished caller or live access.
+These values enforce no request/byte/time budget and supply no running ledger, transport,
+process supervisor or public summary. Shared ledger/admission/receipts remain #468, supervision
+and summaries #467, production transport #465 and actual caller adoption #448/#449. The core's
+existing explicit policy boundary is separate. No furnished caller or live access is activated.
 
 ## Test levels
 
