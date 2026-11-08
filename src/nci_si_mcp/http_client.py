@@ -19,9 +19,11 @@ import random
 import re
 import time
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from functools import partial
 from http import HTTPStatus
 from http.client import HTTPException, HTTPMessage, IncompleteRead
 from typing import IO, Any
@@ -32,7 +34,19 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .audit import emit, hashed, requested
 from .bounds import CallDeadlineError, check_deadline, current_budget, current_deadline
 from .errors import PlatformError, current_correlation_id
+from .request_policy import (
+    ControlledRequest,
+    Exchange,
+    RequestPolicy,
+    current_request_policy,
+)
+from .request_policy import (
+    using_request_policy as _using_request_policy,
+)
 from .upstream import parse_upstream_json
+from .validation import PolicyReason
+
+using_request_policy = _using_request_policy
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +65,14 @@ class UpstreamError(RuntimeError):
     def __init__(self, message: str, /, **details: Any) -> None:
         super().__init__(message)
         self.details = details
+
+
+class RequestPolicyError(UpstreamError):
+    """Terminal refusal: internal reason is never a public error detail or cache fallback."""
+
+    def __init__(self, reason: PolicyReason) -> None:
+        super().__init__("Controlled upstream request refused.")
+        self.reason = reason
 
 
 class UpstreamUnavailableError(UpstreamError):
@@ -134,6 +156,12 @@ class _Attempt:
     number: int
     status: int | None = None
     failure: str | None = None
+    entered: bool = False
+
+
+def _require_transport_entry(controlled: ControlledRequest | None, attempt: _Attempt) -> None:
+    if controlled is not None and not attempt.entered:
+        raise RequestPolicyError("transport") from None
 
 
 def _origin(url: str) -> tuple[str, str]:
@@ -180,6 +208,10 @@ def _error_detail(exc: HTTPError) -> tuple[str, bool]:
     except OSError, HTTPException:
         check_deadline()
         return "", False
+    return _error_payload(payload)
+
+
+def _error_payload(payload: bytes) -> tuple[str, bool]:
     try:
         body = json.loads(payload.decode("utf-8"))
     except RecursionError:
@@ -285,7 +317,11 @@ class HttpClient:
         size_bound: str,
         credentials: Mapping[str, str] | None = None,
         redact_values: tuple[str, ...] = (),
+        request_policy: RequestPolicy | None = None,
     ) -> None:
+        self.request_policy = (
+            request_policy if request_policy is not None else current_request_policy()
+        )
         self.base_url = base_url.rstrip("/")
         self.label = label
         self.timeout_seconds = timeout_seconds
@@ -431,10 +467,17 @@ class HttpClient:
         # worded it: a platform can echo a header in its message.
         raise redacted
 
-    def _http_failure(self, exc: HTTPError, path: str, attempt: _Attempt) -> Exception:
+    def _http_failure(
+        self,
+        exc: HTTPError,
+        path: str,
+        attempt: _Attempt,
+        controlled: ControlledRequest | None = None,
+    ) -> Exception:
         """The failure an HTTP error status stands for: to retry, or to report as it is."""
 
         try:
+            _require_transport_entry(controlled, attempt)
             detail, empty_body = _error_detail(exc)
         except UpstreamUnavailableError:
             raise UpstreamUnavailableError(
@@ -445,21 +488,63 @@ class HttpClient:
             ) from None
         finally:
             exc.close()
-        reason = " ".join(part for part in (f"HTTP {exc.code}", _status_reason(exc.code)) if part)
+        return self._status_failure(
+            exc.code, exc.headers.get("Retry-After"), path, detail, empty_body, attempt
+        )
+
+    def _status_failure(
+        self,
+        status: int,
+        retry_after: str | None,
+        path: str,
+        detail: str,
+        empty_body: bool,
+        attempt: _Attempt,
+    ) -> Exception:
+        reason = " ".join(part for part in (f"HTTP {status}", _status_reason(status)) if part)
         message = self._redact(f"{self.label} request failed for {path}: {reason}")
-        retry_after = exc.headers.get("Retry-After")
-        if exc.code == HTTPStatus.TOO_MANY_REQUESTS or exc.code >= HTTPStatus.INTERNAL_SERVER_ERROR:
-            return _Transient(message, status=exc.code, retry_after=retry_after)
+        if status == HTTPStatus.TOO_MANY_REQUESTS or status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            return _Transient(message, status=status, retry_after=retry_after)
         return UpstreamRejectedError(
             message,
             empty_body=empty_body,
             body_message=self._redact(detail),
             surface=self.surface,
-            status=exc.code,
+            status=status,
             attempts=attempt.number,
         )
 
-    def _exchange(self, request: Request, path: str, attempt: _Attempt) -> Any:
+    def _buffered(self, exchange: Exchange, path: str, attempt: _Attempt) -> bytes:
+        attempt.status = exchange.status
+        if HTTPStatus.MULTIPLE_CHOICES <= exchange.status < HTTPStatus.BAD_REQUEST:
+            raise RequestPolicyError("authorization")
+        if exchange.status >= HTTPStatus.BAD_REQUEST:
+            attempt.failure = "http_status"
+            try:
+                detail, empty = (
+                    ("", False)
+                    if exchange.body_state == "unreadable"
+                    else _error_payload(exchange.body)
+                )
+            except UpstreamUnavailableError:
+                raise UpstreamUnavailableError(
+                    "The upstream error body exceeds JSON nesting limits. Retry later.",
+                    surface=self.surface,
+                    status=exchange.status,
+                    attempts=attempt.number,
+                ) from None
+            raise self._status_failure(
+                exchange.status, exchange.headers.get("retry-after"), path, detail, empty, attempt
+            )
+        return exchange.body
+
+    def _exchange(
+        self,
+        request: Request,
+        path: str,
+        attempt: _Attempt,
+        controlled: ControlledRequest | None = None,
+    ) -> Any:
         try:
             deadline = current_deadline()
             timeout = (
@@ -467,19 +552,28 @@ class HttpClient:
                 if deadline
                 else self.timeout_seconds
             )
+            if controlled is not None:
+                response_limit = self.max_response_bytes
+                on_start = partial(self._enter, attempt)
+                exchange = controlled.exchange(
+                    timeout_seconds=timeout, response_limit=response_limit, on_start=on_start
+                )
+                return self._buffered(exchange, path, attempt)
             with _open(request, timeout) as response:
                 attempt.status = response.status
                 return self._read(response, path, attempt)
         except HTTPError as exc:
             attempt.status, attempt.failure = exc.code, "http_status"
-            failure = self._http_failure(exc, path, attempt)
+            failure = self._http_failure(exc, path, attempt, controlled)
         except HTTPException as exc:
+            _require_transport_entry(controlled, attempt)
             attempt.failure = _transport_failure(exc)
             failure = _Transient(
                 self._redact(f"{self.label} request failed for {path}: invalid HTTP response"),
                 timed_out=_timed_out(exc),
             )
         except OSError as exc:
+            _require_transport_entry(controlled, attempt)
             attempt.failure = _transport_failure(exc)
             failure = _Transient(
                 self._redact(f"{self.label} request failed for {path}: transport failure"),
@@ -497,17 +591,19 @@ class HttpClient:
         reject: Callable[[Any], str | None] | None,
         json_response: bool,
         interpret: Callable[[bytes, int | None], None] | None,
+        controlled: ControlledRequest | None = None,
     ) -> Any:
-        check_deadline()
-        if budget := current_budget():
-            budget.request()
-        if deadline := current_deadline():
-            deadline.request(self.surface)
+        if controlled is None:
+            self._enter(_Attempt(number))
         attempt = _Attempt(number)
         started = time.monotonic()
         try:
             payload = self._parse(
-                self._exchange(request, path, attempt), path, attempt, json_response, interpret
+                self._exchange(request, path, attempt, controlled),
+                path,
+                attempt,
+                json_response,
+                interpret,
             )
             reason = reject(payload) if reject else None
             if reason is not None:
@@ -523,7 +619,18 @@ class HttpClient:
             attempt.failure = "deadline"
             raise
         finally:
-            self._record(request, attempt, time.monotonic() - started)
+            if controlled is None or attempt.entered:
+                self._record(request, attempt, time.monotonic() - started)
+
+    def _enter(self, attempt: _Attempt) -> None:
+        if attempt.entered:
+            raise RequestPolicyError("accounting")
+        check_deadline()
+        if budget := current_budget():
+            budget.request()
+        if deadline := current_deadline():
+            deadline.request(self.surface)
+        attempt.entered = True
 
     def _delay(self, attempt: int, failure: _Transient) -> float | None:
         """The wait before the next attempt, or None when the platform asks for too long."""
@@ -630,12 +737,31 @@ class HttpClient:
         json_response: bool = True,
         interpret: Callable[[bytes, int | None], None] | None = None,
     ) -> Any:
+        admission = (
+            self.request_policy.request(request)
+            if self.request_policy is not None
+            else nullcontext()
+        )
+        with admission as controlled:
+            return self._retry(request, path, reject, json_response, interpret, controlled)
+
+    def _retry(
+        self,
+        request: Request,
+        path: str,
+        reject: Callable[[object], str | None] | None,
+        json_response: bool,
+        interpret: Callable[[bytes, int | None], None] | None,
+        controlled: ControlledRequest | None,
+    ) -> object:
         attempts = timeouts = 0
         last_http: dict[str, Any] = {}
         while True:
             attempts += 1
             try:
-                return self._attempt(request, path, attempts, reject, json_response, interpret)
+                return self._attempt(
+                    request, path, attempts, reject, json_response, interpret, controlled
+                )
             except _Transient as failure:
                 check_deadline()
                 timeouts += failure.timed_out
@@ -645,4 +771,18 @@ class HttpClient:
                     raise self._unavailable(failure, attempts, timeouts, last_http) from failure
                 if deadline := current_deadline():
                     deadline.check(delay)
-                self._wait(path, attempts, delay, failure.message)
+                self._retry_wait(controlled, path, attempts, delay, failure.message)
+
+    def _retry_wait(
+        self,
+        controlled: ControlledRequest | None,
+        path: str,
+        attempt: int,
+        delay: float,
+        message: str,
+    ) -> None:
+        if controlled is not None:
+            controlled.check_wait(delay)
+        self._wait(path, attempt, delay, message)
+        if controlled is not None:
+            controlled.check_wait(0)
