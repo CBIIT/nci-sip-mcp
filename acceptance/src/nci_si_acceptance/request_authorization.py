@@ -38,6 +38,12 @@ def _text(value: object) -> str:
     return value
 
 
+def _digest(value: object) -> str:
+    text = _text(value)
+    _require(re.fullmatch(r"[a-f0-9]{64}", text) is not None)
+    return text
+
+
 def _url_text(url: str) -> None:
     _require(not any(char.isspace() or ord(char) < CONTROL_START for char in url))
     _require("#" not in url)
@@ -50,6 +56,7 @@ def _url_path(path: str) -> None:
 
 
 def destination(url: str) -> tuple[str, str, int]:
+    url = _text(url)
     try:
         parts = urlsplit(url)
         port = (
@@ -169,7 +176,7 @@ class Authorization:
             bool(self.grants) and all(isinstance(grant, RequestGrant) for grant in self.grants)
         )
         _require(isinstance(self.limits, Limits))
-        _require(re.fullmatch(r"[a-f0-9]{64}", self.policy_sha256) is not None)
+        _digest(self.policy_sha256)
         object.__setattr__(self, "grants", tuple(self.grants))
 
     def binding(self, key: bytes) -> bytes:
@@ -196,8 +203,9 @@ class RunDescriptor:
     directory: Path = field(repr=False)
 
     def __post_init__(self) -> None:
-        _require(re.fullmatch(r"[a-f0-9]{32}", self.run_id) is not None)
-        _require(re.fullmatch(r"[a-f0-9]{64}", self.policy_sha256) is not None)
+        _require(re.fullmatch(r"[a-f0-9]{32}", _text(self.run_id)) is not None)
+        _digest(self.policy_sha256)
+        _require(isinstance(self.directory, Path))
         _require(self.directory.is_absolute())
 
     def to_record(self) -> DescriptorRecord:

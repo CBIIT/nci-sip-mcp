@@ -283,12 +283,14 @@ class ControlledRun:
     def snapshot(self) -> LedgerSnapshot:
         with self._connection() as connection:
             row = connection.execute("SELECT * FROM run").fetchone()
-            state = STATES[row["state"]]
+            state = STATES.get(row["state"])
+            if state is None:
+                self._deny("accounting")
             pending = _count(
                 connection.execute("SELECT count(*) FROM leases WHERE pending>0").fetchone()[0]
             )
             failure = self._failure()
-            return LedgerSnapshot(
+            result = LedgerSnapshot(
                 run_id=self.descriptor.run_id,
                 policy_sha256=self.descriptor.policy_sha256,
                 state="failed" if failure else state,
@@ -303,6 +305,22 @@ class ControlledRun:
                 observation_complete=pending == 0 and row["active"] == 0,
                 failure=failure,
             )
+            self._validate_snapshot(result)
+            return result
+
+    def _validate_snapshot(self, snapshot: LedgerSnapshot) -> None:
+        limits = self.authorization.limits
+        bounds = (
+            snapshot.logical <= limits.logical,
+            snapshot.attempts <= min(limits.attempts, snapshot.logical * limits.per_logical),
+            snapshot.transport_entries <= snapshot.attempts,
+            snapshot.consumed_body_bytes <= snapshot.reserved_body_bytes <= limits.total_bytes,
+            snapshot.active <= snapshot.peak_active <= limits.concurrent,
+            snapshot.peak_active <= snapshot.attempts,
+            snapshot.pending_receipts <= snapshot.active,
+        )
+        if not all(bounds):
+            self._deny("accounting")
 
 
 class LogicalRequest:
