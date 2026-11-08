@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -30,7 +30,7 @@ from nci_si_mcp.request_policy import Exchange
 
 http_client._OPENER = build_opener(ProxyHandler({}), http_client._SameOriginRedirects())
 settings = json.loads(Path(sys.argv[1]).read_text())
-sys.stdin.readline()  # The parent transfers ownership before releasing the child.
+sys.stdin.readline()  # The parent authorizes the participant before releasing its child.
 module = None
 if importlib.util.find_spec("nci_si_acceptance.request_budget") is not None:
     module = importlib.import_module("nci_si_acceptance.request_budget")
@@ -49,14 +49,17 @@ class ActorPolicy:
     def check_wait(self, delay_seconds):
         self.run.check_wait(delay_seconds)
     def exchange(self, *, timeout_seconds, response_limit, on_start):
-        with self.logical.attempt() as lease:
-            on_start()
-            lease.entered()
-            with build_opener(ProxyHandler({})).open(
-                self.request_snapshot, timeout=timeout_seconds
-            ) as response:
+        with self.logical.attempt(response_limit=response_limit) as lease:
+            with self._enter_transport(lease, on_start, timeout_seconds) as response:
                 body = lease.read(response.read, response_limit + 1)
                 return Exchange(response.status, dict(response.headers), body)
+    def _enter_transport(self, lease, on_start, timeout_seconds):
+        # This local actor declares entry here; receiver contacts remain independent.
+        on_start()
+        lease.entered()
+        return build_opener(ProxyHandler({})).open(
+            self.request_snapshot, timeout=timeout_seconds
+        )
 
 run = None
 if module is not None:
@@ -110,12 +113,20 @@ def optional_budget():
     return importlib.import_module("nci_si_acceptance.request_budget")
 
 
+@contextmanager
 def run_context(module, base, directory, limits):
     if module is None:
-        return nullcontext(None)
+        yield None
+        return
     grant = module.RequestGrant("GET", base + "/api/v1/version", (("accept", "application/json"),))
     authorization = module.Authorization((grant,), module.Limits(**limits), "a" * 64)
-    return module.ControlledRun.create(authorization, directory / "runs")
+    run = module.ControlledRun.create(authorization, directory / "runs")
+    try:
+        run.open()
+        yield run
+    finally:
+        # The test parent owns child joins/reaping, not the ledger.
+        run.close()
 
 
 def stop_actor(child):
@@ -144,7 +155,7 @@ def launch_actor(actor, directory, number, settings, run):
     )
     try:
         if run is not None:
-            run.register(participant, child, kind="worker")
+            run.authorize_participant(participant)
     except BaseException:
         stop_actor(child)
         raise
