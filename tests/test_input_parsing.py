@@ -13,7 +13,7 @@ from nci_si_mcp.errors import correlated
 from nci_si_mcp.evs import EVSClient
 from nci_si_mcp.invocation import call
 from ncit_index.embeddings import EmbeddingProvider
-from test_http_client import Reply, ServerTestCase
+from test_http_client import BufferedPolicy, Reply, ServerTestCase
 from test_index import IndexTestCase
 
 
@@ -67,6 +67,31 @@ class ResponseParsingTest(ServerTestCase):
         self.assertEqual(error["correlationId"], "deep-success")
         self.assertEqual(len(server.seen), 2)
         self.assertEqual(client.get_json("/x"), {"ok": True})
+
+    def test_controlled_deep_error_body_is_terminal_with_exact_details(self):
+        # The real Python decoder setup above makes this 4001-byte body deterministic.
+        body = b"[" * 2000 + b"0" + b"]" * 2000
+        for status in (400, 404, 503):
+            with self.subTest(status=status):
+                server = self.serve(Reply(status, body), Reply())
+                policy = BufferedPolicy(server.url + "/x")
+                client = self.client(server, request_policy=policy)
+                with correlated("deep-controlled-error"):
+                    result = call("read", partial(client.get_json, "/x"))
+                self.assertEqual(
+                    result,
+                    {
+                        "error": {
+                            "code": "upstream_unavailable",
+                            "message": "The upstream error body exceeds JSON nesting limits. "
+                            "Retry later. Retry later.",
+                            "details": {"surface": "evs", "status": status, "attempts": 1},
+                            "correlationId": "deep-controlled-error",
+                        }
+                    },
+                )
+                self.assertEqual([path for path, _ in server.seen], ["/x"])
+                self.assertEqual(self.waits, [])
 
     def test_deep_http_error_body_is_unavailable_without_claiming_absence(self):
         # A parser-depth failure is terminal, even when the status alone suggested absence.
