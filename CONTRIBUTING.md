@@ -153,6 +153,8 @@ capacity before the caller declares actual entry and reads through its lease. A 
 local transport entry, committed byte receipt and independently observed receiver contact
 are different observations. Known bytes remain recorded after a later admission refusal;
 unknown read/receipt progress retains capacity. Only known unused body allowance is refunded.
+Retired lease identities remain bounded by admitted attempts. Repeat release validates authority
+before returning without a second refund/decrement; unknown or foreign leases still refuse.
 Snapshots are private typed accounting records, not public summaries or proof of upstream work.
 Callers own, join and reap their children and retain needed private ledger evidence outside
 managed scratch before pruning. This API supplies no automatic supervisor, owner-death

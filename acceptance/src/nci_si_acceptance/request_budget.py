@@ -111,7 +111,8 @@ class ControlledRun:
                 ) STRICT;
                 CREATE TABLE leases (
                     id TEXT PRIMARY KEY, request TEXT, participant TEXT,
-                    allowance INTEGER, consumed INTEGER, pending INTEGER, entered INTEGER
+                    allowance INTEGER, consumed INTEGER, pending INTEGER, entered INTEGER,
+                    retired INTEGER
                 ) STRICT;
             """)
             connection.execute(
@@ -337,7 +338,7 @@ class LogicalRequest:
             self.run._guard(connection)
             self._reserve(connection, allowance)
             connection.execute(
-                "INSERT INTO leases VALUES (?,?,?,?,0,0,0)",
+                "INSERT INTO leases VALUES (?,?,?,?,0,0,0,0)",
                 (lease_id, self.request_id, self.run.participant, allowance),
             )
         lease = AttemptLease(self.run, lease_id)
@@ -387,12 +388,15 @@ class AttemptLease:
     def __init__(self, run: ControlledRun, lease_id: str) -> None:
         self.run, self.lease_id = run, lease_id
 
-    def _row(self, connection: sqlite3.Connection) -> sqlite3.Row:
+    def _row(self, connection: sqlite3.Connection, *, allow_retired: bool = False) -> sqlite3.Row:
         row = connection.execute(
-            "SELECT * FROM leases WHERE id=? AND participant=?",
+            "SELECT id,request,participant,allowance,consumed,pending,entered,retired "
+            "FROM leases WHERE id=? AND participant=?",
             (self.lease_id, self.run.participant),
         ).fetchone()
         if row is None:
+            self.run._deny("accounting")
+        if row["retired"] not in (0, 1) or (row["retired"] and not allow_retired):
             self.run._deny("accounting")
         return row
 
@@ -443,11 +447,14 @@ class AttemptLease:
 
     def release(self) -> None:
         with self.run._connection() as connection:
-            row = self._row(connection)
+            row = self._row(connection, allow_retired=True)
+            if row["retired"]:
+                return  # The connection still validates authority on every repeat.
             if row["pending"]:
                 return  # Unknown read progress retains its whole lease and capacity.
             unused = row["allowance"] - row["consumed"]
             connection.execute(
                 "UPDATE run SET active=active-1,reserved=reserved-? WHERE active>0", (unused,)
             )
-            connection.execute("DELETE FROM leases WHERE id=?", (self.lease_id,))
+            # Retain at most one retirement fact per admitted, finite-budget attempt.
+            connection.execute("UPDATE leases SET retired=1 WHERE id=?", (self.lease_id,))
