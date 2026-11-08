@@ -87,7 +87,7 @@ def destination(url: str) -> tuple[str, str, int]:
 
 
 def _header_valid(name: str, value: str) -> bool:
-    return bool(re.fullmatch(r"[a-z0-9-]+", name)) and not any(_control(char) for char in value)
+    return bool(re.fullmatch(r"[A-Za-z0-9-]+", name)) and not any(_control(char) for char in value)
 
 
 def _pair(row: HeaderRow) -> tuple[str, str]:
@@ -98,9 +98,10 @@ def _pair(row: HeaderRow) -> tuple[str, str]:
 
 def _headers(values: Sequence[HeaderRow]) -> tuple[tuple[str, str], ...]:
     _require(isinstance(values, (tuple, list)))
-    headers = tuple((name.lower(), value) for name, value in map(_pair, values))
+    pairs = tuple(map(_pair, values))
+    _require(all(_header_valid(name, value) for name, value in pairs))
+    headers = tuple((name.lower(), value) for name, value in pairs)
     _require(len({name for name, _ in headers}) == len(headers))
-    _require(all(_header_valid(name, value) for name, value in headers))
     return tuple(sorted(headers))
 
 
