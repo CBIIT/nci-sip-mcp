@@ -301,6 +301,8 @@ def test_exact_defaults_and_native_storage_clock_boundaries():
         "http://127.0.0.1/owned\x7f",
         "http://127.0.0.1:70000/owned",
         "http://127.0.0.1/%2e%2e/owned",
+        "http://127.0.0.1/./owned",
+        "http://127.0.0.1/own\\ed",
         "http://127.0.0.1/own%2fed",
         "http://127.0.0.1/own%5ced",
         "http://127.0.0.1/own%252fed",
@@ -416,3 +418,29 @@ def test_original_header_name_grammar_is_terminal(name):
     assert refusal(
         lambda: RequestGrant("GET", "http://127.0.0.1:9/owned", ((name, "synthetic"),))
     ) == (RequestPolicyError, "Controlled upstream request refused.", None)
+
+
+@pytest.mark.parametrize("name", ["Authorization", "X-EVSRestAPI-License-Key"])
+def test_sensitive_header_requires_credential_destination(name):
+    assert refusal(
+        lambda: RequestGrant("GET", "http://127.0.0.1:9/owned", ((name, "synthetic"),))
+    ) == (RequestPolicyError, "Controlled upstream request refused.", None)
+
+
+@pytest.mark.parametrize("field,value", [("grants", ()), ("grants", (None,)), ("limits", None)])
+def test_authorization_refuses_empty_or_wrong_value_records(field, value):
+    authorization = binding_authorization()
+    assert refusal(lambda: replace(authorization, **{field: value})) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+
+
+@pytest.mark.parametrize("value", [None, []])
+def test_private_descriptor_refuses_nonmapping_records(value):
+    assert refusal(lambda: RunDescriptor.from_record(value)) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
