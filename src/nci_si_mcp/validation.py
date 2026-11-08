@@ -10,6 +10,20 @@ from urllib.parse import urlsplit
 from .bounds import HARD_MAX_NODES
 from .errors import InputValidationError
 
+type PolicyReason = Literal[
+    "authorization",
+    "logical_limit",
+    "attempt_limit",
+    "concurrency_limit",
+    "deadline",
+    "response_limit",
+    "byte_limit",
+    "accounting",
+    "closed",
+    "transport",
+]
+type BodyState = Literal["complete", "proven_empty", "unreadable"]
+
 SearchMode = Literal["hybrid", "bm25", "vector"]
 UnresolvedConceptReason = Literal["compound_code", "missing_source", "non_ncit_source"]
 Direction = Literal["out", "in", "both"]

@@ -103,6 +103,26 @@ The acceptance suite and its self-tests use pytest directly.
 The unit tests ignore the developer's `NCI_SI_*` variables (`tests/conftest.py` removes them); a
 test that needs a setting sets it with `monkeypatch` or `patch.dict`.
 
+### Explicit controlled request integration
+
+`HttpClient(request_policy=...)` selects an explicit provider. Platform-client constructors
+can instead run inside `nci_si_mcp.request_policy.using_request_policy`; each client captures
+that default, and nested scopes restore their parent. Without either opt-in, transport behavior
+is unchanged. The core classifies the provider's raw `Exchange` through the existing parser and
+error path; terminal refusal is `upstream_unavailable`, without cache fallback or public policy
+counters. I/O errors before transport entry are terminal refusals, not fictitious attempts.
+
+A provider owns exact request validation and immutable snapshots, pre-send budget reservation,
+proxy/redirect controls, bounded success/error reads and sanitization of admission/cleanup errors.
+It calls `on_start` once immediately at transport entry, after other admission gates, before I/O;
+the callback checks the call's existing budget/deadline. Returned exchanges hide private bytes
+and headers in their representation. Core classification alone proves none of the provider's
+I/O guarantees. The `on_request` observer is not an enforcement boundary.
+
+Shared accounting is #464; the production provider is #465. Furnished harness, prepare, selected
+stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
+activates no caller protection or live access and changes no native/benchmark report schema.
+
 ## Test levels
 
 The [behavioural story catalogue](docs/behavioural-tests.md) documents every MCP acceptance

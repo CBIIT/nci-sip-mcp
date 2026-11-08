@@ -3,33 +3,50 @@
 A request the server saw is a request the client made: the attempt counts are checked against it.
 """
 
+import io
 import json
 import socket
+import tempfile
 import threading
 import time
 import traceback
 import unittest
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
+from dataclasses import FrozenInstanceError, dataclass, field
 from datetime import UTC, datetime
 from email.utils import formatdate
+from http import HTTPStatus
+from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from threading import Barrier
 from typing import ClassVar
 from unittest.mock import patch
-from urllib.request import ProxyHandler, build_opener
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 
-from fakes import release
+from fakes import FakeEVS, concept, release, terminology_row
+from nci_si_mcp import http_client
+from nci_si_mcp.audit import audited
+from nci_si_mcp.bounds import Budget, budgeted, deadline_scope
 from nci_si_mcp.cadsr import CaDSRClient
 from nci_si_mcp.config import Settings
+from nci_si_mcp.context import Context
 from nci_si_mcp.errors import PlatformError, correlated
 from nci_si_mcp.evs import LICENSE_KEY_HEADER, EVSClient
 from nci_si_mcp.http_client import (
     MAX_RETRY_DELAY_SECONDS,
     HttpClient,
+    RequestPolicyError,
     UpstreamRejectedError,
     UpstreamTooLargeError,
     UpstreamUnavailableError,
 )
 from nci_si_mcp.invocation import call
+from nci_si_mcp.registry import invoke
+from nci_si_mcp.request_policy import Exchange, using_request_policy
+from ncit_index.embeddings import HashingEmbeddingProvider
 from test_evs_client import FakeResponse
 
 KEY = "placeholder-licence-key"
@@ -818,6 +835,443 @@ class CredentialRedactionTest(unittest.TestCase):
             client.get_json("/metadata", reject=lambda payload: "unusable key-canary")
         self.assertEqual(str(raised.exception), "unusable [redacted]")
         self.assertEqual(raised.exception.details, {"surface": "evs", "status": 200, "attempts": 1})
+
+
+DENIED = {
+    "error": {
+        "code": "upstream_unavailable",
+        "message": "Controlled upstream request refused. Retry later.",
+        "correlationId": "policy-test",
+    }
+}
+
+
+def scoped(policy):
+    # Absence of the new interface drives the existing real caller in the red revision.
+    return getattr(http_client, "using_request_policy", lambda _: nullcontext())(policy)
+
+
+class DeniedPolicy:
+    def request(self, request):
+        raise http_client.RequestPolicyError("authorization")
+
+
+class HttpPolicyTest(ServerTestCase):
+    def test_policy_is_captured_and_nested_scope_restores_default(self):
+        server = self.serve()
+        default = self.client(server)
+        with scoped(DeniedPolicy()):
+            captured = self.client(server)
+            with scoped(BufferedPolicy(server.url + "/x")):
+                nested = self.client(server)
+            restored = self.client(server)
+        with correlated("policy-test"):
+            for client in (captured, restored):
+                with self.subTest(client=client):
+                    self.assertEqual(
+                        call("read", lambda client=client: client.get_json("/x")), DENIED
+                    )
+            self.assertEqual(nested.get_json("/x"), {"ok": True})
+            self.assertEqual(default.get_json("/x"), {"ok": True})
+            self.assertEqual(self.client(server).get_json("/x"), {"ok": True})
+        self.assertEqual(len(server.seen), 3)
+
+    def test_explicit_constructor_policy_overrides_the_scoped_default(self):
+        server = self.serve()
+        with using_request_policy(DeniedPolicy()):
+            explicit = self.client(server, request_policy=BufferedPolicy(server.url + "/x"))
+            inherited = self.client(server)
+        with correlated("policy-test"):
+            self.assertEqual(explicit.get_json("/x"), {"ok": True})
+            self.assertEqual(call("read", lambda: inherited.get_json("/x")), DENIED)
+        self.assertEqual(len(server.seen), 1)
+
+    def test_empty_scope_cannot_clear_the_outer_denying_policy(self):
+        server = self.serve()
+        with using_request_policy(DeniedPolicy()):
+            with self.assertRaises(ValueError) as refused, using_request_policy(None):
+                self.client(server).get_json("/x")
+            self.assertEqual(str(refused.exception), "an explicit request policy is required")
+            captured = self.client(server)
+        with correlated("policy-test"):
+            self.assertEqual(call("read", lambda: captured.get_json("/x")), DENIED)
+        self.assertEqual(server.seen, [])
+
+    def test_exceptional_inner_scope_restores_its_outer_policy(self):
+        server = self.serve()
+        with using_request_policy(DeniedPolicy()):
+            with (
+                self.assertRaisesRegex(LookupError, "scope interrupted"),
+                using_request_policy(BufferedPolicy(server.url + "/x")),
+            ):
+                raise LookupError("scope interrupted")
+            captured = self.client(server)
+        with correlated("policy-test"):
+            self.assertEqual(call("read", lambda: captured.get_json("/x")), DENIED)
+        self.assertEqual(self.client(server).get_json("/x"), {"ok": True})
+        self.assertEqual(len(server.seen), 1)
+
+    def test_concurrent_scopes_do_not_grant_another_callers_authority(self):
+        server = self.serve()
+        barrier = Barrier(2)
+
+        def read(denied):
+            with scoped(DeniedPolicy()) if denied else nullcontext():
+                client = self.client(server)
+                barrier.wait(timeout=5)
+                with correlated("policy-test"):
+                    return call("read", lambda client=client: client.get_json("/x"))
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            denied, allowed = list(workers.map(read, (True, False)))
+        self.assertEqual(denied, DENIED)
+        self.assertEqual(allowed, {"ok": True})
+        self.assertEqual(len(server.seen), 1)
+
+
+class CachedPolicyTest(ServerTestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.context = Context(
+            Settings(data_dir=Path(directory.name)),
+            evs=FakeEVS([concept("C3262")]),
+            embedding_provider=HashingEmbeddingProvider(),
+        )
+
+    def test_cached_lookup_cannot_hide_policy_denial(self):
+        self.assertNotIn("error", invoke(self.context, "index_codes", ["C3262"]))
+        server = ServerTestCase.serve(self, Reply(body=json.dumps(concept("C3262")).encode()))
+        with scoped(DeniedPolicy()):
+            self.context.evs = EVSClient(server.url, 1)
+        with (
+            patch.object(self.context.evs, "get_terminologies", return_value=[terminology_row()]),
+            correlated("policy-test"),
+            self.assertLogs("nci_si_mcp", level="INFO") as logs,
+        ):
+            result = invoke(self.context, "lookup", "C3262")
+        self.assertEqual(result, DENIED)
+        completions = [
+            row
+            for entry in logs.records
+            if (row := json.loads(entry.getMessage())).get("event") == "call_completed"
+        ]
+        self.assertEqual(len(completions), 1)
+        self.assertEqual(completions[0]["outboundRequests"], 0)
+        self.assertEqual(completions[0]["responseCode"], "upstream_unavailable")
+        self.assertEqual(server.seen, [])
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+class BufferedPolicy:
+    """An explicit local transport double for the core protocol's independent contract."""
+
+    def __init__(self, url, *, unreadable=False, deny_wait=False):
+        self.url, self.unreadable, self.deny_wait = url, unreadable, deny_wait
+        self.waits = []
+        self.reads = []
+
+    @contextmanager
+    def request(self, request):
+        if request.full_url != self.url:
+            raise RequestPolicyError("authorization")
+        self.selected = request
+        yield self
+
+    def check_wait(self, delay_seconds):
+        self.waits.append(delay_seconds)
+        if self.deny_wait:
+            raise RequestPolicyError("deadline")
+
+    def exchange(self, *, timeout_seconds, response_limit, on_start):
+        opener = build_opener(ProxyHandler({}), NoRedirect())
+        on_start()
+        try:
+            response = opener.open(self.selected, timeout=timeout_seconds)
+        except HTTPError as error:
+            response = error
+        with response:
+            limit = 4096 if response.status >= HTTPStatus.BAD_REQUEST else response_limit + 1
+            self.reads.append(limit)
+            payload = response.read(limit)
+            state = "unreadable" if self.unreadable else "complete"
+            return Exchange(response.status, dict(response.headers), payload, state)
+
+
+class RepeatedStartPolicy(BufferedPolicy):
+    def exchange(self, *, timeout_seconds, response_limit, on_start):
+        options = {
+            "timeout_seconds": timeout_seconds,
+            "response_limit": response_limit,
+            "on_start": on_start,
+        }
+        super().exchange(**options)
+        return super().exchange(**options)
+
+
+class FailingPolicy(BufferedPolicy):
+    def __init__(self, url, factory, *, after_entry=False):
+        super().__init__(url)
+        self.factory, self.after_entry = factory, after_entry
+        self.failures = []
+
+    def exchange(self, *, timeout_seconds, response_limit, on_start):
+        if self.after_entry:
+            on_start()
+        failure = self.factory()
+        self.failures.append(failure)
+        raise failure
+
+
+class BufferedPolicyTest(ServerTestCase):
+    def guarded(self, server, **policy_options):
+        policy = BufferedPolicy(server.url + "/x", **policy_options)
+        with using_request_policy(policy):
+            client = self.client(server)
+        return client, policy
+
+    def test_repeated_entry_refuses_a_second_send_and_records_one_attempt(self):
+        server = self.serve()
+        client = self.client(server, request_policy=RepeatedStartPolicy(server.url + "/x"))
+        with (
+            self.assertLogs("nci_si_mcp", level="INFO") as logs,
+            audited("read", {}, {}, (), correlation_id="policy-test") as record,
+        ):
+            result = call("read", lambda: client.get_json("/x"))
+            record.result = result
+        self.assertEqual(result, DENIED)
+        self.assertEqual([row[0] for row in server.seen], ["/x"])
+        completed = [
+            row
+            for entry in logs.records
+            if (row := json.loads(entry.getMessage())).get("event") == "call_completed"
+        ]
+        self.assertEqual(
+            [(row["outboundRequests"], row["responseCode"]) for row in completed],
+            [(1, "upstream_unavailable")],
+        )
+
+    def test_pre_entry_io_failure_is_terminal_without_fictitious_attempts(self):
+        server = self.serve()
+        marker = "policy-input-canary"
+        factories = (
+            lambda: OSError(marker),
+            lambda: HTTPException(marker),
+            lambda: TimeoutError(marker),
+            lambda: HTTPError(server.url + "/x?" + marker, 403, marker, {}, io.BytesIO(b"private")),
+        )
+        for factory in factories:
+            with self.subTest(factory=factory):
+                policy = FailingPolicy(server.url + "/x", factory)
+                client = self.client(server, request_policy=policy)
+                with audited("read", {}, {}, (), correlation_id="policy-test") as record:
+                    result = call("read", lambda client=client: client.get_json("/x"))
+                    record.result = result
+                self.assertEqual(result, DENIED)
+                self.assertEqual(record.outbound_requests, 0)
+                self.assertEqual(self.waits, [])
+                self.assertEqual(server.seen, [])
+                failure = policy.failures[0]
+                if isinstance(failure, HTTPError):
+                    self.assertTrue(failure.fp.closed)
+
+    def test_entered_transport_failures_preserve_retry_counts_and_privacy(self):
+        server = self.serve()
+        marker = "policy-input-canary"
+        cases = (
+            (TimeoutError, "timeout", {"seconds": 5}),
+            (HTTPException, "upstream_unavailable", {}),
+            (OSError, "upstream_unavailable", {}),
+        )
+        for failure, code, extra in cases:
+            with self.subTest(failure=failure):
+                policy = FailingPolicy(
+                    server.url + "/x", lambda failure=failure: failure(marker), after_entry=True
+                )
+                client = self.client(server, request_policy=policy, max_attempts=2)
+                with audited("read", {}, {}, ()) as record:
+                    result = call("read", lambda client=client: client.get_json("/x"))
+                    record.result = result
+                self.assertEqual(result["error"]["code"], code)
+                self.assertEqual(
+                    result["error"]["details"], {"surface": "evs", "attempts": 2} | extra
+                )
+                self.assertEqual(record.outbound_requests, 2)
+                self.assertNotIn(marker, json.dumps(result))
+                self.assertEqual(server.seen, [])
+
+    def test_retry_after_case_preserves_wait(self):
+        for header in ("retry-after", "rEtRy-AfTeR"):
+            for controlled in (False, True):
+                with self.subTest(header=header, controlled=controlled):
+                    server = self.serve(Reply(429, headers={header: "2"}), Reply())
+                    client = self.guarded(server)[0] if controlled else self.client(server)
+                    client.retry_backoff_seconds = 0
+                    self.assertEqual(client.get_json("/x"), {"ok": True})
+                    self.assertEqual(self.waits, [2.0])
+                    self.assertEqual(len(server.seen), 2)
+
+    def test_retry_after_case_preserves_exhausted_details(self):
+        for header in ("retry-after", "rEtRy-AfTeR"):
+            for controlled in (False, True):
+                with self.subTest(header=header, controlled=controlled):
+                    server = self.serve(Reply(429, headers={header: "2"}))
+                    client = self.guarded(server)[0] if controlled else self.client(server)
+                    client.max_attempts = 1
+                    with self.assertRaises(http_client.UpstreamUnavailableError) as caught:
+                        client.get_json("/x")
+                    self.assertEqual(
+                        caught.exception.details,
+                        {"surface": "evs", "attempts": 1, "status": 429, "retryAfter": "2"},
+                    )
+                    self.assertEqual(len(server.seen), 1)
+
+    def test_error_body_empty_nonempty_and_unreadable_are_distinct(self):
+        for body, unreadable, empty, message in (
+            (b"", False, True, ""),
+            (b'{"message":"not here"}', False, False, "not here"),
+            (b"", True, False, ""),
+            (b"not JSON", False, False, ""),
+        ):
+            with self.subTest(body=body, unreadable=unreadable):
+                server = self.serve(Reply(404, body=body))
+                client, policy = self.guarded(server, unreadable=unreadable)
+                with self.assertRaises(UpstreamRejectedError) as caught:
+                    client.get_json("/x")
+                error = caught.exception
+                self.assertEqual((error.empty_body, error.body_message), (empty, message))
+                self.assertEqual(error.details, {"surface": "evs", "status": 404, "attempts": 1})
+                self.assertEqual(policy.reads, [4096])
+                self.assertEqual(len(server.seen), 1)
+
+    def test_retry_after_and_wait_admission_are_separate_from_send_accounting(self):
+        server = self.serve(Reply(429, headers={"Retry-After": "1"}), Reply())
+        client, policy = self.guarded(server)
+        self.assertEqual(client.get_json("/x"), {"ok": True})
+        self.assertEqual(policy.waits, [1.0, 0])
+        self.assertEqual(self.waits, [1.0])
+        self.assertEqual(len(server.seen), 2)
+        server = self.serve(Reply(503))
+        client, policy = self.guarded(server, deny_wait=True)
+        with correlated("policy-test"), audited("read", {}, {}, ()) as record:
+            result = call("read", lambda: client.get_json("/x"))
+        self.assertEqual(
+            result["error"]["message"], "Controlled upstream request refused. Retry later."
+        )
+        self.assertEqual(record.outbound_requests, 1)
+        self.assertEqual(len(server.seen), 1)
+        self.assertEqual(self.waits, [])
+
+    def test_existing_budget_and_deadline_gate_do_not_record_unsent_attempts(self):
+        server = self.serve()
+        client, _ = self.guarded(server)
+        cases = (
+            (
+                budgeted(Budget(requests=0)),
+                {
+                    "code": "bound_exceeded",
+                    "message": "The traversal exhausted its outbound request allowance. "
+                    "Ask for fewer start codes or a smaller traversal.",
+                    "details": {"bound": "requests", "limit": 0, "reached": 0},
+                    "correlationId": "policy-test",
+                },
+            ),
+            (
+                deadline_scope(0),
+                {
+                    "code": "upstream_unavailable",
+                    "message": "The call exhausted its elapsed-time budget. "
+                    "Retry later or ask for less work.",
+                    "details": {"attempts": 0},
+                    "correlationId": "policy-test",
+                },
+            ),
+        )
+        for scope, expected in cases:
+            with (
+                self.subTest(expected=expected),
+                scope,
+                correlated("policy-test"),
+                self.assertLogs("nci_si_mcp", level="INFO") as logs,
+            ):
+                with audited("read", {}, {}, ()) as record:
+                    result = call("read", lambda: client.get_json("/x"))
+                    record.result = result
+                self.assertEqual(result, {"error": expected})
+                completed = [
+                    row
+                    for entry in logs.records
+                    if (row := json.loads(entry.getMessage())).get("event") == "call_completed"
+                ]
+                self.assertEqual(len(completed), 1)
+                self.assertEqual(completed[0]["outboundRequests"], 0)
+                self.assertEqual(completed[0]["responseCode"], expected["code"])
+                self.assertEqual(server.seen, [])
+
+    def test_duplicate_retry_after_keeps_the_first_physical_field(self):
+        for controlled in (False, True):
+            with self.subTest(controlled=controlled):
+                server = self.serve(
+                    Reply(429, headers={"retry-after": "2", "Retry-After": "9"}), Reply()
+                )
+                client = self.guarded(server)[0] if controlled else self.client(server)
+                self.assertEqual(client.get_json("/x"), {"ok": True})
+                self.assertEqual(self.waits, [2.0])
+                self.assertEqual(len(server.seen), 2)
+        exchange = Exchange(429, {"retry-after": "2", "Retry-After": "9"}, b"")
+        self.assertEqual(dict(exchange.headers), {"retry-after": "2"})
+
+    def test_controlled_redirect_does_not_contact_its_target(self):
+        target = self.serve()
+        server = self.serve(Reply(302, headers={"Location": target.url + "/x"}))
+        client, _ = self.guarded(server)
+        with correlated("policy-test"), audited("read", {}, {}, ()) as record:
+            result = call("read", lambda: client.get_json("/x"))
+        self.assertEqual(result, DENIED)
+        self.assertEqual(record.outbound_requests, 1)
+        self.assertEqual(len(server.seen), 1)
+        self.assertEqual(target.seen, [])
+
+    def test_masked_success_and_form_absence_use_existing_consumers(self):
+        server = self.serve(Reply(body=b'{"apiResponse":{"type":"E"}}'))
+        client, _ = self.guarded(server)
+        with self.assertRaises(PlatformError) as caught:
+            client.get_json("/x")
+        self.assertEqual(caught.exception.code, "upstream_unavailable")
+        body = b'{"form":null,"apiResponse":{"type":"E"}}'
+        server = self.serve(Reply(body=body))
+        path = "/NCIFormAPI.v2_0:NciFormApiRad/Form/5406471"
+        policy = BufferedPolicy(server.url + path)
+        with using_request_policy(policy):
+            cadsr = CaDSRClient(Settings(cadsr_base_url=server.url))
+        with self.assertRaises(PlatformError) as caught:
+            cadsr.get_form("5406471")
+        self.assertEqual(caught.exception.code, "not_found")
+        self.assertEqual(caught.exception.details, {"identifiers": ["5406471"]})
+        self.assertEqual([row[0] for row in server.seen], [path])
+
+    def test_exchange_body_cannot_be_replaced(self):
+        exchange = Exchange(200, {}, b"original content")
+        with self.assertRaises(FrozenInstanceError):
+            exchange.body = b"replacement content"
+        self.assertEqual(exchange.body, b"original content")
+
+    def test_exchange_exposed_headers_cannot_be_modified(self):
+        exchange = Exchange(200, {"X-Private": "original value"}, b"")
+        with self.assertRaises(TypeError):
+            exchange.headers["x-private"] = "replacement value"
+        self.assertEqual(dict(exchange.headers), {"x-private": "original value"})
+
+    def test_exchange_copies_headers_and_hides_private_fields(self):
+        headers = {"X-Private": "canary"}
+        exchange = Exchange(200, headers, b"private content")
+        headers["X-Private"] = "changed"
+        self.assertEqual(dict(exchange.headers), {"x-private": "canary"})
+        self.assertEqual(repr(exchange), "Exchange(status=200, body_state='complete')")
 
 
 if __name__ == "__main__":
