@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,7 @@ from nci_si_acceptance.request_authorization import (
     RequestGrant,
     RunDescriptor,
 )
-from nci_si_acceptance.request_budget import ControlledRun
+from nci_si_acceptance.request_budget import AttemptLease, ControlledRun
 from nci_si_mcp.http_client import RequestPolicyError
 
 # This explicit consumer drives today's HttpClient if the new entry is absent. Absence
@@ -494,3 +495,85 @@ def test_snapshot_rejects_incoherent_ledger_values(tmp_path, query, value):
         )
     finally:
         run.close()
+
+
+@contextmanager
+def retirement_run(tmp_path):
+    grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
+    limits = Limits(
+        logical=2, attempts=2, per_logical=1, concurrent=2, response_bytes=5, total_bytes=12
+    )
+    run = ControlledRun.create(Authorization((grant,), limits, "a" * 64), tmp_path)
+    try:
+        run.open()
+        yield run, grant
+    finally:
+        run.close()
+
+
+def retired_lease(run, grant):
+    with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
+        lease.entered()
+        assert lease.read(lambda maximum: b"known"[:maximum], 6) == b"known"
+    return lease
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_release_is_identity_checked_and_idempotent(tmp_path, closed):
+    with retirement_run(tmp_path) as (run, grant):
+        retired = retired_lease(run, grant)
+        with run.logical(grant) as logical, logical.attempt(response_limit=5):
+            if closed:
+                run.close()
+            assert refusal(retired.release) is None
+            snapshot = run.snapshot()
+            assert (
+                snapshot.logical,
+                snapshot.attempts,
+                snapshot.active,
+                snapshot.reserved_body_bytes,
+                snapshot.consumed_body_bytes,
+                snapshot.pending_receipts,
+                snapshot.state,
+            ) == (2, 2, 1, 11, 5, 0, "closed" if closed else "open")
+        assert (run.snapshot().active, run.snapshot().reserved_body_bytes) == (0, 5)
+
+
+@pytest.mark.parametrize(
+    "change", ["run", "policy", "authorization", "participant", "unknown", "foreign"]
+)
+def test_retired_release_checks_authority(tmp_path, change):
+    with retirement_run(tmp_path) as (run, grant):
+        run.authorize_participant("other")
+        other = ControlledRun.attach(run.descriptor, run.authorization, participant="other")
+        retired = retired_lease(run, grant)
+        with run.logical(grant) as logical, logical.attempt(response_limit=5):
+            run.close()
+            original = run.descriptor, run.authorization, run.participant
+            target = retired
+            if change == "run":
+                run.descriptor = replace(run.descriptor, run_id="b" * 32)
+            elif change == "policy":
+                run.descriptor = replace(run.descriptor, policy_sha256="b" * 64)
+            elif change == "authorization":
+                run.authorization = replace(
+                    run.authorization, limits=replace(run.authorization.limits, per_logical=2)
+                )
+            elif change == "participant":
+                run.participant = "unregistered"
+            elif change == "unknown":
+                target = AttemptLease(run, "0" * 32)
+            else:
+                target = AttemptLease(other, retired.lease_id)
+            try:
+                observed = refusal(target.release)
+            finally:
+                run.descriptor, run.authorization, run.participant = original
+            assert observed == (RequestPolicyError, "Controlled upstream request refused.", None)
+            snapshot = run.snapshot()
+            assert (
+                snapshot.active,
+                snapshot.reserved_body_bytes,
+                snapshot.consumed_body_bytes,
+                snapshot.pending_receipts,
+            ) == (1, 11, 5, 0)
