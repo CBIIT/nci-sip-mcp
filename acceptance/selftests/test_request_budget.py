@@ -577,3 +577,37 @@ def test_retired_release_checks_authority(tmp_path, change):
                 snapshot.consumed_body_bytes,
                 snapshot.pending_receipts,
             ) == (1, 11, 5, 0)
+
+
+@pytest.mark.parametrize("operation", ["entry", "read"])
+def test_retired_lease_refuses_new_entry_or_read(tmp_path, operation):
+    with retirement_run(tmp_path) as (run, grant):
+        if operation == "entry":
+            # A never-entered retired lease must not claim entry after its refund.
+            with run.logical(grant) as logical, logical.attempt(response_limit=5) as retired:
+                pass
+        else:
+            # This lease has already entered; its remaining byte was refunded.
+            retired = retired_lease(run, grant)
+        with run.logical(grant) as logical, logical.attempt(response_limit=5):
+            reads = []
+
+            def reader(maximum):
+                reads.append(maximum)
+                return b"x"[:maximum]
+
+            action = retired.entered if operation == "entry" else lambda: retired.read(reader, 1)
+            observed = refusal(action)
+            assert reads == []
+            assert observed == (RequestPolicyError, "Controlled upstream request refused.", None)
+            snapshot = run.snapshot()
+            expected = (2, 2, 1, 6, 0, 0, 0) if operation == "entry" else (2, 2, 1, 11, 1, 5, 0)
+            assert (
+                snapshot.logical,
+                snapshot.attempts,
+                snapshot.active,
+                snapshot.reserved_body_bytes,
+                snapshot.transport_entries,
+                snapshot.consumed_body_bytes,
+                snapshot.pending_receipts,
+            ) == expected
