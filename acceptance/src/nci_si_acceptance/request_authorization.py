@@ -48,10 +48,9 @@ def _text(value: object) -> str:
     return value
 
 
-def _digest(value: object) -> str:
+def _digest(value: object) -> None:
     text = _text(value)
     _require(re.fullmatch(r"[a-f0-9]{64}", text) is not None)
-    return text
 
 
 def _control(char: str) -> bool:
@@ -82,11 +81,13 @@ def destination(url: str) -> tuple[str, str, int]:
         )
     except ValueError:
         raise RequestPolicyError("authorization") from None
-    _require(parts.scheme in ("http", "https") and bool(parts.hostname))
-    _require(parts.username is None and parts.password is None and port > 0)
+    hostname = parts.hostname
+    if parts.scheme not in ("http", "https") or not hostname:
+        raise RequestPolicyError("authorization")
+    _require(parts.username is None and port > 0)
     _url_text(url)
     _url_path(parts.path)
-    return parts.scheme, parts.hostname or "", port
+    return parts.scheme, hostname, port
 
 
 def _header_valid(name: str, value: str) -> bool:
