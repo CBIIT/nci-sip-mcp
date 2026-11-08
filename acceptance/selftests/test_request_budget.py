@@ -1,7 +1,5 @@
 """Shared controlled-run accounting at real process and HTTP caller boundaries."""
 
-import importlib
-import importlib.util
 import json
 import sqlite3
 import subprocess
@@ -35,7 +33,7 @@ from nci_si_mcp.http_client import RequestPolicyError
 
 # This explicit consumer drives today's HttpClient if the new entry is absent. Absence
 # therefore produces actual excess local contacts in the red revision, not an import error.
-ACTOR = """import importlib, importlib.util, json, sys, tempfile
+ACTOR = """import json, sys, tempfile
 import nci_si_acceptance
 from nci_si_mcp import http_client
 from contextlib import contextmanager
@@ -47,9 +45,7 @@ from nci_si_mcp.request_policy import Exchange
 http_client._OPENER = build_opener(ProxyHandler({}), http_client._SameOriginRedirects())
 settings = json.loads(Path(sys.argv[1]).read_text())
 sys.stdin.readline()  # The parent authorizes the participant before releasing its child.
-module = None
-if importlib.util.find_spec("nci_si_acceptance.request_budget") is not None:
-    module = importlib.import_module("nci_si_acceptance.request_budget")
+import nci_si_acceptance.request_budget as module
 
 class ActorPolicy:
     def __init__(self, run, grant):
@@ -77,26 +73,24 @@ class ActorPolicy:
             self.request_snapshot, timeout=timeout_seconds
         )
 
-run = None
-if module is not None:
-    try:
-        body = settings.get("body")
-        grant = module.RequestGrant(
-            "GET", settings["url"],
-            tuple(tuple(row) for row in settings.get("headers", (("accept", "application/json"),))),
-            body.encode() if body is not None else None,
-        )
-        authorization = module.Authorization(
-            (grant,), module.Limits(**settings["limits"]), settings.get("policy", "a" * 64)
-        )
-        run = module.ControlledRun.attach(
-            module.RunDescriptor.from_record(settings["descriptor"]), authorization,
-            participant=settings["participant"],
-        )
-    except RequestPolicyError as error:
-        print(json.dumps({"accepted": 0, "refused": [error.reason]}))
-        sys.exit(0)
-policy = ActorPolicy(run, grant) if run is not None else None
+try:
+    body = settings.get("body")
+    grant = module.RequestGrant(
+        "GET", settings["url"],
+        tuple(tuple(row) for row in settings.get("headers", (("accept", "application/json"),))),
+        body.encode() if body is not None else None,
+    )
+    authorization = module.Authorization(
+        (grant,), module.Limits(**settings["limits"]), settings.get("policy", "a" * 64)
+    )
+    run = module.ControlledRun.attach(
+        module.RunDescriptor.from_record(settings["descriptor"]), authorization,
+        participant=settings["participant"],
+    )
+except RequestPolicyError as error:
+    print(json.dumps({"accepted": 0, "refused": [error.reason]}))
+    sys.exit(0)
+policy = ActorPolicy(run, grant)
 client = HttpClient(
     settings["base"], label="EVS", timeout_seconds=2, max_attempts=1,
     retry_backoff_seconds=0, max_response_bytes=1024, size_bound="local-test",
@@ -123,20 +117,11 @@ EXPECTED_CONTACTS = 2
 EXPECTED_REFUSALS = 2
 
 
-def optional_budget():
-    if importlib.util.find_spec("nci_si_acceptance.request_budget") is None:
-        return None
-    return importlib.import_module("nci_si_acceptance.request_budget")
-
-
 @contextmanager
-def run_context(module, base, directory, limits):
-    if module is None:
-        yield None
-        return
-    grant = module.RequestGrant("GET", base + "/api/v1/version", (("accept", "application/json"),))
-    authorization = module.Authorization((grant,), module.Limits(**limits), "a" * 64)
-    run = module.ControlledRun.create(authorization, directory / "runs")
+def run_context(base, directory, limits):
+    grant = RequestGrant("GET", base + "/api/v1/version", (("accept", "application/json"),))
+    authorization = Authorization((grant,), Limits(**limits), "a" * 64)
+    run = ControlledRun.create(authorization, directory / "runs")
     try:
         run.open()
         yield run
@@ -159,8 +144,7 @@ def stop_actor(child):
 def launch_actor(actor, directory, number, settings, run):
     participant = f"child-{number}"
     settings = settings | {"participant": participant}
-    if run is not None:
-        settings["descriptor"] = run.descriptor.to_record()
+    settings["descriptor"] = run.descriptor.to_record()
     config = directory / f"child-{number}.json"
     config.write_text(json.dumps(settings))
     child = subprocess.Popen(  # noqa: S603 - this test wrote the actor and uses its own interpreter.
@@ -170,8 +154,7 @@ def launch_actor(actor, directory, number, settings, run):
         stderr=subprocess.PIPE,
     )
     try:
-        if run is not None:
-            run.authorize_participant(participant)
+        run.authorize_participant(participant)
     except BaseException:
         stop_actor(child)
         raise
@@ -226,7 +209,7 @@ def test_real_children_share_the_logical_request_ceiling(tmp_path):
             "barrier": True,
         }
         try:
-            with run_context(optional_budget(), base, tmp_path, limits) as run:
+            with run_context(base, tmp_path, limits) as run:
                 for number in range(2):
                     children.append(launch_actor(actor, tmp_path, number, settings, run))
                 markers = [tmp_path / f"child-{number}.round1" for number in range(2)]
@@ -276,7 +259,7 @@ def test_attached_child_changed_authorization_has_zero_contacts(tmp_path, change
             "policy": {"policy": "b" * 64},
         }
         try:
-            with run_context(optional_budget(), base, tmp_path, limits) as run:
+            with run_context(base, tmp_path, limits) as run:
                 child = launch_actor(actor, tmp_path, 0, settings | changes[change], run)
                 children.append(child)
                 results = release_and_collect(children)
@@ -325,7 +308,6 @@ print(json.dumps({"reason": reason}))
 
 @contextmanager
 def tiny_run(tmp_path):
-    module = optional_budget()
     fixtures = FixtureSet(
         {request_key("evs", "GET", "/owned", {}): Fixture("known", (Response(body="known"),))}, {}
     )
@@ -339,9 +321,9 @@ def tiny_run(tmp_path):
         "total_bytes": 6,
     }
     with FixtureServer(fixtures) as upstream:
-        grant = module.RequestGrant("GET", upstream.base_url("evs") + "/owned", ())
-        run = module.ControlledRun.create(
-            module.Authorization((grant,), module.Limits(**limits), "a" * 64), tmp_path / "runs"
+        grant = RequestGrant("GET", upstream.base_url("evs") + "/owned", ())
+        run = ControlledRun.create(
+            Authorization((grant,), Limits(**limits), "a" * 64), tmp_path / "runs"
         )
         try:
             run.open()
