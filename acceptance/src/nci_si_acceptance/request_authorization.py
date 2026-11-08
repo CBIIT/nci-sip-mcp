@@ -9,7 +9,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Self, TypedDict, get_args
+from typing import Self, TypedDict, final, get_args
 from urllib.parse import unquote, urlsplit
 
 from nci_si_mcp.http_client import RequestPolicyError
@@ -128,6 +128,7 @@ def _seconds(value: float) -> float:
     return seconds
 
 
+@final
 @dataclass(frozen=True, slots=True)
 class Limits:
     logical: int = DEFAULT_LOGICAL
@@ -159,6 +160,7 @@ class Limits:
         object.__setattr__(self, "seconds", seconds)
 
 
+@final
 @dataclass(frozen=True, slots=True, init=False)
 class RequestGrant:
     method: RequestMethod
@@ -195,12 +197,11 @@ class RequestGrant:
             _require(_credential_destination(self.url, self.credential_origin))
 
 
-def _private_bytes(value: object) -> str:
-    if not isinstance(value, bytes):
-        raise RequestPolicyError("authorization")
+def _private_bytes(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
+@final
 @dataclass(frozen=True, slots=True, init=False)
 class Authorization:
     grants: tuple[RequestGrant, ...] = field(repr=False)
@@ -215,14 +216,15 @@ class Authorization:
     ) -> None:
         """Snapshot a nonempty tuple/list; never consume an arbitrary iterator."""
         _require(isinstance(grants, (tuple, list)))
-        _require(bool(grants) and all(isinstance(grant, RequestGrant) for grant in grants))
-        _require(isinstance(limits, Limits))
+        _require(bool(grants) and all(type(grant) is RequestGrant for grant in grants))
+        _require(type(limits) is Limits)
         _digest(policy_sha256)
         object.__setattr__(self, "grants", tuple(grants))
         object.__setattr__(self, "limits", limits)
         object.__setattr__(self, "policy_sha256", policy_sha256)
 
     def binding(self, key: bytes) -> bytes:
+        _require(type(self) is Authorization)
         _require(isinstance(key, bytes))
         canonical = json.dumps(
             asdict(self),

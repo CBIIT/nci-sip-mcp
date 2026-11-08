@@ -129,6 +129,8 @@ activates no caller protection or live access and changes no native/benchmark re
 `nci_si_acceptance.request_authorization` supplies frozen exact `RequestGrant`, `Limits`,
 `Authorization` and private `RunDescriptor` values for explicitly cooperating diagnostic callers.
 Grants describe one exact GET/POST method, URL, headers, body and credential destination.
+`Authorization` admits only exact `RequestGrant` and `Limits` records; binding requires an exact
+`Authorization`. Subclass extensions are refused locally.
 Constructors snapshot tuple/list inputs into immutable values; unsupported outer containers or
 header-row shapes refuse before parsing or iteration. `Authorization.binding` binds the complete
 private authorization with a caller-supplied private byte key. Callers supply a reviewed nonsecret
