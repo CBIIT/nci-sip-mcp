@@ -230,7 +230,6 @@ def test_public_identity_and_header_canonicalization_are_separate():
     assert replace(original, policy_sha256="b" * 64).binding(b"k" * 32) != original.binding(
         b"k" * 32
     )
-    assert "Bearer synthetic" not in repr(original.grants[0])
 
 
 @pytest.mark.parametrize(
@@ -405,3 +404,15 @@ def test_grant_repr_omits_private_fields(private_value):
         "http://grant-url.invalid/private-destination",
     )
     assert private_value not in repr(grant)
+
+
+def test_private_binding_depends_on_supplied_key():
+    authorization = binding_authorization()
+    assert authorization.binding(b"k" * 32) != authorization.binding(b"z" * 32)
+
+
+@pytest.mark.parametrize("name", ["\u212aey", "bad:name", "\u03b1lpha"])
+def test_original_header_name_grammar_is_terminal(name):
+    assert refusal(
+        lambda: RequestGrant("GET", "http://127.0.0.1:9/owned", ((name, "synthetic"),))
+    ) == (RequestPolicyError, "Controlled upstream request refused.", None)
