@@ -1,5 +1,9 @@
-"""The explicit diagnostic caller's private authority and ledger record contracts."""
+"""Immutable diagnostic authorization values, private records and binding contracts."""
 
+import math
+import sqlite3
+import time
+from contextlib import closing
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
@@ -164,3 +168,200 @@ def test_valid_authority_is_an_immutable_snapshot():
         grant.body = b"changed"
     assert "synthetic-value" not in repr(grant)
     assert "owned-body" not in repr(authorization)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("method", "GET"),
+        ("url", "http://127.0.0.1:9/owned?x=2"),
+        ("headers", (("accept", "text/plain"), ("authorization", "Bearer synthetic"))),
+        ("body", b"changed"),
+        ("credential_origin", "http://127.0.0.1:9"),
+    ],
+)
+def test_each_request_field_changes_private_binding(field, value):
+    original = binding_authorization()
+    changed = replace(original, grants=(replace(original.grants[0], **{field: value}),))
+    assert changed.binding(b"k" * 32) != original.binding(b"k" * 32)
+    assert changed.policy_sha256 == original.policy_sha256 == "a" * 64
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("logical", 3),
+        ("attempts", 5),
+        ("per_logical", 2),
+        ("concurrent", 1),
+        ("seconds", 31),
+        ("response_bytes", 6),
+        ("total_bytes", 65),
+    ],
+)
+def test_each_limit_changes_private_binding(field, value):
+    original = binding_authorization()
+    changed = replace(original, limits=replace(original.limits, **{field: value}))
+    assert changed.binding(b"k" * 32) != original.binding(b"k" * 32)
+
+
+def test_public_identity_and_header_canonicalization_are_separate():
+    original = binding_authorization()
+    reordered = replace(
+        original.grants[0],
+        headers=[
+            ["accept", "application/json"],
+            ["authorization", "Bearer synthetic"],
+        ],
+    )
+    assert replace(original, grants=[reordered]).binding(b"k" * 32) == original.binding(b"k" * 32)
+    secret_changed = replace(
+        original,
+        grants=[
+            replace(
+                reordered,
+                headers=[
+                    ["accept", "application/json"],
+                    ["authorization", "Bearer changed"],
+                ],
+            )
+        ],
+    )
+    assert secret_changed.binding(b"k" * 32) != original.binding(b"k" * 32)
+    assert secret_changed.policy_sha256 == "a" * 64
+    assert replace(original, policy_sha256="b" * 64).binding(b"k" * 32) != original.binding(
+        b"k" * 32
+    )
+    assert "Bearer synthetic" not in repr(original.grants[0])
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        pytest.param({"logical": True}, id="boolean-counter"),
+        pytest.param({"logical": 1.5}, id="noninteger-counter"),
+        pytest.param({"attempts": 0}, id="zero-counter"),
+        pytest.param({"logical": -1}, id="negative-counter"),
+        pytest.param({"per_logical": 769}, id="per-logical-exceeds-global"),
+        pytest.param({"concurrent": 769}, id="concurrency-exceeds-global"),
+        pytest.param({"seconds": True}, id="boolean-duration"),
+        pytest.param({"seconds": float("nan")}, id="nan-duration"),
+        pytest.param({"seconds": float("inf")}, id="infinite-duration"),
+        pytest.param({"seconds": 0}, id="zero-duration"),
+        pytest.param({"seconds": 10**1000}, id="duration-overflow"),
+        pytest.param({"response_bytes": 1, "total_bytes": 1}, id="sentinel-does-not-fit"),
+        pytest.param({"total_bytes": 1 << 63}, id="sqlite-counter-overflow"),
+        pytest.param(
+            {"response_bytes": (1 << 63) - 1, "total_bytes": (1 << 63) - 1}, id="sentinel-overflow"
+        ),
+    ],
+)
+def test_limits_refuse_invalid_and_unrepresentable_values(changes):
+    assert refusal(lambda: Limits(**changes)) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+
+
+def test_exact_defaults_and_native_storage_clock_boundaries():
+    limits = Limits()
+    assert (
+        limits.logical,
+        limits.attempts,
+        limits.per_logical,
+        limits.concurrent,
+        limits.seconds,
+        limits.response_bytes,
+        limits.total_bytes,
+    ) == (256, 768, 3, 4, 1800.0, 1048576, 67108864)
+    maximum = (1 << 63) - 1
+    largest = Limits(
+        logical=maximum,
+        attempts=maximum,
+        per_logical=maximum,
+        concurrent=maximum,
+        seconds=float.fromhex("0x1.fffffffffffffp+1023"),
+        response_bytes=maximum - 1,
+        total_bytes=maximum,
+    )
+    with closing(sqlite3.connect(":memory:")) as connection:
+        assert connection.execute(
+            "SELECT ?,?,?", (largest.logical, largest.total_bytes, largest.seconds)
+        ).fetchone() == (maximum, maximum, largest.seconds)
+    assert math.isfinite(time.monotonic() + largest.seconds)
+    assert largest.response_bytes + 1 == largest.total_bytes == maximum
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "ftp://127.0.0.1/owned",
+        "http:///owned",
+        "http://user:synthetic@127.0.0.1/owned",
+        "http://127.0.0.1/owned#fragment",
+        "http://127.0.0.1/own ed",
+        "http://127.0.0.1/owned\x7f",
+        "http://127.0.0.1:70000/owned",
+        "http://127.0.0.1/%2e%2e/owned",
+        "http://127.0.0.1/own%2fed",
+        "http://127.0.0.1/own%5ced",
+        "http://127.0.0.1/own%252fed",
+    ],
+)
+def test_ambiguous_destinations_are_terminal(url):
+    assert refusal(lambda: RequestGrant("GET", url, ())) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"method": "DELETE"},
+        {"body": bytearray(b"mutable")},
+        {"headers": (("accept", "json"), ("Accept", "text"))},
+        {"credential_origin": "https://127.0.0.1:9/owned"},
+        {"credential_origin": "http://127.0.0.1:9/own"},
+        {"credential_origin": "http://127.0.0.1:9/owned?q=1"},
+    ],
+)
+def test_exact_grant_fields_and_credential_destination(changes):
+    grant = binding_authorization().grants[0]
+    assert refusal(lambda: replace(grant, **changes)) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+
+
+@pytest.mark.parametrize("missing", ["run_id", "policy_sha256", "directory"])
+def test_private_descriptor_refuses_missing_keys(missing):
+    record = {"run_id": "b" * 32, "policy_sha256": "a" * 64, "directory": "/owned"}
+    del record[missing]
+    assert refusal(lambda: RunDescriptor.from_record(record)) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"extra": "synthetic"},
+        {"run_id": "b" * 31},
+        {"policy_sha256": "A" * 64},
+        {"directory": "relative"},
+        {"directory": 7},
+    ],
+)
+def test_private_descriptor_refuses_extra_or_malformed_fields(changes):
+    record = {"run_id": "b" * 32, "policy_sha256": "a" * 64, "directory": "/owned"} | changes
+    assert refusal(lambda: RunDescriptor.from_record(record)) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
