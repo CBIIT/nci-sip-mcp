@@ -34,10 +34,11 @@ STATES: dict[str, LedgerState] = {value: value for value in get_args(LedgerState
 REASONS: dict[str, PolicyReason] = {value: value for value in get_args(PolicyReason.__value__)}
 
 
-def _count(value: object) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= MAX_COUNTER:
-        raise RequestPolicyError("accounting")
-    return value
+def _clock() -> float:
+    now = time.monotonic()
+    if type(now) is not float or not math.isfinite(now):
+        raise RequestPolicyError("accounting") from None
+    return now
 
 
 def _participant(value: str) -> None:
@@ -79,7 +80,9 @@ class ControlledRun:
             participant,
         )
         self.directory = descriptor.directory
-        self.started = time.monotonic()
+        self.started = _clock()
+        if not math.isfinite(self.started + authorization.limits.seconds):
+            raise RequestPolicyError("accounting") from None
         self._owner = False
         self._failed: PolicyReason | None = None
 
@@ -188,8 +191,13 @@ class ControlledRun:
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         connection = None
-        remaining = self.started + self.authorization.limits.seconds - time.monotonic()
         try:
+            try:
+                remaining = self.started + self.authorization.limits.seconds - _clock()
+            except RequestPolicyError:
+                # Close admission, but allow identity-valid receipts without waiting.
+                self._mark_failed("accounting")
+                remaining = 0.0
             connection = sqlite3.connect(
                 (self.directory / "ledger.sqlite").as_uri() + "?mode=rw",
                 uri=True,
@@ -206,7 +214,7 @@ class ControlledRun:
             if connection is not None:
                 connection.close()
 
-    def _deny(self, reason: PolicyReason) -> NoReturn:
+    def _mark_failed(self, reason: PolicyReason) -> None:
         self._failed = reason
         try:
             with (self.directory / "failed").open("x") as stream:
@@ -216,7 +224,15 @@ class ControlledRun:
         except OSError:
             # This participant still refuses; inability to publish never authorizes traffic.
             raise RequestPolicyError("accounting") from None
+
+    def _deny(self, reason: PolicyReason) -> NoReturn:
+        self._mark_failed(reason)
         raise RequestPolicyError(reason) from None
+
+    def _count(self, value: object) -> int:
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= MAX_COUNTER:
+            self._deny("accounting")
+        return value
 
     def _failure(self) -> PolicyReason | None:
         try:
@@ -228,11 +244,15 @@ class ControlledRun:
         return REASONS[text]
 
     def _guard(self, connection: sqlite3.Connection, delay: float = 0) -> None:
+        try:
+            now = _clock()
+        except RequestPolicyError:
+            self._deny("accounting")
         if self._failure() is not None:
             raise RequestPolicyError("closed")
         if connection.execute("SELECT state FROM run").fetchone()[0] != "open":
             self._deny("closed")
-        if time.monotonic() + delay >= self.started + self.authorization.limits.seconds:
+        if now + delay >= self.started + self.authorization.limits.seconds:
             self._deny("deadline")
 
     def open(self) -> None:
@@ -298,7 +318,7 @@ class ControlledRun:
             state = STATES.get(row["state"])
             if state is None:
                 self._deny("accounting")
-            pending = _count(
+            pending = self._count(
                 connection.execute("SELECT count(*) FROM leases WHERE pending>0").fetchone()[0]
             )
             failure = self._failure()
@@ -306,13 +326,13 @@ class ControlledRun:
                 run_id=self.descriptor.run_id,
                 policy_sha256=self.descriptor.policy_sha256,
                 state="failed" if failure else state,
-                logical=_count(row["logical"]),
-                attempts=_count(row["attempts"]),
-                reserved_body_bytes=_count(row["reserved"]),
-                transport_entries=_count(row["entered"]),
-                consumed_body_bytes=_count(row["consumed"]),
-                active=_count(row["active"]),
-                peak_active=_count(row["peak"]),
+                logical=self._count(row["logical"]),
+                attempts=self._count(row["attempts"]),
+                reserved_body_bytes=self._count(row["reserved"]),
+                transport_entries=self._count(row["entered"]),
+                consumed_body_bytes=self._count(row["consumed"]),
+                active=self._count(row["active"]),
+                peak_active=self._count(row["peak"]),
                 pending_receipts=pending,
                 observation_complete=pending == 0 and row["active"] == 0,
                 failure=failure,

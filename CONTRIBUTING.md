@@ -155,6 +155,8 @@ capacity before the caller declares actual entry and reads through its lease. A 
 local transport entry, committed byte receipt and independently observed receiver contact
 are different observations. Known bytes remain recorded after a later admission refusal;
 unknown read/receipt progress retains capacity. Only known unused body allowance is refunded.
+Invalid clocks or snapshot counters close shared admission. Known receipts may still commit
+without waiting on an invalid clock; counters are never clamped to manufacture a valid snapshot.
 Retired lease identities remain bounded by admitted attempts. Repeat release validates authority
 before returning without a second refund/decrement; unknown or foreign leases still refuse.
 Snapshots are private typed accounting records, not public summaries or proof of upstream work.
