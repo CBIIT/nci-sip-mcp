@@ -479,38 +479,43 @@ def test_https_default_destination_preserves_exact_private_request_identity():
     assert authority.binding(b"k" * 32) != explicit.binding(b"k" * 32)
 
 
-@dataclass(frozen=True, slots=True)
-class ExtendedGrant(RequestGrant):
-    _extra: int = 1
+def extended_grant():
+    @dataclass(frozen=True, slots=True)
+    class ExtendedGrant(RequestGrant):
+        _extra: int = 1
+
+    return ExtendedGrant("GET", "http://127.0.0.1:9/owned", ())
 
 
-@dataclass(frozen=True, slots=True)
-class ExtendedLimits(Limits):
-    _extra: int = 1
+def extended_limits():
+    @dataclass(frozen=True, slots=True)
+    class ExtendedLimits(Limits):
+        _extra: int = 1
+
+    return ExtendedLimits()
 
 
-@dataclass(frozen=True, slots=True)
-class ExtendedAuthorization(Authorization):
-    _extra: int = 1
+def extended_authorization():
+    @dataclass(frozen=True, slots=True)
+    class ExtendedAuthorization(Authorization):
+        _extra: int = 1
+
+    return ExtendedAuthorization(binding_authorization().grants, Limits(), "a" * 64)
 
 
 @pytest.mark.parametrize(
     "construct",
     [
         pytest.param(
-            lambda: Authorization(
-                (ExtendedGrant("GET", "http://127.0.0.1:9/owned", ()),), Limits(), "a" * 64
-            ),
+            lambda: Authorization((extended_grant(),), Limits(), "a" * 64),
             id="grant-admission",
         ),
         pytest.param(
-            lambda: Authorization(binding_authorization().grants, ExtendedLimits(), "a" * 64),
+            lambda: Authorization(binding_authorization().grants, extended_limits(), "a" * 64),
             id="limits-admission",
         ),
         pytest.param(
-            lambda: ExtendedAuthorization(
-                binding_authorization().grants, Limits(), "a" * 64
-            ).binding(b"k" * 32),
+            lambda: extended_authorization().binding(b"k" * 32),
             id="authorization-binding",
         ),
     ],

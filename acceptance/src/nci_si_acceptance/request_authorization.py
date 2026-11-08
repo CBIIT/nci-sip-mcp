@@ -24,10 +24,10 @@ HEADER_PAIR_SIZE = 2
 type HeaderRow = tuple[str, str] | list[str]
 # SQLite INTEGER counters are signed 64-bit; remeasure if the storage representation changes.
 MAX_COUNTER = (1 << 63) - 1
-# Reviewed diagnostic policy, not measured upstream capacity: 256 logical calls at up to
+# Reviewed diagnostic defaults, not measured upstream capacity: 256 logical calls at up to
 # three attempts each, four in flight and 30 minutes bound work and burst exposure.
 # One MiB per response and 64 MiB aggregate bound retained response data. Revisit these
-# ceilings with approved run evidence before widening them.
+# defaults with approved run evidence before widening them.
 DEFAULT_LOGICAL = 256
 DEFAULT_ATTEMPTS = 768
 DEFAULT_PER_LOGICAL = 3

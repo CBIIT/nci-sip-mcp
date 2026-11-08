@@ -126,7 +126,7 @@ activates no caller protection or live access and changes no native/benchmark re
 
 ### Explicit request authorization
 
-`nci_si_acceptance.request_authorization` supplies frozen exact `RequestGrant`, `Limits`,
+`nci_si_acceptance.request_authorization` supplies frozen `RequestGrant`, `Limits`,
 `Authorization` and private `RunDescriptor` values for explicitly cooperating diagnostic callers.
 Grants describe one exact GET/POST method, URL, headers, body and credential destination.
 `Authorization` admits only exact `RequestGrant` and `Limits` records; binding requires an exact
