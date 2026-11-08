@@ -120,8 +120,8 @@ and headers in their representation. Core classification alone proves none of th
 I/O guarantees. The `on_request` observer is not an enforcement boundary.
 
 Explicit authorization values are described below; shared accounting remains #468, owned-run
-supervision and sanitized summaries #467, and the production provider #465. Furnished harness, prepare, selected
-stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
+supervision and sanitized summaries #467, and the production provider #465. Furnished harness,
+prepare, selected stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
 activates no caller protection or live access and changes no native/benchmark report schema.
 
 ### Explicit request authorization
@@ -130,9 +130,10 @@ activates no caller protection or live access and changes no native/benchmark re
 `Authorization` and private `RunDescriptor` values for explicitly cooperating diagnostic callers.
 Grants describe one exact GET/POST method, URL, headers, body and credential destination.
 Constructors snapshot tuple/list inputs into immutable values; unsupported outer containers or
-header-row shapes refuse before parsing or iteration. `Authorization.binding` binds the complete private authorization
-with a caller-supplied private byte key; the separately supplied public policy identity contains
-no credential-derived binding. Descriptor records are private IPC, including their local path;
+header-row shapes refuse before parsing or iteration. `Authorization.binding` binds the complete
+private authorization with a caller-supplied private byte key. Callers supply a reviewed nonsecret
+public policy identity separately; this API validates its format and does not derive it from
+credentials or the binding. Descriptor records are private IPC, including their local path;
 keep them and the binding out of public reports.
 
 These values enforce no request/byte/time budget and supply no running ledger, transport,

@@ -24,7 +24,10 @@ HEADER_PAIR_SIZE = 2
 type HeaderRow = tuple[str, str] | list[str]
 # SQLite INTEGER counters are signed 64-bit; remeasure if the storage representation changes.
 MAX_COUNTER = (1 << 63) - 1
-# Explicit diagnostic ceilings, not measured upstream capacity. Revisit with approved run evidence.
+# Reviewed diagnostic policy, not measured upstream capacity: 256 logical calls at up to
+# three attempts each, four in flight and 30 minutes bound work and burst exposure.
+# One MiB per response and 64 MiB aggregate bound retained response data. Revisit these
+# ceilings with approved run evidence before widening them.
 DEFAULT_LOGICAL = 256
 DEFAULT_ATTEMPTS = 768
 DEFAULT_PER_LOGICAL = 3
@@ -106,7 +109,6 @@ def _headers(values: Sequence[HeaderRow]) -> tuple[tuple[str, str], ...]:
 
 
 def _credential_destination(url: str, base: str) -> bool:
-    base = _text(base)
     origin_matches = destination(url) == destination(base)
     path, prefix = urlsplit(url).path, urlsplit(base).path.rstrip("/")
     return (
