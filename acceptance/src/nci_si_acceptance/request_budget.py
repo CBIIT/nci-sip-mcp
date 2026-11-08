@@ -35,7 +35,10 @@ REASONS: dict[str, PolicyReason] = {value: value for value in get_args(PolicyRea
 
 
 def _clock() -> float:
-    now = time.monotonic()
+    try:
+        now = time.monotonic()
+    except OSError:
+        raise RequestPolicyError("accounting") from None
     if type(now) is not float or not math.isfinite(now):
         raise RequestPolicyError("accounting") from None
     return now
