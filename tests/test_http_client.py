@@ -13,7 +13,7 @@ import traceback
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import FrozenInstanceError, dataclass, field
 from datetime import UTC, datetime
 from email.utils import formatdate
 from http import HTTPStatus
@@ -1221,6 +1221,18 @@ class BufferedPolicyTest(ServerTestCase):
         self.assertEqual(caught.exception.code, "not_found")
         self.assertEqual(caught.exception.details, {"identifiers": ["5406471"]})
         self.assertEqual([row[0] for row in server.seen], [path])
+
+    def test_exchange_body_cannot_be_replaced(self):
+        exchange = Exchange(200, {}, b"original content")
+        with self.assertRaises(FrozenInstanceError):
+            exchange.body = b"replacement content"
+        self.assertEqual(exchange.body, b"original content")
+
+    def test_exchange_exposed_headers_cannot_be_modified(self):
+        exchange = Exchange(200, {"X-Private": "original value"}, b"")
+        with self.assertRaises(TypeError):
+            exchange.headers["x-private"] = "replacement value"
+        self.assertEqual(dict(exchange.headers), {"x-private": "original value"})
 
     def test_exchange_copies_headers_and_hides_private_fields(self):
         headers = {"X-Private": "canary"}
