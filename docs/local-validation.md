@@ -192,3 +192,11 @@ for **30 days**. It neither uploads the store nor imports UAT/PROD results. No P
 promoted to a release or deployed by this job. Existing public engineering CI remains unchanged
 in visibility. [Government website assurance](government-site-assurance.md) records the Section
 508 and deployment applicability checks required in #196.
+
+### Explicit diagnostic request authorization
+
+The [authorization value API](../CONTRIBUTING.md#explicit-request-authorization) validates and
+snapshots exact private request grants, finite limits and descriptor records. These values do
+not enforce dashboard request budgets or replace native reports. Shared ledger enforcement is
+#468, supervision/sanitized summaries #467, transport #465 and caller adoption #448/#449.
+Callers retain ownership of private binding/descriptor evidence. No live access is activated.

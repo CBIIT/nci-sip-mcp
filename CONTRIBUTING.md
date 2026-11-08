@@ -119,9 +119,30 @@ the callback checks the call's existing budget/deadline. Returned exchanges hide
 and headers in their representation. Core classification alone proves none of the provider's
 I/O guarantees. The `on_request` observer is not an enforcement boundary.
 
-Shared accounting is #464; the production provider is #465. Furnished harness, prepare, selected
-stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
+Explicit authorization values are described below; shared accounting remains #468, owned-run
+supervision and sanitized summaries #467, and the production provider #465. Furnished harness,
+prepare, selected stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
 activates no caller protection or live access and changes no native/benchmark report schema.
+
+### Explicit request authorization
+
+`nci_si_acceptance.request_authorization` supplies frozen `RequestGrant`, `Limits`,
+`Authorization` and private `RunDescriptor` values for explicitly cooperating diagnostic callers.
+Grants describe one exact GET/POST method, URL, headers, body and credential destination.
+`Authorization` admits only exact `RequestGrant` and `Limits` records; binding requires an exact
+`Authorization`. Subclass extensions are refused locally. Binding serializes the declared
+request, limit and policy fields; attachments on scalar subclasses are excluded.
+Constructors snapshot tuple/list inputs into immutable values; unsupported outer containers or
+header-row shapes refuse before parsing or iteration. `Authorization.binding` binds the complete
+private authorization with a caller-supplied private byte key. Callers supply a reviewed nonsecret
+public policy identity separately; this API validates its format and does not derive it from
+credentials or the binding. Descriptor records are private IPC, including their local path;
+keep them and the binding out of public reports.
+
+These values enforce no request/byte/time budget and supply no running ledger, transport,
+process supervisor or public summary. Shared ledger/admission/receipts remain #468, supervision
+and summaries #467, production transport #465 and actual caller adoption #448/#449. The core's
+existing explicit policy boundary is separate. No furnished caller or live access is activated.
 
 ## Test levels
 
