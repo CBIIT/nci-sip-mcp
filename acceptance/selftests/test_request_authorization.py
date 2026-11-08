@@ -166,8 +166,6 @@ def test_valid_authority_is_an_immutable_snapshot():
     assert authorization.grants == (grant,)
     with pytest.raises(FrozenInstanceError):
         grant.body = b"changed"
-    assert "synthetic-value" not in repr(grant)
-    assert "owned-body" not in repr(authorization)
 
 
 @pytest.mark.parametrize(
@@ -365,3 +363,45 @@ def test_private_descriptor_refuses_extra_or_malformed_fields(changes):
         "Controlled upstream request refused.",
         None,
     )
+
+
+@pytest.mark.parametrize(
+    "make,field,value",
+    [
+        pytest.param(Limits, "logical", 1, id="limits"),
+        pytest.param(binding_authorization, "policy_sha256", "b" * 64, id="authorization"),
+        pytest.param(
+            lambda: RunDescriptor("b" * 32, "a" * 64, Path("/owned")),
+            "run_id",
+            "c" * 32,
+            id="descriptor",
+        ),
+    ],
+)
+def test_frozen_authority_records_refuse_reassignment(make, field, value):
+    record = make()
+    previous = getattr(record, field)
+    with pytest.raises(FrozenInstanceError):
+        setattr(record, field, value)
+    assert getattr(record, field) == previous
+
+
+@pytest.mark.parametrize(
+    "private_value",
+    [
+        pytest.param("GRANT-URL.invalid", id="url"),
+        pytest.param("private-synthetic-header", id="headers"),
+        pytest.param("private-synthetic-body", id="body"),
+        pytest.param("http://grant-url.invalid/private-destination", id="credential-origin"),
+    ],
+)
+def test_grant_repr_omits_private_fields(private_value):
+    # Host case and explicit default port distinguish the URL and destination markers.
+    grant = RequestGrant(
+        "POST",
+        "http://GRANT-URL.invalid:80/private-destination/private-url?private-query=1",
+        (("Authorization", "Bearer private-synthetic-header"),),
+        b"private-synthetic-body",
+        "http://grant-url.invalid/private-destination",
+    )
+    assert private_value not in repr(grant)
