@@ -3,6 +3,7 @@
 import importlib
 import importlib.util
 import json
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -14,7 +15,14 @@ import pytest
 
 import nci_si_acceptance
 from conftest import FIXTURES
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_si_acceptance.fixture_server import (
+    Fixture,
+    FixtureServer,
+    FixtureSet,
+    Response,
+    load_fixtures,
+    request_key,
+)
 from nci_si_mcp.http_client import RequestPolicyError
 
 # This explicit consumer drives today's HttpClient if the new entry is absent. Absence
@@ -271,3 +279,139 @@ def test_attached_child_changed_authorization_has_zero_contacts(tmp_path, change
                 stop_actor(child)
         assert upstream.log() == []
     assert results == [{"accepted": 0, "refused": ["authorization"]}]
+
+
+# The storage wait is0.1s; allow finite scheduler headroom, revisiting on measured slow hosts.
+CONTENTION_RESPONSE_SECONDS = 2
+
+HELD_ACTOR = """import json, sys
+from pathlib import Path
+from urllib.request import ProxyHandler, build_opener
+from nci_si_acceptance.request_budget import (
+    Authorization, ControlledRun, Limits, RequestGrant, RunDescriptor,
+)
+from nci_si_mcp.http_client import RequestPolicyError
+
+settings = json.loads(Path(sys.argv[1]).read_text())
+sys.stdin.readline()
+reason = None
+try:
+    grant = RequestGrant("GET", settings["url"], ())
+    authorization = Authorization((grant,), Limits(**settings["limits"]), "a" * 64)
+    run = ControlledRun.attach(RunDescriptor.from_record(settings["descriptor"]), authorization,
+                               participant=settings["participant"])
+    with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
+        # This raw accounting caller declares transport entry; it is not the production provider.
+        lease.entered()
+        with build_opener(ProxyHandler({})).open(grant.url, timeout=2) as response:
+            def held_read(maximum):
+                Path(sys.argv[1]).with_suffix(".reading").write_text("pending")
+                sys.stdin.readline()
+                return response.read(maximum)
+            lease.read(held_read, 6)
+except RequestPolicyError as error:
+    reason = error.reason
+print(json.dumps({"reason": reason}))
+"""
+
+
+@contextmanager
+def tiny_run(tmp_path):
+    module = optional_budget()
+    fixtures = FixtureSet(
+        {request_key("evs", "GET", "/owned", {}): Fixture("known", (Response(body="known"),))}, {}
+    )
+    limits = {
+        "logical": 2,
+        "attempts": 2,
+        "per_logical": 1,
+        "concurrent": 2,
+        "seconds": 30,
+        "response_bytes": 5,
+        "total_bytes": 6,
+    }
+    with FixtureServer(fixtures) as upstream:
+        grant = module.RequestGrant("GET", upstream.base_url("evs") + "/owned", ())
+        run = module.ControlledRun.create(
+            module.Authorization((grant,), module.Limits(**limits), "a" * 64), tmp_path / "runs"
+        )
+        try:
+            run.open()
+            yield run, grant, limits, upstream
+        finally:
+            run.close()
+
+
+def test_inflight_exhaustion_preserves_admitted_read_receipts(tmp_path):
+    actor = tmp_path / "held.py"
+    actor.write_text(HELD_ACTOR)
+    with tiny_run(tmp_path) as (run, grant, limits, upstream):
+        child = launch_actor(actor, tmp_path, 0, {"url": grant.url, "limits": limits}, run)
+        try:
+            child.stdin.write(b"ready\n")
+            child.stdin.flush()
+            wait_for_first_round([tmp_path / "child-0.reading"])
+            before = run.snapshot()
+            assert (
+                before.active,
+                before.pending_receipts,
+                before.reserved_body_bytes,
+                before.transport_entries,
+                before.consumed_body_bytes,
+            ) == (1, 1, 6, 1, 0)
+            with (
+                pytest.raises(RequestPolicyError) as refused,
+                run.logical(grant) as logical,
+                logical.attempt(response_limit=5),
+            ):
+                pytest.fail("Exhausted aggregate capacity admitted another transport")
+            assert refused.value.reason == "byte_limit"
+            output, error = child.communicate(b"read\n", timeout=10)
+            assert child.returncode == 0, error.decode()
+            assert json.loads(output) == {"reason": "closed"}
+            after = run.snapshot()
+            assert (
+                after.state,
+                after.logical,
+                after.attempts,
+                after.transport_entries,
+                after.consumed_body_bytes,
+                after.reserved_body_bytes,
+                after.active,
+                after.pending_receipts,
+                after.observation_complete,
+                after.failure,
+            ) == ("failed", 2, 1, 1, 5, 5, 0, 0, True, "byte_limit")
+            assert len(upstream.log()) == 1
+        finally:
+            stop_actor(child)
+
+
+def test_real_sqlite_contention_closes_admission(tmp_path):
+    actor = tmp_path / "blocked.py"
+    actor.write_text(HELD_ACTOR)
+    with tiny_run(tmp_path) as (run, grant, limits, upstream):
+        child = launch_actor(actor, tmp_path, 0, {"url": grant.url, "limits": limits}, run)
+        try:
+            with sqlite3.connect(run.directory / "ledger.sqlite") as blocker:
+                blocker.execute("BEGIN IMMEDIATE")
+                started = time.monotonic()
+                with pytest.raises(RequestPolicyError) as refused:
+                    run.check_wait(0)
+                # The ledger permits 0.1s contention; allow scheduler headroom in this test.
+                assert time.monotonic() - started < CONTENTION_RESPONSE_SECONDS
+                assert refused.value.reason == "accounting"
+            output, error = child.communicate(b"ready\n", timeout=10)
+            assert child.returncode == 0, error.decode()
+            assert upstream.log() == []
+            assert json.loads(output) == {"reason": "closed"}
+            snapshot = run.snapshot()
+            assert (
+                snapshot.state,
+                snapshot.attempts,
+                snapshot.transport_entries,
+                snapshot.consumed_body_bytes,
+                snapshot.failure,
+            ) == ("failed", 0, 0, 0, "accounting")
+        finally:
+            stop_actor(child)
