@@ -128,8 +128,9 @@ activates no caller protection or live access and changes no native/benchmark re
 
 `nci_si_acceptance.request_authorization` supplies frozen exact `RequestGrant`, `Limits`,
 `Authorization` and private `RunDescriptor` values for explicitly cooperating diagnostic callers.
-Grants describe one exact method/URL/header/body and credential destination. Constructors validate
-and retain immutable snapshots. `Authorization.binding` binds the complete private authorization
+Grants describe one exact GET/POST method, URL, headers, body and credential destination.
+Constructors snapshot tuple/list inputs into immutable values; unsupported outer containers or
+header-row shapes refuse before parsing or iteration. `Authorization.binding` binds the complete private authorization
 with a caller-supplied private byte key; the separately supplied public policy identity contains
 no credential-derived binding. Descriptor records are private IPC, including their local path;
 keep them and the binding out of public reports.

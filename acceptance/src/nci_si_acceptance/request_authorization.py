@@ -6,15 +6,22 @@ import hmac
 import json
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Self, TypedDict
+from typing import Self, TypedDict, get_args
 from urllib.parse import unquote, urlsplit
 
 from nci_si_mcp.http_client import RequestPolicyError
+from nci_si_mcp.validation import RequestMethod
 
 # ASCII control characters cannot identify an HTTP destination.
 CONTROL_START = 32
+CONTROL_END = 127
+# Each header is exactly a field name and value, not an iterable to reinterpret.
+HEADER_PAIR_SIZE = 2
+
+type HeaderRow = tuple[str, str] | list[str]
 # SQLite INTEGER counters are signed 64-bit; remeasure if the storage representation changes.
 MAX_COUNTER = (1 << 63) - 1
 # Explicit diagnostic ceilings, not measured upstream capacity. Revisit with approved run evidence.
@@ -74,21 +81,31 @@ def destination(url: str) -> tuple[str, str, int]:
 
 
 def _header_valid(name: str, value: str) -> bool:
-    return bool(re.fullmatch(r"[a-z0-9-]+", name)) and "\r" not in value and "\n" not in value
+    return bool(re.fullmatch(r"[a-z0-9-]+", name)) and not any(
+        ord(char) < CONTROL_START or ord(char) == CONTROL_END for char in value
+    )
 
 
-def _headers(values: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
-    _require(all(isinstance(name, str) and isinstance(value, str) for name, value in values))
-    headers = tuple((name.lower(), value) for name, value in values)
+def _pair(row: HeaderRow) -> tuple[str, str]:
+    _require(isinstance(row, (tuple, list)) and len(row) == HEADER_PAIR_SIZE)
+    _require(all(isinstance(value, str) for value in row))
+    return row[0], row[1]
+
+
+def _headers(values: Sequence[HeaderRow]) -> tuple[tuple[str, str], ...]:
+    _require(isinstance(values, (tuple, list)))
+    headers = tuple((name.lower(), value) for name, value in map(_pair, values))
     _require(len({name for name, _ in headers}) == len(headers))
     _require(all(_header_valid(name, value) for name, value in headers))
     return tuple(sorted(headers))
 
 
 def _credential_destination(url: str, base: str) -> bool:
+    base = _text(base)
+    origin_matches = destination(url) == destination(base)
     path, prefix = urlsplit(url).path, urlsplit(base).path.rstrip("/")
     return (
-        destination(url) == destination(base)
+        origin_matches
         and not urlsplit(base).query
         and (path == prefix or path.startswith(prefix + "/"))
     )
@@ -135,28 +152,40 @@ class Limits:
         object.__setattr__(self, "seconds", seconds)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RequestGrant:
-    method: str
+    method: RequestMethod
     url: str = field(repr=False)
     headers: tuple[tuple[str, str], ...] = field(repr=False)
     body: bytes | None = field(default=None, repr=False)
     credential_origin: str | None = field(default=None, repr=False)
 
+    def __init__(
+        self,
+        method: RequestMethod,
+        url: str,
+        headers: Sequence[HeaderRow],
+        body: bytes | None = None,
+        credential_origin: str | None = None,
+    ) -> None:
+        """Snapshot tuple/list header rows; unsupported sequence shapes are refused."""
+        object.__setattr__(self, "method", method)
+        object.__setattr__(self, "url", url)
+        object.__setattr__(self, "headers", _headers(headers))
+        object.__setattr__(self, "body", body)
+        object.__setattr__(self, "credential_origin", credential_origin)
+        self.__post_init__()
+
     def __post_init__(self) -> None:
         destination(self.url)
-        _require(self.method in ("GET", "POST"))
+        _require(self.method in get_args(RequestMethod.__value__))
         _require(self.body is None or isinstance(self.body, bytes))
-        try:
-            headers = _headers(self.headers)
-        except TypeError, ValueError, AttributeError:
-            raise RequestPolicyError("authorization") from None
+        headers = self.headers
         sensitive = {"authorization", "x-evsrestapi-license-key"} & {name for name, _ in headers}
         if sensitive and self.credential_origin is None:
             raise RequestPolicyError("authorization")
         if self.credential_origin is not None:
             _require(_credential_destination(self.url, self.credential_origin))
-        object.__setattr__(self, "headers", headers)
 
 
 def _private_bytes(value: object) -> str:
@@ -165,21 +194,29 @@ def _private_bytes(value: object) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class Authorization:
     grants: tuple[RequestGrant, ...] = field(repr=False)
     limits: Limits
     policy_sha256: str
 
-    def __post_init__(self) -> None:
-        _require(
-            bool(self.grants) and all(isinstance(grant, RequestGrant) for grant in self.grants)
-        )
-        _require(isinstance(self.limits, Limits))
-        _digest(self.policy_sha256)
-        object.__setattr__(self, "grants", tuple(self.grants))
+    def __init__(
+        self,
+        grants: Sequence[RequestGrant],
+        limits: Limits,
+        policy_sha256: str,
+    ) -> None:
+        """Snapshot a nonempty tuple/list; never consume an arbitrary iterator."""
+        _require(isinstance(grants, (tuple, list)))
+        _require(bool(grants) and all(isinstance(grant, RequestGrant) for grant in grants))
+        _require(isinstance(limits, Limits))
+        _digest(policy_sha256)
+        object.__setattr__(self, "grants", tuple(grants))
+        object.__setattr__(self, "limits", limits)
+        object.__setattr__(self, "policy_sha256", policy_sha256)
 
     def binding(self, key: bytes) -> bytes:
+        _require(isinstance(key, bytes))
         canonical = json.dumps(
             asdict(self),
             sort_keys=True,
