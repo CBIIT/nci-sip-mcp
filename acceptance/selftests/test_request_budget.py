@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 
 import pytest
@@ -31,8 +31,7 @@ from nci_si_acceptance.request_authorization import (
 from nci_si_acceptance.request_budget import AttemptLease, ControlledRun
 from nci_si_mcp.http_client import RequestPolicyError
 
-# This explicit consumer drives today's HttpClient if the new entry is absent. Absence
-# therefore produces actual excess local contacts in the red revision, not an import error.
+# This explicit local consumer exercises shared accounting through the real HttpClient.
 ACTOR = """import json, sys, tempfile
 import nci_si_acceptance
 from nci_si_mcp import http_client
@@ -593,3 +592,57 @@ def test_retired_lease_refuses_new_entry_or_read(tmp_path, operation):
                 snapshot.consumed_body_bytes,
                 snapshot.pending_receipts,
             ) == expected
+
+
+@pytest.mark.parametrize(
+    "boundary", ["create", "attach_authority", "attach_descriptor", "directory"]
+)
+@pytest.mark.parametrize("kind", ["none", "boolean", "text", "probe"])
+def test_run_boundaries_refuse_shapes_before_field_use(tmp_path, boundary, kind):
+    reads = []
+
+    class Probe:
+        def __getattr__(self, name):
+            reads.append(name)
+            raise AttributeError(name)
+
+    value = {"none": None, "boolean": False, "text": "invalid", "probe": Probe()}[kind]
+    with retirement_run(tmp_path) as (run, _):
+        run.authorize_participant("worker")
+        calls = {
+            "create": lambda: ControlledRun.create(value, tmp_path / "rejected"),
+            "attach_authority": lambda: ControlledRun.attach(
+                run.descriptor, value, participant="worker"
+            ),
+            "attach_descriptor": lambda: ControlledRun.attach(
+                value, run.authorization, participant="worker"
+            ),
+            "directory": lambda: ControlledRun.create(run.authorization, value),
+        }
+        observed = refusal(calls[boundary])
+        assert reads == []
+        assert observed == (RequestPolicyError, "Controlled upstream request refused.", None)
+
+
+@pytest.mark.parametrize("boundary", ["create", "attach_authority", "attach_descriptor"])
+def test_run_boundaries_refuse_extended_records(tmp_path, boundary):
+    with retirement_run(tmp_path) as (run, _):
+        run.authorize_participant("worker")
+        value = run.descriptor if boundary == "attach_descriptor" else run.authorization
+        extended = type("ExtendedRecord", (type(value),), {})(
+            **{field.name: getattr(value, field.name) for field in fields(value)}
+        )
+        calls = {
+            "create": lambda: ControlledRun.create(extended, tmp_path / "rejected"),
+            "attach_authority": lambda: ControlledRun.attach(
+                run.descriptor, extended, participant="worker"
+            ),
+            "attach_descriptor": lambda: ControlledRun.attach(
+                extended, run.authorization, participant="worker"
+            ),
+        }
+        assert refusal(calls[boundary]) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
