@@ -297,6 +297,7 @@ def test_exact_defaults_and_native_storage_clock_boundaries():
     "url",
     [
         "ftp://127.0.0.1/owned",
+        "ftp://127.0.0.1:9/owned",
         "http:///owned",
         "http://user:synthetic@127.0.0.1/owned",
         "http://user@127.0.0.1/owned",
@@ -304,6 +305,7 @@ def test_exact_defaults_and_native_storage_clock_boundaries():
         "http://127.0.0.1/own ed",
         "http://127.0.0.1/owned\x7f",
         "http://127.0.0.1:70000/owned",
+        "http://127.0.0.1:0/owned",
         "http://127.0.0.1/%2e%2e/owned",
         "http://127.0.0.1/./owned",
         "http://127.0.0.1/own\\ed",
@@ -450,3 +452,28 @@ def test_private_descriptor_refuses_nonmapping_records(value):
         "Controlled upstream request refused.",
         None,
     )
+
+
+@pytest.mark.parametrize(
+    "construct",
+    [
+        pytest.param(lambda: RequestGrant("GET", "http://127.0.0.1:1/owned", ()), id="first-port"),
+        pytest.param(lambda: Limits(seconds=0.5), id="positive-fractional-duration"),
+    ],
+)
+def test_valid_low_request_and_time_bounds_are_admitted(construct):
+    assert refusal(construct) is None
+
+
+def test_https_default_destination_preserves_exact_private_request_identity():
+    implicit_url = "https://127.0.0.1/owned"
+    explicit_url = "https://127.0.0.1:443/owned"
+    assert (
+        refusal(lambda: RequestGrant("GET", implicit_url, (), credential_origin=explicit_url))
+        is None
+    )
+    grant = RequestGrant("GET", implicit_url, (), credential_origin=explicit_url)
+    assert grant.url == implicit_url
+    authority = Authorization((grant,), Limits(), "a" * 64)
+    explicit = replace(authority, grants=(replace(grant, url=explicit_url),))
+    assert authority.binding(b"k" * 32) != explicit.binding(b"k" * 32)
