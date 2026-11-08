@@ -9,6 +9,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import fields, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -646,3 +647,131 @@ def test_run_boundaries_refuse_extended_records(tmp_path, boundary):
             "Controlled upstream request refused.",
             None,
         )
+
+
+@pytest.mark.parametrize("operation", ["create", "wait"])
+@pytest.mark.parametrize(
+    "clock",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        None,
+        True,
+        "invalid",
+        pytest.param(1 << 4096, id="overflow"),
+    ],
+)
+def test_invalid_monotonic_clock_is_terminal(tmp_path, monkeypatch, operation, clock):
+    with retirement_run(tmp_path) as (run, _):
+        calls = {
+            "create": lambda: ControlledRun.create(run.authorization, tmp_path / "invalid-clock"),
+            "wait": lambda: run.check_wait(0),
+        }
+
+        def invoke():
+            try:
+                calls[operation]()
+            except RequestPolicyError as error:
+                assert error.reason == "accounting"
+                raise
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: clock)
+            )
+            observed = refusal(invoke)
+        assert observed == (RequestPolicyError, "Controlled upstream request refused.", None)
+
+
+def test_unrepresentable_run_deadline_is_terminal(tmp_path, monkeypatch):
+    with retirement_run(tmp_path) as (run, _):
+        authority = replace(
+            run.authorization, limits=replace(run.authorization.limits, seconds=1e308)
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: 1e308)
+            )
+            observed = refusal(lambda: ControlledRun.create(authority, tmp_path / "overflow-clock"))
+        assert observed == (RequestPolicyError, "Controlled upstream request refused.", None)
+
+
+@pytest.mark.parametrize("clock", [-1.5, 0.0, 1.5])
+def test_finite_monotonic_origins_are_supported(tmp_path, monkeypatch, clock):
+    with retirement_run(tmp_path) as (parent, _), monkeypatch.context() as patch:
+        patch.setattr(
+            "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: clock)
+        )
+        run = ControlledRun.create(parent.authorization, tmp_path / "finite-clock")
+        try:
+            run.open()
+            run.check_wait(0)
+            snapshot = run.snapshot()
+            assert (snapshot.state, snapshot.logical, snapshot.attempts) == ("open", 0, 0)
+        finally:
+            run.close()
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_rejected_snapshot_closes_other_participant_admission(tmp_path, invalid):
+    with retirement_run(tmp_path) as (run, grant):
+        run.authorize_participant("other")
+        other = ControlledRun.attach(run.descriptor, run.authorization, participant="other")
+        if invalid:
+            with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+                connection.execute("UPDATE run SET logical=?", (-1,))
+            with pytest.raises(RequestPolicyError) as rejected:
+                run.snapshot()
+            assert rejected.value.reason == "accounting"
+        else:
+            assert run.snapshot().logical == 0
+
+        def enter():
+            # Declared ledger entry is independent of a receiver contact.
+            with other.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
+                lease.entered()
+
+        observed = refusal(enter)
+        expected = (
+            (RequestPolicyError, "Controlled upstream request refused.", None) if invalid else None
+        )
+        assert observed == expected
+        with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+            quantities = connection.execute("SELECT logical,attempts,entered FROM run").fetchone()
+        assert quantities == ((-1, 0, 0) if invalid else (1, 1, 1))
+
+
+@pytest.mark.parametrize("clock", [None, float("nan")])
+def test_known_read_survives_clock_failure(tmp_path, monkeypatch, clock):
+    with retirement_run(tmp_path) as (run, grant):
+        with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
+            lease.entered()
+            with monkeypatch.context() as patch:
+
+                def reader(maximum):
+                    patch.setattr(
+                        "nci_si_acceptance.request_budget.time",
+                        SimpleNamespace(monotonic=lambda: clock),
+                    )
+                    return b"known"[:maximum]
+
+                observed = refusal(lambda: lease.read(reader, 6))
+            assert observed == (RequestPolicyError, "Controlled upstream request refused.", None)
+            snapshot = run.snapshot()
+            assert (
+                snapshot.state,
+                snapshot.active,
+                snapshot.pending_receipts,
+                snapshot.reserved_body_bytes,
+                snapshot.consumed_body_bytes,
+                snapshot.failure,
+            ) == ("failed", 1, 0, 6, 5, "accounting")
+        snapshot = run.snapshot()
+        assert (
+            snapshot.active,
+            snapshot.pending_receipts,
+            snapshot.reserved_body_bytes,
+            snapshot.consumed_body_bytes,
+            snapshot.observation_complete,
+        ) == (0, 0, 5, 5, True)
