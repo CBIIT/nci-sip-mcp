@@ -1,6 +1,6 @@
 """The explicit diagnostic caller's private authority and ledger record contracts."""
 
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 import pytest
@@ -98,3 +98,69 @@ def test_binding_matches_independent_vector():
     assert binding_authorization().binding(b"k" * 32).hex() == (
         "91e318fb3e8245adcda7299d669e5946792d95fba55258f92f776ee4e0642745"
     )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        pytest.param("credential_origin", 7, id="origin-number"),
+        pytest.param("credential_origin", b"http://127.0.0.1:9", id="origin-bytes"),
+        pytest.param("headers", ("ab",), id="row-string"),
+        pytest.param("headers", {"ab": "cd"}, id="outer-mapping"),
+        pytest.param("headers", ({"ab": "x", "cd": "y"},), id="row-mapping"),
+        pytest.param("headers", (iter(("accept", "json")),), id="row-iterator"),
+        pytest.param("headers", iter((("accept", "json"),)), id="outer-iterator"),
+        pytest.param("headers", (("accept",),), id="short-row"),
+        pytest.param("headers", (("accept", 7),), id="nontext-value"),
+        pytest.param("headers", (("accept", "j\x00son"),), id="control-value"),
+    ],
+)
+def test_malformed_grant_shapes_are_terminal(field, value):
+    grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
+    assert refusal(lambda: replace(grant, **{field: value})) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        pytest.param(lambda _: 7, id="number"),
+        pytest.param(iter, id="iterator"),
+        pytest.param(set, id="set"),
+    ],
+)
+def test_malformed_grants_container_is_terminal(wrap):
+    grants = binding_authorization().grants
+    assert refusal(lambda: Authorization(wrap(grants), Limits(), "a" * 64)) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+
+
+@pytest.mark.parametrize("key", ["not-bytes", None])
+def test_malformed_binding_key_is_terminal(key):
+    assert refusal(lambda: binding_authorization().binding(key)) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+
+
+def test_valid_authority_is_an_immutable_snapshot():
+    headers = [["X-Allowed", "synthetic-value"]]
+    grant = RequestGrant("POST", "http://127.0.0.1:9/owned", headers, b"owned-body")
+    grants = [grant]
+    authorization = Authorization(grants, Limits(), "a" * 64)
+    headers[0][1] = "changed"
+    grants.clear()
+    assert grant.headers == (("x-allowed", "synthetic-value"),)
+    assert grant.body == b"owned-body"
+    assert authorization.grants == (grant,)
+    with pytest.raises(FrozenInstanceError):
+        grant.body = b"changed"
+    assert "synthetic-value" not in repr(grant)
+    assert "owned-body" not in repr(authorization)
