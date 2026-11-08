@@ -521,3 +521,57 @@ def test_authorization_refuses_extended_record_shapes(construct):
         "Controlled upstream request refused.",
         None,
     )
+
+
+@dataclass(frozen=True, init=False, eq=False)
+class AttachedText(str):
+    _attachment: Path = Path("synthetic-private-attachment")
+
+
+@dataclass(frozen=True, init=False, eq=False)
+class NonfiniteText(str):
+    _attachment: float = float("nan")
+
+
+@dataclass(frozen=True, init=False, eq=False)
+class AttachedBytes(bytes):
+    _attachment: Path = Path("synthetic-private-attachment")
+
+
+@dataclass(frozen=True, init=False, eq=False)
+class AttachedInteger(int):
+    _attachment: float = float("nan")
+
+
+@pytest.mark.parametrize(
+    "field,wrap",
+    [
+        pytest.param("policy_sha256", AttachedText, id="policy-path"),
+        pytest.param("policy_sha256", NonfiniteText, id="policy-nan"),
+        pytest.param("method", AttachedText, id="method"),
+        pytest.param("url", AttachedText, id="url"),
+        pytest.param("headers", AttachedText, id="header-value"),
+        pytest.param("body", AttachedBytes, id="body"),
+        pytest.param("credential_origin", AttachedText, id="credential-origin"),
+        pytest.param("logical", AttachedInteger, id="limit-integer"),
+    ],
+)
+def test_binding_uses_scalar_values_without_dataclass_attachments(field, wrap):
+    original = binding_authorization()
+    if field == "policy_sha256":
+        changed = replace(original, policy_sha256=wrap(original.policy_sha256))
+    elif field == "logical":
+        changed = replace(original, limits=replace(original.limits, logical=wrap(2)))
+    else:
+        grant = original.grants[0]
+        value = getattr(grant, field)
+        if field == "headers":
+            value = (("authorization", "Bearer synthetic"), ("accept", wrap("application/json")))
+        else:
+            value = wrap(value)
+        changed = replace(original, grants=(replace(grant, **{field: value}),))
+    try:
+        result = changed.binding(b"k" * 32)
+    except (RequestPolicyError, TypeError, ValueError) as error:
+        result = type(error), str(error)
+    assert result == original.binding(b"k" * 32)
