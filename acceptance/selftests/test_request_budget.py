@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from contextlib import contextmanager
 from dataclasses import fields, replace
 from pathlib import Path
@@ -742,21 +743,42 @@ def test_rejected_snapshot_closes_other_participant_admission(tmp_path, invalid)
         assert quantities == ((-1, 0, 0) if invalid else (1, 1, 1))
 
 
-@pytest.mark.parametrize("clock", [None, float("nan")])
+@pytest.mark.parametrize(
+    "clock",
+    [
+        None,
+        float("nan"),
+        pytest.param(OSError("synthetic-private-clock-detail"), id="raised-oserror"),
+    ],
+)
 def test_known_read_survives_clock_failure(tmp_path, monkeypatch, clock):
     with retirement_run(tmp_path) as (run, grant):
         with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
             lease.entered()
             with monkeypatch.context() as patch:
 
+                def monotonic():
+                    if isinstance(clock, OSError):
+                        raise clock
+                    return clock
+
                 def reader(maximum):
                     patch.setattr(
                         "nci_si_acceptance.request_budget.time",
-                        SimpleNamespace(monotonic=lambda: clock),
+                        SimpleNamespace(monotonic=monotonic),
                     )
                     return b"known"[:maximum]
 
-                observed = refusal(lambda: lease.read(reader, 6))
+                def read():
+                    try:
+                        lease.read(reader, 6)
+                    except RequestPolicyError as error:
+                        assert "synthetic-private-clock-detail" not in "".join(
+                            traceback.format_exception(error)
+                        )
+                        raise
+
+                observed = refusal(read)
             assert observed == (RequestPolicyError, "Controlled upstream request refused.", None)
             snapshot = run.snapshot()
             assert (
