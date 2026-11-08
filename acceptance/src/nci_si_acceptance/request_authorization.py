@@ -7,7 +7,7 @@ import json
 import math
 import re
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Self, TypedDict, final, get_args
 from urllib.parse import unquote, urlsplit
@@ -227,8 +227,30 @@ class Authorization:
     def binding(self, key: bytes) -> bytes:
         _require(type(self) is Authorization)
         _require(isinstance(key, bytes))
+        payload = {
+            "grants": [
+                {
+                    "method": grant.method,
+                    "url": grant.url,
+                    "headers": grant.headers,
+                    "body": grant.body,
+                    "credential_origin": grant.credential_origin,
+                }
+                for grant in self.grants
+            ],
+            "limits": {
+                "logical": self.limits.logical,
+                "attempts": self.limits.attempts,
+                "per_logical": self.limits.per_logical,
+                "concurrent": self.limits.concurrent,
+                "seconds": self.limits.seconds,
+                "response_bytes": self.limits.response_bytes,
+                "total_bytes": self.limits.total_bytes,
+            },
+            "policy_sha256": self.policy_sha256,
+        }
         canonical = json.dumps(
-            asdict(self),
+            payload,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,

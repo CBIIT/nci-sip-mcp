@@ -130,7 +130,8 @@ activates no caller protection or live access and changes no native/benchmark re
 `Authorization` and private `RunDescriptor` values for explicitly cooperating diagnostic callers.
 Grants describe one exact GET/POST method, URL, headers, body and credential destination.
 `Authorization` admits only exact `RequestGrant` and `Limits` records; binding requires an exact
-`Authorization`. Subclass extensions are refused locally.
+`Authorization`. Subclass extensions are refused locally. Binding serializes the declared
+request, limit and policy fields; attachments on scalar subclasses are excluded.
 Constructors snapshot tuple/list inputs into immutable values; unsupported outer containers or
 header-row shapes refuse before parsing or iteration. `Authorization.binding` binds the complete
 private authorization with a caller-supplied private byte key. Callers supply a reviewed nonsecret
