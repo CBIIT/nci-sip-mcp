@@ -148,6 +148,8 @@ Supervision/summaries remain #467, production transport #465 and actual caller a
 `nci_si_acceptance.request_budget.ControlledRun` owns a private SQLite ledger for explicitly
 cooperating callers. `create` starts with admission closed; the controller opens once,
 authorizes participant identities and terminally closes. `attach` opens existing state only.
+Creation requires a `Path`; create/attach require exact authorization/descriptor records and
+refuse unsupported shapes before reading their fields.
 `logical` and `attempt` reserve shared call/attempt/concurrency and response-plus-sentinel
 capacity before the caller declares actual entry and reads through its lease. A reservation,
 local transport entry, committed byte receipt and independently observed receiver contact

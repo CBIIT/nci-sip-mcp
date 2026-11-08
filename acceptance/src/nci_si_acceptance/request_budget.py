@@ -45,6 +45,11 @@ def _participant(value: str) -> None:
         raise RequestPolicyError("authorization")
 
 
+def _authorization(value: Authorization) -> None:
+    if type(value) is not Authorization:
+        raise RequestPolicyError("authorization")
+
+
 @dataclass(frozen=True, slots=True)
 class LedgerSnapshot:
     run_id: str
@@ -64,6 +69,9 @@ class LedgerSnapshot:
 
 class ControlledRun:
     def __init__(self, descriptor: RunDescriptor, authorization: Authorization, participant: str):
+        _authorization(authorization)
+        if type(descriptor) is not RunDescriptor:
+            raise RequestPolicyError("authorization")
         _participant(participant)
         self.descriptor, self.authorization, self.participant = (
             descriptor,
@@ -77,6 +85,9 @@ class ControlledRun:
 
     @classmethod
     def create(cls, authorization: Authorization, owned_directory: Path) -> Self:
+        _authorization(authorization)
+        if not isinstance(owned_directory, Path):
+            raise RequestPolicyError("authorization")
         try:
             directory = owned_directory.resolve() / uuid.uuid4().hex
             directory.mkdir(mode=0o700, parents=True)
