@@ -197,6 +197,9 @@ in visibility. [Government website assurance](government-site-assurance.md) reco
 
 The [authorization value API](../CONTRIBUTING.md#explicit-request-authorization) validates and
 snapshots exact private request grants, finite limits and descriptor records. These values do
-not enforce dashboard request budgets or replace native reports. Shared ledger enforcement is
-#468, supervision/sanitized summaries #467, transport #465 and caller adoption #448/#449.
-Callers retain ownership of private binding/descriptor evidence. No live access is activated.
+not enforce dashboard request budgets or replace native reports. The separate explicit
+[shared accounting API](../CONTRIBUTING.md#explicit-shared-request-accounting) supplies private
+reservations and receipts for cooperating diagnostic callers, not automatic supervision or
+public summaries (#467), production transport (#465) or caller adoption (#448/#449).
+Callers own/reap children and preserve required private ledger/binding/descriptor evidence
+outside managed scratch before pruning. No furnished-caller protection or live access is activated.
