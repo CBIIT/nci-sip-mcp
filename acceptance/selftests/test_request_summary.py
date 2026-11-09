@@ -66,6 +66,18 @@ def test_reader_preserves_known_bytes_in_failed_uncertain_run(tmp_path):
         ((1, 1, 9, 0, 0, 1), False, True),
         ((1, 1, 0, 0, 0, 1), True, True),
         ((1, 2, 18, 1, 5, 2), False, True),
+        pytest.param((3, 2, 9, 1, 4, 1), False, False, id="logical-ceiling"),
+        pytest.param((2, 2, 9, 1, 4, 1), False, True, id="logical-boundary"),
+        pytest.param((2, 4, 9, 1, 4, 1), False, False, id="global-attempt-ceiling"),
+        pytest.param((2, 3, 9, 1, 4, 1), False, True, id="global-attempt-boundary"),
+        pytest.param((1, 1, 4, 1, 5, 1), False, False, id="known-reserved-ceiling"),
+        pytest.param((1, 1, 5, 1, 5, 1), False, True, id="known-reserved-boundary"),
+        pytest.param((2, 3, 21, 1, 4, 2), False, False, id="total-byte-ceiling"),
+        pytest.param((2, 3, 20, 1, 4, 2), False, True, id="total-byte-boundary"),
+        pytest.param((1, 1, 9, 1, 4, 2), False, False, id="peak-attempt-ceiling"),
+        pytest.param((1, 1, 9, 1, 4, 1), False, True, id="peak-attempt-boundary"),
+        pytest.param((2, 3, 9, 1, 4, 3), False, False, id="peak-concurrency-ceiling"),
+        pytest.param((2, 3, 9, 1, 4, 2), False, True, id="peak-concurrency-boundary"),
     ],
 )
 def test_reader_enforces_attempt_and_entry_byte_capacity(tmp_path, counts, complete, accepted):

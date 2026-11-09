@@ -33,7 +33,7 @@ def failure_leaves(error):
     return [error]
 
 
-def marker_publication_failure(monkeypatch, run, active, stage="open"):
+def marker_publication_failure(monkeypatch, run, active, stage="open", error=None):
     original_open = Path.open
     failures = []
 
@@ -49,6 +49,8 @@ def marker_publication_failure(monkeypatch, run, active, stage="open"):
                 with stream:
                     yield stream
                 failures.append("marker")
+                if error is not None:
+                    raise error
                 raise OSError("synthetic post-close marker publication failure")
 
             return after_close()
@@ -1282,3 +1284,81 @@ def test_competing_local_failure_keeps_first_completed_latch(tmp_path, monkeypat
     assert worker_errors == ["accounting"]
     assert marker_errors == ["marker", "marker"]
     assert not owner._observer.is_alive()
+
+
+def test_marker_interruption_keeps_initiating_close_failure(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    active = threading.Event()
+    interruption = KeyboardInterrupt("synthetic marker context interruption")
+    marker_errors = marker_publication_failure(
+        monkeypatch, owner.run, active, stage="after_close", error=interruption
+    )
+
+    def fail_close():
+        active.set()
+        raise OSError("synthetic initiating close failure")
+
+    monkeypatch.setattr(owner.run, "close", fail_close)
+    failure = None
+    try:
+        with owner:
+            pass
+    except (RequestPolicyError, BaseExceptionGroup, KeyboardInterrupt) as error:
+        failure = error
+    errors = failure_leaves(failure)
+    assert [type(error) for error in errors] == [RequestPolicyError, KeyboardInterrupt]
+    assert errors[0].reason == "accounting"
+    assert errors[1] is interruption
+    assert marker_errors == ["marker"] and not owner._observer.is_alive()
+    assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "failed"
+
+
+def test_suspended_closure_cannot_keep_renewing_caller_authority(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    opened, leaving, closing, release = (threading.Event() for _ in range(4))
+    outcomes = []
+    original_close = owner.run.close
+
+    def suspended_close():
+        closing.set()
+        assert release.wait(8), "The caller did not release admission closure"
+        original_close()
+
+    def control():
+        try:
+            with owner:
+                owner.run.authorize_participant("caller")
+                opened.set()
+                assert leaving.wait(5), "The caller did not request shutdown"
+        except (RequestPolicyError, BaseExceptionGroup) as error:
+            outcomes.append(error)
+
+    monkeypatch.setattr(owner.run, "close", suspended_close)
+    controller = threading.Thread(target=control)
+    controller.start()
+    try:
+        assert opened.wait(3), "The controller did not open its run"
+        caller = request_budget.ControlledRun.attach(
+            owner.run.descriptor, authorization(), participant="caller"
+        )
+        leaving.set()
+        assert closing.wait(3), "The controller did not begin closure"
+        deadline = time.monotonic() + 3
+        owner._observer.join(timeout=3)
+        time.sleep(max(0, deadline - time.monotonic()))
+        with (
+            pytest.raises(RequestPolicyError) as refused,
+            caller.logical(authorization().grants[0]),
+        ):
+            pass
+        assert refused.value.reason == "accounting"
+        assert caller.snapshot().logical == 0
+    finally:
+        leaving.set()
+        release.set()
+        controller.join(timeout=8)
+        if owner._observer.ident is not None:
+            owner._observer.join(timeout=3)
+        assert not controller.is_alive() and not owner._observer.is_alive()
+    assert [error.reason for error in outcomes] == ["accounting"]
+    assert owner.snapshot()["state"] == "failed"
