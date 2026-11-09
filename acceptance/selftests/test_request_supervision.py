@@ -215,6 +215,9 @@ def test_registered_short_worker_is_reaped_and_streams_closed(tmp_path):
             register = getattr(owner, "register_child", None)
             assert callable(register), "An owned run must accept explicit child custody"
             register(child, participant="worker-1", role="worker")
+            with pytest.raises(RequestPolicyError) as duplicate:
+                register(child, participant="duplicate", role="worker")
+            assert duplicate.value.reason == "authorization"
             child.stdin.write(b"x")
             child.stdin.flush()
             deadline = time.monotonic() + 5
@@ -357,7 +360,10 @@ def test_supervision_cannot_restart_or_accept_unknown_participant(tmp_path, oper
     assert owner.run.snapshot().state != "open"
 
 
-@pytest.mark.parametrize("fault", ["missing", "disabled", "duplicate", "invalid"])
+@pytest.mark.parametrize(
+    "fault",
+    ["missing", "disabled", "duplicate", "invalid", "null", "range", "unmanaged", "infinite"],
+)
 def test_malformed_supervision_never_becomes_unmanaged(tmp_path, fault):
     owner = supervisor(tmp_path)
     with owner:
@@ -367,6 +373,10 @@ def test_malformed_supervision_never_becomes_unmanaged(tmp_path, fault):
         "disabled": "UPDATE supervision SET enabled=0,heartbeat=NULL",
         "duplicate": "INSERT INTO supervision SELECT * FROM supervision",
         "invalid": "UPDATE supervision SET heartbeat=NULL",
+        "null": "UPDATE supervision SET enabled=NULL",
+        "range": "UPDATE supervision SET enabled=2",
+        "unmanaged": "UPDATE supervision SET enabled=0",
+        "infinite": "UPDATE supervision SET heartbeat=9e999",
     }
     with sqlite3.connect(owner.run.directory / "ledger.sqlite") as connection:
         connection.execute(queries[fault])
@@ -874,7 +884,8 @@ def test_new_supervision_operations_recheck_private_identity(tmp_path, operation
                 db.execute("UPDATE run SET policy=?", ("a" * 64,))
 
 
-def test_actual_unreaped_child_failure_preserves_initiating_exception(tmp_path, monkeypatch):
+@pytest.mark.parametrize("role", ["worker", "service"])
+def test_actual_unreaped_child_failure_preserves_initiating_exception(tmp_path, monkeypatch, role):
     owner = supervisor(tmp_path)
     module = importlib.import_module("nci_si_acceptance.request_supervision")
     original_stop = module.stop_child
@@ -884,6 +895,7 @@ def test_actual_unreaped_child_failure_preserves_initiating_exception(tmp_path, 
         raise subprocess.TimeoutExpired(["owned-child"], seconds)
 
     monkeypatch.setattr(module, "stop_child", fail_reap)
+    monkeypatch.setattr(module, "STOP_SECONDS", 0.02)
     with subprocess.Popen(
         [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
         stdin=subprocess.PIPE,
@@ -892,12 +904,14 @@ def test_actual_unreaped_child_failure_preserves_initiating_exception(tmp_path, 
     ) as child:
         try:
             with pytest.raises(BaseExceptionGroup) as caught, owner:
-                owner.register_child(child, participant="service", role="service")
+                owner.register_child(child, participant="service", role=role)
                 raise initiating
             assert tuple(type(error) for error in caught.value.exceptions) == (
                 KeyError,
-                RequestPolicyError,
+                ExceptionGroup if role == "worker" else RequestPolicyError,
             )
+            reasons = [error.reason for error in failure_leaves(caught.value)[1:]]
+            assert reasons == (["transport", "accounting"] if role == "worker" else ["accounting"])
             assert caught.value.exceptions[0] is initiating
             assert child.poll() is None
             assert owner.snapshot()["state"] == "failed"
@@ -1146,3 +1160,32 @@ def test_handoff_append_order_decides_custody_during_shutdown(tmp_path, monkeypa
             assert child.returncode == 0
         else:
             assert child.returncode is not None and child.returncode != 0
+
+
+@pytest.mark.parametrize("run", [None, object()])
+def test_constructor_refuses_foreign_run_before_attribute_access(run):
+    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    with pytest.raises(RequestPolicyError) as caught:
+        entry.SupervisedRun(run)
+    assert caught.value.reason == "authorization"
+
+
+def test_reentry_is_closed_and_preserves_completed_summary(tmp_path):
+    owner = supervisor(tmp_path)
+    with owner:
+        pass
+    path = owner.run.directory / "summary.json"
+    original = path.read_bytes()
+    with pytest.raises(RequestPolicyError) as caught, owner:
+        pytest.fail("A completed context cannot reenter")
+    assert caught.value.reason == "closed" and path.read_bytes() == original
+
+
+def test_unmanaged_heartbeat_refuses_implicit_supervision(tmp_path):
+    run = request_budget.ControlledRun.create(authorization(), tmp_path)
+    run.open()
+    with pytest.raises(RequestPolicyError) as caught:
+        run.heartbeat()
+    assert caught.value.reason == "authorization"
+    assert not (run.directory / "summary.json").exists()
+    run.close()

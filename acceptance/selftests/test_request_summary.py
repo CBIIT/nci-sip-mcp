@@ -87,6 +87,8 @@ def test_reader_enforces_attempt_and_entry_byte_capacity(tmp_path, counts, compl
     [
         (None, "schemaVersion", True),
         (None, "runId", "c" * 32),
+        (None, "runId", None),
+        (None, "runId", "Z" * 32),
         (None, "policySha256", "c" * 64),
         (None, "state", "closed"),
         (None, "observationComplete", 1),
@@ -97,6 +99,7 @@ def test_reader_enforces_attempt_and_entry_byte_capacity(tmp_path, counts, compl
         (None, "observed", []),
         (None, "reservations", None),
         ("limits", "seconds", float("nan")),
+        ("limits", "seconds", "10"),
         ("limits", "seconds", float("inf")),
         ("limits", "logical", True),
         ("limits", "total_bytes", 8),
@@ -186,19 +189,39 @@ def managed(directory):
 
 
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
-def test_interrupted_initial_publication_closes_and_removes_temporary(
-    tmp_path, monkeypatch, interruption
+@pytest.mark.parametrize("cleanup_fault", [False, True])
+def test_interrupted_initial_publication_retains_failure_and_cleanup(
+    tmp_path, monkeypatch, interruption, cleanup_fault
 ):
     owner = managed(tmp_path)
+    module = importlib.import_module("nci_si_acceptance.request_summary")
     before = set(owner.run.directory.iterdir())
+    original_unlink = module.Path.unlink
+    initiating = interruption("synthetic publication interruption")
 
     def interrupt(_descriptor):
-        raise interruption()
+        raise initiating
+
+    def unlink(path, **options):
+        if cleanup_fault and path.parent == owner.run.directory:
+            raise OSError("synthetic temporary cleanup failure")
+        return original_unlink(path, **options)
 
     monkeypatch.setattr("os.fsync", interrupt)
-    with pytest.raises(interruption), owner:
+    monkeypatch.setattr(module.Path, "unlink", unlink)
+    with pytest.raises(BaseExceptionGroup if cleanup_fault else interruption) as caught, owner:
         pytest.fail("Interrupted publication must not open admission")
+    errors = caught.value.exceptions if cleanup_fault else (caught.value,)
+    assert errors[0] is initiating
+    assert [type(error) for error in errors] == [interruption] + [
+        RequestPolicyError
+    ] * cleanup_fault
     assert owner.run.snapshot().state == "closed"
+    remaining = set(owner.run.directory.iterdir()) - before
+    assert len(remaining) == int(cleanup_fault)
+    for path in remaining:
+        assert json.loads(path.read_text())["state"] == "incomplete"
+        original_unlink(path)
     assert set(owner.run.directory.iterdir()) == before
 
 
