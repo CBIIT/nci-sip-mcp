@@ -6,13 +6,14 @@ import io
 import itertools
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout, suppress
+from contextlib import nullcontext, redirect_stdout, suppress
 from dataclasses import asdict
 from pathlib import Path
 from time import monotonic, sleep
@@ -1131,6 +1132,9 @@ class MutationSourceContractsTest(unittest.TestCase):
             )
 
     def test_only_key_mode_and_setting_literal_roles_are_eligible(self):
+        warning_text = (
+            "str indices must be integers or slices, not str; perhaps you missed a comma?"
+        )
         snippets = {
             "mapping = {'key': 'value'}": {"'key'"},
             "value = mapping['lookup']": {"'lookup'"},
@@ -1143,11 +1147,22 @@ class MutationSourceContractsTest(unittest.TestCase):
             "value = open(path, 'rb')": {"'rb'"},
         }
         for snippet, expected in snippets.items():
-            with self.subTest(snippet=snippet):
+            warning_case = snippet == "value = 'abc'['index']"
+            expectation = (
+                pytest.warns(SyntaxWarning, match="^" + re.escape(warning_text) + "$")
+                if warning_case
+                else nullcontext()
+            )
+            with self.subTest(snippet=snippet), expectation as emitted:
                 mutants, _ = source.candidates("src/example.py", snippet.encode())
                 self.assertEqual(
                     {m.before for m in mutants if m.operator == "string:key-mode-setting"}, expected
                 )
+                if warning_case:
+                    self.assertEqual(
+                        [(event.category, str(event.message)) for event in emitted],
+                        [(SyntaxWarning, warning_text)],
+                    )
 
     def test_equivalent_and_uncompilable_replacements_are_not_executable_candidates(self):
         node = ast.parse("True", mode="eval").body

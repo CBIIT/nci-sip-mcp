@@ -498,7 +498,7 @@
   qualname: "ControlledRun._identity"
   operator: "boolean:drop:0"
   site: "/body/5/test/0"
-  context: "28d14feb1a3c7297f62fe446190e1aac284614639bc03e68f212bad30be4bab8"
+  context: "79ddef308b4a1d07290183a4bf6d34c1047f31231127d16b8166a238c9faf346"
   original: "677d79f9924768ddbc0cd6f504904f0094970f567b533287b9d566968a978d17"
   mutated: "5a59f8b82a2959be009a3fa0164300839ecd13b83e11663cbb808ecb48607b18"
   reason: "Authorization duration is finite positive. A nonfinite recorded origin necessarily produces a nonfinite origin-plus-duration, so the remaining finite-sum guard rejects it. Finite-origin sum overflow still refuses; separate controls protect that independent bound."
