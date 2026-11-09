@@ -24,6 +24,7 @@ from nci_si_acceptance.request_authorization import (
     RequestGrant,
     RunDescriptor,
 )
+from nci_si_acceptance.request_summary import read_summary
 from nci_si_mcp.http_client import RequestPolicyError
 from nci_si_mcp.validation import LedgerState, PolicyReason
 
@@ -335,12 +336,28 @@ class ControlledRun:
         with self._connection() as connection:
             if not self._owner or self._failure() is not None:
                 self._deny("closed")
+            self._initial_summary(connection)
             changed = connection.execute(
                 "UPDATE run SET state='open' WHERE state='created'"
             ).rowcount
             if changed != 1:
                 self._deny("closed")
             self._guard(connection)
+
+    def _initial_summary(self, connection: sqlite3.Connection) -> None:
+        enabled, _heartbeat = self._supervision(connection)
+        if not enabled:
+            return
+        try:
+            summary = read_summary(
+                self.directory / "summary.json",
+                run_id=self.descriptor.run_id,
+                policy_sha256=self.descriptor.policy_sha256,
+            )
+        except RequestPolicyError:
+            self._deny("accounting")
+        if summary["state"] != "incomplete":
+            self._deny("accounting")
 
     def close(self) -> None:
         with self._connection() as connection:

@@ -62,12 +62,18 @@ class SupervisedRun:
         try:
             self._publish()
             self._initial_published = True
-            self._observer.start()
+            self._start_observer()
             self.run.open()
         except BaseException as error:
             self._finish(error)
             raise
         return self
+
+    def _start_observer(self) -> None:
+        try:
+            self._observer.start()
+        except OSError, RuntimeError:
+            raise RequestPolicyError("accounting") from None
 
     def register_child(
         self, process: subprocess.Popen[bytes], *, participant: str, role: ChildRole
@@ -160,6 +166,8 @@ class SupervisedRun:
             errors.append(self._observer_error)
         errors.extend(self._collect([lambda: self._finalize(not errors)]))
         if len(errors) > (initiating is not None):
+            if len(errors) == 1:
+                raise errors[0] from None
             raise BaseExceptionGroup("Controlled run failed.", errors) from None
 
     def _finalize(self, clean: bool) -> None:
@@ -168,6 +176,8 @@ class SupervisedRun:
         self._state = "completed" if success else "failed"
         if self._initial_published:
             self._publish()
+        if not snapshot.observation_complete:
+            raise RequestPolicyError("accounting")
 
     def __exit__(
         self,

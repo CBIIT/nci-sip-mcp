@@ -7,12 +7,14 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import TypedDict, get_args
+from typing import TYPE_CHECKING, TypedDict, get_args
 
 from nci_si_acceptance.request_authorization import MAX_COUNTER, Limits
-from nci_si_acceptance.request_budget import LedgerSnapshot
 from nci_si_mcp.http_client import RequestPolicyError
 from nci_si_mcp.validation import SummaryState
+
+if TYPE_CHECKING:
+    from nci_si_acceptance.request_budget import LedgerSnapshot
 
 
 class SummaryLimits(TypedDict):
