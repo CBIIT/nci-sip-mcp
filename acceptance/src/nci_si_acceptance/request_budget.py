@@ -156,9 +156,10 @@ class ControlledRun:
         return run
 
     def _identity(self, connection: sqlite3.Connection) -> None:
-        row = connection.execute("SELECT * FROM run").fetchone()
-        if row is None:
+        rows = connection.execute("SELECT * FROM run LIMIT 2").fetchall()
+        if len(rows) != 1:
             self._deny("accounting")
+        row = rows[0]
         key = self._key()
         started = float(row["started"])
         if not math.isfinite(started) or not math.isfinite(
