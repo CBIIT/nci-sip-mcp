@@ -184,7 +184,7 @@ existing ten-second TERM/wait/KILL/wait leaf; service cleanup uses that leaf dir
 Resource waits are bounded by `2 + 30N` seconds for N registered children, plus ledger operations
 and filesystem/OS scheduling, not a hard real-time guarantee. Intentional termination is not
 reported as successful worker completion. Initiating and cleanup failures remain distinct.
-Even a refusal caught inside the context produces one outer `RequestPolicyError` with the
+Even a terminal ledger refusal caught inside the context produces one outer `RequestPolicyError` with the
 ledger's original reason. Observer notification does not duplicate that failure. An initiating
 caller exception remains first when additional cleanup failures require a `BaseExceptionGroup`.
 

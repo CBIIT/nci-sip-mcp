@@ -60,7 +60,6 @@ def _require(condition: bool) -> None:
 
 
 def _record(value: object, keys: tuple[str, ...]) -> dict[str, object]:
-    _require(isinstance(value, dict))
     if not isinstance(value, dict) or set(value) != set(keys):
         raise RequestPolicyError("accounting") from None
     return {key: value[key] for key in keys}
@@ -188,6 +187,8 @@ def project(snapshot: LedgerSnapshot, limits: Limits, state: SummaryState) -> Ru
 
 
 def read_summary(path: Path, *, run_id: str, policy_sha256: str) -> RunSummary:
+    if not isinstance(path, Path):
+        raise RequestPolicyError("accounting") from None
     try:
         value: object = json.loads(path.read_text())
         return validate_summary(value, run_id=run_id, policy_sha256=policy_sha256)

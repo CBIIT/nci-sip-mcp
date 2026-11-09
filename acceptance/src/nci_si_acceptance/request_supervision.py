@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import Self, get_args
 
 from nci_si_acceptance.owned_process import stop_child
 from nci_si_acceptance.request_authorization import Authorization
@@ -21,6 +21,7 @@ from nci_si_mcp.validation import ChildRole, SummaryState
 PULSE_SECONDS = 1.0
 JOIN_SECONDS = 2.0
 STOP_SECONDS = 10.0
+ROLES = get_args(ChildRole.__value__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,14 +84,26 @@ class SupervisedRun:
     def register_child(
         self, process: subprocess.Popen[bytes], *, participant: str, role: ChildRole
     ) -> None:
-        with self._lock:
-            if not self._entered or self._finishing or type(process) is not subprocess.Popen:
+        if any(
+            (
+                not self._entered,
+                self._finishing,
+                type(process) is not subprocess.Popen,
+                role not in ROLES,
+            )
+        ):
+            raise RequestPolicyError("authorization")
+        self.run.authorize_participant(participant)
+        child = OwnedChild(process, participant, role)
+        if not self._lock.acquire(blocking=False):
+            raise RequestPolicyError("accounting")
+        try:
+            if self._registered(process, participant) or self._finishing:
                 raise RequestPolicyError("authorization")
-            if role not in ("worker", "service") or self._registered(process, participant):
-                raise RequestPolicyError("authorization")
-            self.run.authorize_participant(participant)
             # The caller releases its start barrier only after this transfer succeeds.
-            self._children.append(OwnedChild(process, participant, role))
+            self._children.append(child)
+        finally:
+            self._lock.release()
 
     def _registered(self, process: subprocess.Popen[bytes], participant: str) -> bool:
         return any(
@@ -99,20 +112,19 @@ class SupervisedRun:
 
     def _observe(self) -> None:
         while not self._stop.wait(PULSE_SECONDS):
-            with self._lock:
-                if self._finishing:
-                    return
-                try:
-                    self._pulse()
-                except RequestPolicyError:
-                    # The ledger retains the original reason; a pulse is not a second event.
-                    self._stop.set()
-                except OSError, RuntimeError, subprocess.SubprocessError:
-                    self._inspection_failed()
+            if self._finishing:
+                return
+            try:
+                self._pulse()
+            except RequestPolicyError:
+                # The ledger retains the original reason; a pulse is not a second event.
+                self._stop.set()
+            except OSError, RuntimeError, subprocess.SubprocessError:
+                self._inspection_failed()
 
     def _pulse(self) -> None:
         self.run.heartbeat()
-        for child in self._children:
+        for child in tuple(self._children):
             self._check_child(child)
 
     def _inspection_failed(self) -> None:
@@ -175,18 +187,19 @@ class SupervisedRun:
         return errors
 
     def _finish(self, initiating: BaseException | None) -> None:
-        with self._lock:
-            self._finishing = True
+        self._finishing = True
         # Observer never publishes: only the controller writes initial/final projections.
         errors = [initiating] if initiating is not None else []
         if initiating is None:
             errors.extend(self._collect([self._terminal_failure]))
-        errors.extend(self._observer_failures(errors, initiating))
+        primary_errors = errors.copy()
         errors.extend(self._collect([self._close_admission]))
+        errors.extend(self._collect([self._seal_registry]))
         self._stop.set()
         actions: list[Callable[[], None]] = [self._join]
         actions.extend(lambda child=child: self._clean_child(child) for child in self._children)
         errors.extend(self._collect(actions))
+        errors.extend(self._observer_failures(primary_errors, initiating))
         if self._observer_cleanup_error is not None:
             errors.append(self._observer_cleanup_error)
         errors.extend(self._collect([lambda: self._finalize(not errors)]))
@@ -194,6 +207,12 @@ class SupervisedRun:
             if len(errors) == 1:
                 raise errors[0] from None
             raise BaseExceptionGroup("Controlled run failed.", errors) from None
+
+    def _seal_registry(self) -> None:
+        # Failure retains custody and forbids completed success; never wait on registration.
+        if not self._lock.acquire(blocking=False):
+            raise RequestPolicyError("accounting")
+        self._lock.release()
 
     def _terminal_failure(self) -> None:
         failure = self.run.snapshot().failure

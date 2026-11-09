@@ -307,6 +307,8 @@ class ControlledRun:
         with self._connection() as connection:
             if not self._owner:
                 self._deny("authorization")
+            if connection.execute("SELECT state FROM run").fetchone()[0] in ("closed", "failed"):
+                raise RequestPolicyError("closed")
             self._guard(connection)
             enabled, _heartbeat = self._supervision(connection)
             if not enabled:
