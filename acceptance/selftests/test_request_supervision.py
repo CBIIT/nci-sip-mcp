@@ -460,11 +460,22 @@ def test_caught_refusal_has_one_stable_outer_reason(tmp_path, observed):
     assert owner.snapshot()["state"] == "failed"
 
 
-def test_real_observer_inspection_failure_is_terminal_and_sanitized(tmp_path, monkeypatch):
+@pytest.mark.parametrize("record_fault", [False, True])
+def test_real_observer_inspection_failure_is_terminal_and_sanitized(
+    tmp_path, monkeypatch, record_fault
+):
     owner = supervisor(tmp_path)
     inspected = threading.Event()
     thread_errors = []
     monkeypatch.setattr(threading, "excepthook", lambda event: thread_errors.append(event.exc_type))
+    original_mark = owner.run._mark_failed
+
+    def mark(reason):
+        if record_fault:
+            raise RequestPolicyError("accounting")
+        return original_mark(reason)
+
+    monkeypatch.setattr(owner.run, "_mark_failed", mark)
     with subprocess.Popen(
         [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
         stdin=subprocess.PIPE,
@@ -476,6 +487,8 @@ def test_real_observer_inspection_failure_is_terminal_and_sanitized(tmp_path, mo
         def fail_observer_inspection():
             if threading.current_thread() is owner._observer and not inspected.is_set():
                 inspected.set()
+                if record_fault:
+                    original_mark("transport")
                 raise OSError("private observer inspection diagnostic")
             return original_poll()
 
@@ -488,11 +501,66 @@ def test_real_observer_inspection_failure_is_terminal_and_sanitized(tmp_path, mo
                 child.communicate(b"x", timeout=5)
         except (RequestPolicyError, BaseExceptionGroup) as error:
             failure = error
-        assert type(failure) is RequestPolicyError
-        assert failure.reason == "accounting"
+        assert type(failure) is (ExceptionGroup if record_fault else RequestPolicyError)
+        errors = failure.exceptions if record_fault else (failure,)
+        assert [error.reason for error in errors] == (
+            ["transport", "accounting", "accounting"] if record_fault else ["accounting"]
+        )
         assert thread_errors == []
         assert child.returncode == 0
     assert owner.snapshot()["state"] == "failed"
+
+
+def test_uncaught_child_observation_remains_the_initiating_event(tmp_path):
+    owner = supervisor(tmp_path)
+    with subprocess.Popen([sys.executable, "-I", "-c", "raise SystemExit(7)"]) as child:
+        initiating = None
+        with pytest.raises(RequestPolicyError) as caught, owner:
+            owner.register_child(child, participant="failed", role="worker")
+            child.wait(timeout=5)
+            try:
+                owner._pulse()
+            except RequestPolicyError as error:
+                initiating = error
+                raise
+        assert caught.value is initiating
+        assert caught.value.reason == "transport"
+    assert owner.snapshot()["state"] == "failed"
+
+
+def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    barrier = threading.Barrier(2)
+    original = owner._registered
+    results = []
+
+    def competing(process, participant):
+        registered = original(process, participant)
+        barrier.wait(timeout=3)
+        return registered
+
+    monkeypatch.setattr(owner, "_registered", competing)
+    with subprocess.Popen(
+        [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"], stdin=subprocess.PIPE
+    ) as child:
+
+        def register(participant):
+            try:
+                owner.register_child(child, participant=participant, role="service")
+                results.append("accepted")
+            except RequestPolicyError:
+                results.append("rejected")
+
+        with owner:
+            threads = [threading.Thread(target=register, args=(name,)) for name in ("one", "two")]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
+            assert sorted(results) == ["accepted", "rejected"]
+            assert len(owner._children) == 1 and owner._children[0].process is child
+        assert child.poll() is not None and child.stdin.closed
 
 
 def test_attached_constructor_cannot_change_controller_summary(tmp_path):

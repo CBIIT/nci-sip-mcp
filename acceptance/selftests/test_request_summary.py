@@ -185,6 +185,23 @@ def managed(directory):
     return entry.SupervisedRun.create(auth, directory)
 
 
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_interrupted_initial_publication_closes_and_removes_temporary(
+    tmp_path, monkeypatch, interruption
+):
+    owner = managed(tmp_path)
+    before = set(owner.run.directory.iterdir())
+
+    def interrupt(_descriptor):
+        raise interruption()
+
+    monkeypatch.setattr("os.fsync", interrupt)
+    with pytest.raises(interruption), owner:
+        pytest.fail("Interrupted publication must not open admission")
+    assert owner.run.snapshot().state == "closed"
+    assert set(owner.run.directory.iterdir()) == before
+
+
 @pytest.mark.parametrize("phase", ["initial", "final"])
 @pytest.mark.parametrize("fault", ["write", "flush", "fsync", "replace"])
 def test_initial_and_final_publication_faults_are_terminal(tmp_path, monkeypatch, phase, fault):
