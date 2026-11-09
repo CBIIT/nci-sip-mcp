@@ -681,3 +681,99 @@ def test_invalid_role_keeps_child_with_caller(tmp_path, role):
             assert child.poll() is None
             child.communicate(b"x", timeout=5)
         assert child.returncode == 0
+
+
+@pytest.mark.parametrize("operation", ["heartbeat", "pending"])
+def test_attached_participant_cannot_control_owner_observation(tmp_path, operation):
+    owner = supervisor(tmp_path)
+    with pytest.raises(RequestPolicyError) as outer, owner:
+        owner.run.authorize_participant("attached")
+        attached = request_budget.ControlledRun.attach(
+            owner.run.descriptor, authorization(), participant="attached"
+        )
+        action = (
+            attached.heartbeat
+            if operation == "heartbeat"
+            else lambda: attached.participant_pending("attached")
+        )
+        with pytest.raises(RequestPolicyError):
+            action()
+    assert outer.value.reason == "authorization"
+
+
+def pause_registration_return(call, phase, selected, arrived, release):
+    def paused(*args):
+        result = call(*args)
+        if phase == selected:
+            arrived.set()
+            assert release.wait(3)
+        return result
+
+    return paused
+
+
+@pytest.mark.parametrize("point", ["authorization", "registry"])
+def test_registration_race_preserves_caller_custody_and_shutdown_bound(
+    tmp_path, monkeypatch, point
+):
+    owner = supervisor(tmp_path)
+    arrived, release, finished = (threading.Event() for _ in range(3))
+    registrations, shutdown = [], []
+    monkeypatch.setattr(
+        owner.run,
+        "authorize_participant",
+        pause_registration_return(
+            owner.run.authorize_participant, "authorization", point, arrived, release
+        ),
+    )
+    monkeypatch.setattr(
+        owner,
+        "_registered",
+        pause_registration_return(owner._registered, "registry", point, arrived, release),
+    )
+    with subprocess.Popen(
+        [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+
+        def register():
+            outcome = None
+            try:
+                owner.register_child(child, participant="racing", role="service")
+            except RequestPolicyError as error:
+                outcome = error.reason
+            registrations.append(outcome)
+
+        registrar = threading.Thread(target=register)
+
+        def control():
+            try:
+                with owner:
+                    registrar.start()
+                    assert arrived.wait(3)
+                    if point == "registry":
+                        with pytest.raises(RequestPolicyError) as competing:
+                            owner.register_child(child, participant="competing", role="service")
+                        assert competing.value.reason == "accounting"
+            except (RequestPolicyError, BaseExceptionGroup) as error:
+                shutdown.append(type(error))
+            finally:
+                finished.set()
+
+        controller = threading.Thread(target=control)
+        controller.start()
+        try:
+            assert arrived.wait(3)
+            assert finished.wait(0.5), "Registration blocked bounded admission closure"
+        finally:
+            release.set()
+            registrar.join(timeout=3)
+            controller.join(timeout=3)
+            assert not registrar.is_alive() and not controller.is_alive()
+        assert registrations == ["authorization"]
+        assert shutdown == ([] if point == "authorization" else [RequestPolicyError])
+        assert child.poll() is None
+        child.communicate(b"x", timeout=5)
+        assert child.returncode == 0
