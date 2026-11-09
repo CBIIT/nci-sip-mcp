@@ -1487,3 +1487,38 @@ def test_unentered_lease_refuses_before_invoking_reader(tmp_path):
             snapshot.observation_complete,
             snapshot.failure,
         ) == (0, 0, True, "accounting")
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+def test_initialization_closes_real_storage(tmp_path, monkeypatch, read_only):
+    grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
+    authorization = Authorization((grant,), Limits(), "a" * 64)
+    original_connect, connections, run = sqlite3.connect, [], None
+
+    def connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connections.append(connection)
+        if read_only:
+            connection.execute("PRAGMA query_only=ON")
+        return connection
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr("nci_si_acceptance.request_budget.sqlite3.connect", connect)
+            if read_only:
+                assert refusal(partial(ControlledRun.create, authorization, tmp_path)) == (
+                    RequestPolicyError,
+                    "Controlled upstream request refused.",
+                    None,
+                )
+            else:
+                run = ControlledRun.create(authorization, tmp_path)
+        if run is not None:
+            assert run.snapshot().state == "created"
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            connections[0].execute("SELECT 1")
+    finally:
+        for connection in connections:
+            connection.close()
+        if run is not None:
+            run.close()
