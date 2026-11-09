@@ -198,6 +198,64 @@ def test_registered_short_worker_is_reaped_and_streams_closed(tmp_path):
     assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "completed"
 
 
+def test_zero_exit_worker_with_pending_read_refuses_live_admission(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    descriptor = tmp_path / "descriptor.json"
+    descriptor.write_text(json.dumps(owner.run.descriptor.to_record()))
+    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
+    script = (
+        "import sys,json,os; from pathlib import Path; sys.path[:0]=sys.argv[1:3]; "
+        "sys.stdin.buffer.read(1); "
+        "from nci_si_acceptance.request_authorization import "
+        "Authorization,Limits,RequestGrant,RunDescriptor; "
+        "from nci_si_acceptance.request_budget import ControlledRun; "
+        "auth=Authorization((RequestGrant('GET','http://127.0.0.1:9/probe',()),),Limits(),'a'*64); "
+        "run=ControlledRun.attach(RunDescriptor.from_record(json.loads(Path(sys.argv[3]).read_text())),"
+        "auth,participant='worker'); logical=run.logical(auth.grants[0]); "
+        "request=logical.__enter__(); attempt=request.attempt(response_limit=8); "
+        "lease=attempt.__enter__(); lease.entered(); lease.read(lambda _maximum:os._exit(0),1)"
+    )
+    observed = threading.Event()
+    original_pulse = owner._pulse
+    with subprocess.Popen(  # noqa: S603 - owned interpreter, fixed program and private synthetic IPC.
+        [sys.executable, "-I", "-c", script, *roots, str(descriptor)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+
+        def pulse():
+            exited = child.poll() is not None
+            try:
+                original_pulse()
+            finally:
+                if exited:
+                    observed.set()
+
+        monkeypatch.setattr(owner, "_pulse", pulse)
+        with pytest.raises(RequestPolicyError) as terminal, owner:
+            owner.register_child(child, participant="worker", role="worker")
+            child.stdin.write(b"x")
+            child.stdin.flush()
+            assert child.wait(timeout=5) == 0
+            assert observed.wait(3), "The actual observer did not inspect the exited worker"
+            admitted = False
+            try:
+                with owner.run.logical(authorization().grants[0]):
+                    admitted = True
+            except RequestPolicyError:
+                pass
+            assert admitted is False
+            snapshot = owner.run.snapshot()
+            assert (snapshot.logical, snapshot.attempts) == (1, 1)
+        assert terminal.value.reason == "accounting"
+        assert child.stdin.closed and child.stdout.closed and child.stderr.closed
+    snapshot = owner.run.snapshot()
+    assert (snapshot.state, snapshot.active, snapshot.pending_receipts) == ("failed", 1, 1)
+    assert (snapshot.reserved_body_bytes, snapshot.consumed_body_bytes) == (9, 0)
+    assert owner.snapshot()["state"] == "failed" and not snapshot.observation_complete
+
+
 def test_supervised_owner_cannot_open_before_initial_summary(tmp_path):
     owner = supervisor(tmp_path)
     with pytest.raises(RequestPolicyError):
