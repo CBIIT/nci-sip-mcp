@@ -7,8 +7,9 @@ import sys
 import tempfile
 import time
 import traceback
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import fields, replace
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -481,14 +482,15 @@ def test_snapshot_rejects_incoherent_ledger_values(tmp_path, query, value):
 
 
 @contextmanager
-def retirement_run(tmp_path):
+def retirement_run(tmp_path, *, opened=True):
     grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
     limits = Limits(
         logical=2, attempts=2, per_logical=1, concurrent=2, response_bytes=5, total_bytes=12
     )
     run = ControlledRun.create(Authorization((grant,), limits, "a" * 64), tmp_path)
     try:
-        run.open()
+        if opened:
+            run.open()
         yield run, grant
     finally:
         run.close()
@@ -844,4 +846,140 @@ def test_only_controller_can_change_run_lifecycle(tmp_path, operation):
             "failed",
             0,
             0,
+        )
+
+
+@contextmanager
+def changed_run_identity(run, change, monkeypatch):
+    grant = run.authorization.grants[0]
+    attributes = {
+        "run": ("descriptor", replace(run.descriptor, run_id="b" * 32)),
+        "policy": ("descriptor", replace(run.descriptor, policy_sha256="b" * 64)),
+        "participant": ("participant", "unregistered"),
+        "authorization": (
+            "authorization",
+            replace(run.authorization, limits=replace(run.authorization.limits, per_logical=2)),
+        ),
+        "method": (
+            "authorization",
+            replace(run.authorization, grants=(replace(grant, method="POST"),)),
+        ),
+        "credential": (
+            "authorization",
+            replace(
+                run.authorization, grants=(replace(grant, credential_origin="http://127.0.0.1:9"),)
+            ),
+        ),
+    }
+    stored = {
+        "stored_run": (0, "b" * 32),
+        "stored_policy": (1, "b" * 64),
+        "origin": (2, run.started + 1),
+    }
+    key = run.directory / "key"
+    original_key = key.read_bytes()
+    with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+        original = connection.execute("SELECT id,policy,started FROM run").fetchone()
+    changed = list(original)
+    index, value = stored.get(change, (2, run.started))
+    changed[index] = value
+    with monkeypatch.context() as patch:
+        try:
+            if change in attributes:
+                patch.setattr(run, *attributes[change])
+            if change == "key":
+                key.write_bytes(b"changed".ljust(32, b"!"))
+            if change in stored:
+                with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+                    connection.execute("UPDATE run SET id=?,policy=?,started=?", changed)
+            yield
+        finally:
+            if change == "key":
+                key.write_bytes(original_key)
+            if change in stored:
+                with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+                    connection.execute("UPDATE run SET id=?,policy=?,started=?", original)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "valid",
+        "run",
+        "stored_run",
+        "policy",
+        "stored_policy",
+        "participant",
+        "authorization",
+        "method",
+        "credential",
+        "key",
+        "origin",
+    ],
+)
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "open",
+        "close",
+        "register",
+        "wait",
+        "logical",
+        "attempt",
+        "entry",
+        "read",
+        "receipt",
+        "release",
+        "snapshot",
+    ],
+)
+def test_every_ledger_operation_checks_identity(tmp_path, monkeypatch, change, operation):
+    with (
+        retirement_run(tmp_path, opened=operation != "open") as (run, grant),
+        ExitStack() as resources,
+        ExitStack() as identities,
+    ):
+        logical = (
+            resources.enter_context(run.logical(grant))
+            if operation in {"attempt", "entry", "read", "receipt", "release"}
+            else None
+        )
+        lease = (
+            resources.enter_context(logical.attempt(response_limit=5))
+            if operation in {"entry", "read", "receipt", "release"}
+            else None
+        )
+        if operation in {"read", "receipt"}:
+            lease.entered()
+        reads = []
+
+        def reader(maximum):
+            reads.append(maximum)
+            if operation == "receipt":
+                identities.enter_context(changed_run_identity(run, change, monkeypatch))
+            return b"known"[:maximum]
+
+        if operation != "receipt":
+            identities.enter_context(changed_run_identity(run, change, monkeypatch))
+        calls = {
+            "open": run.open,
+            "close": run.close,
+            "register": lambda: run.authorize_participant("new-worker"),
+            "wait": lambda: run.check_wait(0),
+            "logical": lambda: resources.enter_context(run.logical(grant)),
+            "attempt": lambda: resources.enter_context(logical.attempt(response_limit=5)),
+            "entry": partial(AttemptLease.entered, lease),
+            "read": lambda: lease.read(reader, 6),
+            "receipt": lambda: lease.read(reader, 6),
+            "release": partial(AttemptLease.release, lease),
+            "snapshot": run.snapshot,
+        }
+        observed = refusal(calls[operation])
+        assert observed == (
+            None
+            if change == "valid"
+            else (RequestPolicyError, "Controlled upstream request refused.", None)
+        )
+        assert reads == (
+            [6] if operation == "receipt" or (operation == "read" and change == "valid") else []
         )
