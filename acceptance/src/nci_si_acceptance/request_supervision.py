@@ -45,7 +45,7 @@ class SupervisedRun:
         self._registrations: list[OwnedChild | None] = []
         self._child_errors: dict[subprocess.Popen[bytes], RequestPolicyError] = {}
         self._observer_error: RequestPolicyError | None = None
-        self._observer_cleanup_error: RequestPolicyError | None = None
+        self._recording_errors: list[RequestPolicyError] = []
         self._observer = threading.Thread(target=self._observe, name="controlled-run-observer")
 
     @classmethod
@@ -140,10 +140,7 @@ class SupervisedRun:
 
     def _inspection_failed(self) -> None:
         self._observer_error = RequestPolicyError("accounting")
-        try:
-            self._record_failure(self._observer_error, "accounting")
-        except RequestPolicyError as error:
-            self._observer_cleanup_error = error
+        self._record_failure(self._observer_error, "accounting")
         self._stop.set()
 
     def _check_child(self, child: OwnedChild) -> None:
@@ -162,8 +159,10 @@ class SupervisedRun:
             raise error
 
     def _record_failure(self, error: BaseException, reason: PolicyReason) -> None:
-        # Exclusive marker creation proves which event owns the ledger's first failure.
-        self.run._mark_failed(reason, event=error)
+        try:
+            self.run._mark_failed(reason, event=error)
+        except RequestPolicyError as recording_error:
+            self._recording_errors.append(recording_error)
 
     def _join(self) -> None:
         if self._observer.ident is not None:
@@ -236,17 +235,17 @@ class SupervisedRun:
         observed = list(self._child_errors.values())
         if self._observer_error is not None:
             observed.append(self._observer_error)
-        if self._observer_cleanup_error is not None:
-            observed.append(self._observer_cleanup_error)
+        observed.extend(self._recording_errors)
         return [error for error in observed if not self._contains(errors, error)]
 
     def _seal_registry(self) -> None:
         self._registrations.append(None)
 
     def _terminal_failure(self) -> None:
-        failure = self.run.snapshot().failure
+        self.run.snapshot()  # Validate private identity and counters before selecting the event.
+        failure, event = self.run._failure_record()
         if failure is not None:
-            raise self.run._first_failure or RequestPolicyError(failure)
+            raise event or RequestPolicyError(failure)
 
     @staticmethod
     def _contains(

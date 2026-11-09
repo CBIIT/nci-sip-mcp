@@ -92,6 +92,7 @@ class ControlledRun:
         self._owner = False
         self._failed: PolicyReason | None = None
         self._first_failure: BaseException | None = None
+        self._marker_failure: BaseException | None = None
 
     @classmethod
     def create(cls, authorization: Authorization, owned_directory: Path) -> Self:
@@ -228,11 +229,12 @@ class ControlledRun:
                 connection.close()
 
     def _mark_failed(self, reason: PolicyReason, *, event: BaseException | None = None) -> None:
-        self._failed = reason
+        if self._failed is None:
+            self._failed, self._first_failure = reason, event
         try:
             with (self.directory / "failed").open("x") as stream:
                 stream.write(reason)
-            self._first_failure = event
+            self._marker_failure = event
         except FileExistsError:
             # An existing marker already closes admission; do not replace it.
             pass
@@ -251,13 +253,16 @@ class ControlledRun:
         return value
 
     def _failure(self) -> PolicyReason | None:
+        return self._failure_record()[0]
+
+    def _failure_record(self) -> tuple[PolicyReason | None, BaseException | None]:
         try:
             text = (self.directory / "failed").read_text()
         except FileNotFoundError:
-            return self._failed
+            return self._failed, self._first_failure
         if text not in REASONS:
             self._deny("accounting")
-        return REASONS[text]
+        return REASONS[text], self._marker_failure
 
     def _guard(self, connection: sqlite3.Connection, delay: float = 0) -> None:
         try:
