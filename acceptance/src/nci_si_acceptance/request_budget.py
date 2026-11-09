@@ -30,6 +30,8 @@ from nci_si_mcp.validation import LedgerState, PolicyReason
 # Bound cooperative contention, not filesystem or operating-system scheduling latency.
 BUSY_SECONDS = 0.1
 KEY_BYTES = 32
+# Observe cooperative owner loss within two seconds, allowing one missed one-second pulse.
+STALE_SECONDS = 2.0
 STATES: dict[str, LedgerState] = {value: value for value in get_args(LedgerState.__value__)}
 REASONS: dict[str, PolicyReason] = {value: value for value in get_args(PolicyReason.__value__)}
 
@@ -109,9 +111,11 @@ class ControlledRun:
         except OSError, sqlite3.Error, OverflowError, ValueError:
             raise RequestPolicyError("accounting") from None
 
-    def _binding(self, key: bytes, started: float) -> bytes:
+    def _binding(self, key: bytes, started: float, supervised: int = 0) -> bytes:
         # Bind the recorded monotonic origin as well as the complete private authorization.
-        identity = json.dumps([self.descriptor.run_id, started], separators=(",", ":")).encode()
+        identity = json.dumps(
+            [self.descriptor.run_id, started, supervised], separators=(",", ":")
+        ).encode()
         return hmac.digest(key, self.authorization.binding(key) + identity, hashlib.sha256)
 
     def _initialize(self, key: bytes) -> None:
@@ -123,6 +127,8 @@ class ControlledRun:
                     reserved INTEGER, consumed INTEGER, entered INTEGER
                 ) STRICT;
                 CREATE TABLE workers (name TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE supervision (enabled INTEGER, heartbeat REAL) STRICT;
+                INSERT INTO supervision VALUES (0, NULL);
                 CREATE TABLE requests (
                     id TEXT PRIMARY KEY, participant TEXT, attempts INTEGER
                 ) STRICT;
@@ -174,7 +180,8 @@ class ControlledRun:
         )
         if identity != expected:
             self._deny("authorization")
-        if not hmac.compare_digest(row["binding"], self._binding(key, started)):
+        supervised, _heartbeat = self._supervision(connection)
+        if not hmac.compare_digest(row["binding"], self._binding(key, started, supervised)):
             self._deny("authorization")
         if (
             connection.execute(
@@ -259,6 +266,70 @@ class ControlledRun:
             self._deny("closed")
         if now + delay >= self.started + self.authorization.limits.seconds:
             self._deny("deadline")
+        self._fresh(connection, now)
+
+    def _supervision(self, connection: sqlite3.Connection) -> tuple[int, float | None]:
+        rows = connection.execute("SELECT enabled,heartbeat FROM supervision LIMIT 2").fetchall()
+        if len(rows) != 1:
+            self._deny("accounting")
+        enabled, heartbeat = rows[0]
+        if type(enabled) is not int or enabled not in (0, 1):
+            self._deny("accounting")
+        return enabled, self._heartbeat_value(enabled, heartbeat)
+
+    def _heartbeat_value(self, enabled: int, heartbeat: object) -> float | None:
+        if not enabled:
+            if heartbeat is not None:
+                self._deny("accounting")
+            return None
+        if type(heartbeat) is not float or not math.isfinite(heartbeat):
+            self._deny("accounting")
+        return heartbeat
+
+    def _fresh(self, connection: sqlite3.Connection, now: float) -> None:
+        enabled, heartbeat = self._supervision(connection)
+        if enabled and (heartbeat is None or not 0 <= now - heartbeat <= STALE_SECONDS):
+            self._deny("accounting")
+
+    def enable_supervision(self) -> None:
+        with self._connection() as connection:
+            enabled, _heartbeat = self._supervision(connection)
+            state = connection.execute("SELECT state FROM run").fetchone()[0]
+            if not self._owner or enabled or state != "created" or self._failure() is not None:
+                self._deny("authorization")
+            connection.execute("UPDATE supervision SET enabled=1,heartbeat=?", (_clock(),))
+            connection.execute(
+                "UPDATE run SET binding=?", (self._binding(self._key(), self.started, 1),)
+            )
+
+    def heartbeat(self) -> None:
+        with self._connection() as connection:
+            if not self._owner:
+                self._deny("authorization")
+            self._guard(connection)
+            enabled, _heartbeat = self._supervision(connection)
+            if not enabled:
+                self._deny("authorization")
+            connection.execute("UPDATE supervision SET heartbeat=?", (_clock(),))
+
+    def participant_pending(self, participant: str) -> bool:
+        _participant(participant)
+        with self._connection() as connection:
+            if (
+                not self._owner
+                or connection.execute(
+                    "SELECT name FROM workers WHERE name=?", (participant,)
+                ).fetchone()
+                is None
+            ):
+                self._deny("authorization")
+            return (
+                connection.execute(
+                    "SELECT id FROM leases WHERE participant=? AND retired=0 LIMIT 1",
+                    (participant,),
+                ).fetchone()
+                is not None
+            )
 
     def open(self) -> None:
         with self._connection() as connection:

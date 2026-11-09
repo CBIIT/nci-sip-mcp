@@ -153,6 +153,7 @@ def _relationships(value: RunSummary) -> None:
                 observed["transportEntries"] <= reserved["attempts"],
                 observed["bodyBytes"] <= reserved["bodyBytes"] <= limits["total_bytes"],
                 observed["peakActive"] <= min(limits["concurrent"], reserved["attempts"]),
+                not value["observationComplete"] or reserved["bodyBytes"] == observed["bodyBytes"],
             )
         )
     )
@@ -194,6 +195,7 @@ def read_summary(path: Path, *, run_id: str, policy_sha256: str) -> RunSummary:
 
 def publish(path: Path, summary: RunSummary) -> None:
     temporary: Path | None = None
+    failures: list[BaseException] = []
     try:
         with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
             temporary = Path(stream.name)
@@ -201,8 +203,22 @@ def publish(path: Path, summary: RunSummary) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        temporary = None
     except OSError, ValueError:
-        raise RequestPolicyError("accounting") from None
-    finally:
-        if temporary is not None:
+        failures.append(RequestPolicyError("accounting"))
+    except BaseException as error:
+        _publication_cleanup(temporary, [error])
+        raise
+    _publication_cleanup(temporary, failures)
+
+
+def _publication_cleanup(temporary: Path | None, failures: list[BaseException]) -> None:
+    if temporary is not None:
+        try:
             temporary.unlink(missing_ok=True)
+        except OSError:
+            failures.append(RequestPolicyError("accounting"))
+    if len(failures) == 1:
+        raise failures[0] from None
+    if failures:
+        raise BaseExceptionGroup("Controlled publication failed.", failures) from None

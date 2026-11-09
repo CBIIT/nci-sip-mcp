@@ -26,6 +26,7 @@ type BodyState = Literal["complete", "proven_empty", "unreadable"]
 type RequestMethod = Literal["GET", "POST"]
 type LedgerState = Literal["created", "open", "closed", "failed"]
 type SummaryState = Literal["incomplete", "failed", "completed"]
+type ChildRole = Literal["worker", "service"]
 
 SearchMode = Literal["hybrid", "bm25", "vector"]
 UnresolvedConceptReason = Literal["compound_code", "missing_source", "non_ncit_source"]
