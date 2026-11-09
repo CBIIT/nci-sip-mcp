@@ -901,6 +901,15 @@ def changed_run_identity(run, change, monkeypatch):
                     connection.execute("UPDATE run SET id=?,policy=?,started=?", original)
 
 
+def receipt_quantities(run, lease):
+    with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+        ledger = connection.execute("SELECT active,reserved,consumed FROM run").fetchone()
+        receipt = connection.execute(
+            "SELECT consumed,pending,retired FROM leases WHERE id=?", (lease.lease_id,)
+        ).fetchone()
+    return ledger, receipt
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -982,4 +991,13 @@ def test_every_ledger_operation_checks_identity(tmp_path, monkeypatch, change, o
         )
         assert reads == (
             [6] if operation == "receipt" or (operation == "read" and change == "valid") else []
+        )
+
+        if operation == "receipt":
+            assert receipt_quantities(run, lease) == (
+                ((1, 6, 5), (5, 0, 0)) if change == "valid" else ((1, 6, 0), (0, 6, 0))
+            )
+    if operation == "receipt":
+        assert receipt_quantities(run, lease) == (
+            ((0, 5, 5), (5, 0, 1)) if change == "valid" else ((1, 6, 0), (0, 6, 0))
         )
