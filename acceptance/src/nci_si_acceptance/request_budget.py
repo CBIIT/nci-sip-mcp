@@ -90,8 +90,7 @@ class ControlledRun:
         if not math.isfinite(self.started + authorization.limits.seconds):
             raise RequestPolicyError("accounting") from None
         self._owner = False
-        self._failed: PolicyReason | None = None
-        self._first_failure: BaseException | None = None
+        self._local_failure: dict[str, tuple[PolicyReason, BaseException | None]] = {}
         self._marker_failure: BaseException | None = None
 
     @classmethod
@@ -229,12 +228,12 @@ class ControlledRun:
                 connection.close()
 
     def _mark_failed(self, reason: PolicyReason, *, event: BaseException | None = None) -> None:
-        if self._failed is None:
-            self._failed, self._first_failure = reason, event
+        # One built-in string key atomically latches the immutable pair; never check then assign.
+        local_reason, local_event = self._local_failure.setdefault("first", (reason, event))
         try:
             with (self.directory / "failed").open("x") as stream:
-                stream.write(reason)
-            self._marker_failure = event
+                self._marker_failure = local_event
+                stream.write(local_reason)
         except FileExistsError:
             # An existing marker already closes admission; do not replace it.
             pass
@@ -259,7 +258,7 @@ class ControlledRun:
         try:
             text = (self.directory / "failed").read_text()
         except FileNotFoundError:
-            return self._failed, self._first_failure
+            return self._local_failure.get("first", (None, None))
         if text not in REASONS:
             self._deny("accounting")
         return REASONS[text], self._marker_failure
