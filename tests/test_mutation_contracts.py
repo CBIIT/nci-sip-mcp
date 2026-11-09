@@ -1275,10 +1275,22 @@ class MutationEvidenceContractsTest(unittest.TestCase):
             other = subprocess.Popen(
                 [sys.executable, "-c", "import signal; signal.pause()"], start_new_session=True
             )
+            wait_exit = runner._wait_exit
             try:
                 for mode in ("exit", "timeout"):
                     marker = root / f"{mode}.json"
                     ready = root / f"{mode}.ready"
+                    observed = []
+
+                    def timeout_after_ready(
+                        pid, deadline, cancel=None, *, mode=mode, ready=ready, observed=observed
+                    ):
+                        if mode == "timeout" and not observed:
+                            self.assertTrue(wait_for(ready.exists))
+                            observed.append(pid)
+                            return None
+                        return wait_exit(pid, deadline, cancel)
+
                     child = (
                         "import json, os, signal, subprocess, sys, time\nfrom pathlib import Path\n"
                         "descendant = subprocess.Popen([sys.executable, '-c', "
@@ -1295,15 +1307,19 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                     )
                     owned = None
                     try:
-                        status = runner.program(
-                            [sys.executable, "-c", child],
-                            root,
-                            dict(os.environ),
-                            1 if mode == "timeout" else 15,
-                            root / f"{mode}.log",
-                        )
+                        # Exercise timeout cleanup only after the descendant ignores TERM.
+                        with patch.object(runner, "_wait_exit", side_effect=timeout_after_ready):
+                            status = runner.program(
+                                [sys.executable, "-c", child],
+                                root,
+                                dict(os.environ),
+                                1 if mode == "timeout" else 15,
+                                root / f"{mode}.log",
+                            )
                         self.assertTrue(marker.exists())
+                        self.assertTrue(ready.exists())
                         owned = json.loads(marker.read_text())
+                        self.assertEqual(observed, [owned["leader"]] if mode == "timeout" else [])
                         self.assertEqual(owned["group"], owned["leader"])
                         self.assertNotEqual(owned["group"], os.getpgrp())
                         self.assertEqual(status, None if mode == "timeout" else 0)
