@@ -1109,3 +1109,33 @@ def test_other_process_holds_concurrency_until_its_receipt(tmp_path):
             assert snapshot.failure == "concurrency_limit"
         finally:
             stop_actor(child)
+
+
+@pytest.mark.parametrize("layout", ["valid", "missing", "duplicate"])
+def test_snapshot_requires_one_run_record(tmp_path, layout):
+    with (
+        retirement_run(tmp_path) as (run, _),
+        sqlite3.connect(run.directory / "ledger.sqlite") as storage,
+    ):
+        storage.execute("CREATE TEMP TABLE saved_run AS SELECT * FROM run")
+        storage.execute(
+            {
+                "valid": "SELECT 1",
+                "missing": "DELETE FROM run",
+                "duplicate": "INSERT INTO run SELECT * FROM run",
+            }[layout]
+        )
+        storage.commit()
+        try:
+            assert refusal(run.snapshot) == (
+                None
+                if layout == "valid"
+                else (RequestPolicyError, "Controlled upstream request refused.", None)
+            )
+        finally:
+            # Preserve actual fault bytes before restoring only this fixture for cleanup.
+            (tmp_path / "faulted-run-ledger.sqlite").write_bytes(
+                (run.directory / "ledger.sqlite").read_bytes()
+            )
+            storage.execute("DELETE FROM run")
+            storage.execute("INSERT INTO run SELECT * FROM saved_run")
