@@ -40,6 +40,7 @@ import nci_si_acceptance
 from nci_si_mcp import http_client
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import ProxyHandler, build_opener
 from nci_si_mcp.http_client import HttpClient, RequestPolicyError
 from nci_si_mcp.request_policy import Exchange
@@ -71,9 +72,12 @@ class ActorPolicy:
         # This local actor declares entry here; receiver contacts remain independent.
         on_start()
         lease.entered()
-        return build_opener(ProxyHandler({})).open(
-            self.request_snapshot, timeout=timeout_seconds
-        )
+        try:
+            return build_opener(ProxyHandler({})).open(
+                self.request_snapshot, timeout=timeout_seconds
+            )
+        except HTTPError as response:
+            return response
 
 try:
     body = settings.get("body")
@@ -94,12 +98,12 @@ except RequestPolicyError as error:
     sys.exit(0)
 policy = ActorPolicy(run, grant)
 client = HttpClient(
-    settings["base"], label="EVS", timeout_seconds=2, max_attempts=1,
+    settings["base"], label="EVS", timeout_seconds=2, max_attempts=settings.get("max_attempts", 1),
     retry_backoff_seconds=0, max_response_bytes=1024, size_bound="local-test",
     request_policy=policy,
 )
 accepted, refused = 0, []
-for round_number in range(2):
+for round_number in range(settings.get("rounds", 2)):
     try:
         client.get_json("/api/v1/version")
         accepted += 1
@@ -309,7 +313,7 @@ print(json.dumps({"reason": reason}))
 
 
 @contextmanager
-def tiny_run(tmp_path):
+def tiny_run(tmp_path, **overrides):
     fixtures = FixtureSet(
         {request_key("evs", "GET", "/owned", {}): Fixture("known", (Response(body="known"),))}, {}
     )
@@ -322,6 +326,7 @@ def tiny_run(tmp_path):
         "response_bytes": 5,
         "total_bytes": 6,
     }
+    limits.update(overrides)
     with FixtureServer(fixtures) as upstream:
         grant = RequestGrant("GET", upstream.base_url("evs") + "/owned", ())
         run = ControlledRun.create(
@@ -1001,3 +1006,106 @@ def test_every_ledger_operation_checks_identity(tmp_path, monkeypatch, change, o
         assert receipt_quantities(run, lease) == (
             ((0, 5, 5), (5, 0, 1)) if change == "valid" else ((1, 6, 0), (0, 6, 0))
         )
+
+
+@pytest.mark.parametrize(
+    "attempts,per_logical,expected_accepted,expected_refused,expected_ledger",
+    [
+        (2, 2, (1, 0), ((), ("attempt_limit",)), (2, 2, 2, "attempt_limit")),
+        (4, 1, (0, 0), (("attempt_limit",), ("closed",)), (1, 1, 1, "attempt_limit")),
+        (3, 2, (1, 1), ((), ()), (2, 3, 3, None)),
+    ],
+)
+def test_children_share_global_and_per_logical_attempt_caps(
+    tmp_path, attempts, per_logical, expected_accepted, expected_refused, expected_ledger
+):
+    actor = tmp_path / "retry.py"
+    actor.write_text(ACTOR)
+    fixtures = FixtureSet(
+        {
+            request_key("evs", "GET", "/api/v1/version", {}): Fixture(
+                "retry", (Response(status=503, body={}), Response(body={}))
+            )
+        },
+        {},
+    )
+    limits = {
+        "logical": 4,
+        "attempts": attempts,
+        "per_logical": per_logical,
+        "concurrent": 2,
+        "seconds": 30,
+        "response_bytes": 1024,
+        "total_bytes": 8192,
+    }
+    with (
+        FixtureServer(fixtures) as upstream,
+        run_context(upstream.base_url("evs"), tmp_path, limits) as run,
+    ):
+        settings = {
+            "url": run.authorization.grants[0].url,
+            "base": upstream.base_url("evs"),
+            "limits": limits,
+            "max_attempts": 2,
+            "rounds": 1,
+        }
+        children = []
+        try:
+            children.append(launch_actor(actor, tmp_path, 0, settings | {"barrier": True}, run))
+            children.append(launch_actor(actor, tmp_path, 1, settings, run))
+            children[0].stdin.write(b"ready\n")
+            children[0].stdin.flush()
+            wait_for_first_round([tmp_path / "child-0.round1"])
+            second = release_and_collect([children[1]])[0]
+            first = release_and_collect([children[0]])[0]
+            assert (first["accepted"], second["accepted"]) == expected_accepted
+            assert (tuple(first["refused"]), tuple(second["refused"])) == expected_refused
+            snapshot = run.snapshot()
+            assert (
+                snapshot.logical,
+                snapshot.attempts,
+                snapshot.transport_entries,
+                snapshot.failure,
+            ) == expected_ledger
+            assert len(upstream.log()) == expected_ledger[2]
+            assert (snapshot.active, snapshot.pending_receipts, snapshot.observation_complete) == (
+                0,
+                0,
+                True,
+            )
+        finally:
+            for child in children:
+                stop_actor(child)
+
+
+def test_other_process_holds_concurrency_until_its_receipt(tmp_path):
+    actor = tmp_path / "concurrent.py"
+    actor.write_text(HELD_ACTOR)
+    with tiny_run(tmp_path, concurrent=1, total_bytes=12) as (run, grant, limits, upstream):
+        child = launch_actor(actor, tmp_path, 0, {"url": grant.url, "limits": limits}, run)
+        try:
+            child.stdin.write(b"ready\n")
+            child.stdin.flush()
+            wait_for_first_round([tmp_path / "child-0.reading"])
+            with (
+                pytest.raises(RequestPolicyError) as refused,
+                run.logical(grant) as logical,
+                logical.attempt(response_limit=5),
+            ):
+                pytest.fail("Active child capacity admitted another reservation")
+            assert refused.value.reason == "concurrency_limit"
+            assert len(upstream.log()) == 1
+            output, error = child.communicate(b"read\n", timeout=10)
+            assert child.returncode == 0, error.decode()
+            assert json.loads(output) == {"reason": "closed"}
+            snapshot = run.snapshot()
+            assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (2, 1, 1)
+            assert (snapshot.consumed_body_bytes, snapshot.reserved_body_bytes) == (5, 5)
+            assert (snapshot.active, snapshot.pending_receipts, snapshot.observation_complete) == (
+                0,
+                0,
+                True,
+            )
+            assert snapshot.failure == "concurrency_limit"
+        finally:
+            stop_actor(child)
