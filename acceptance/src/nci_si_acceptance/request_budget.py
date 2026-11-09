@@ -12,7 +12,7 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn, Self, get_args
@@ -115,7 +115,7 @@ class ControlledRun:
         return hmac.digest(key, self.authorization.binding(key) + identity, hashlib.sha256)
 
     def _initialize(self, key: bytes) -> None:
-        with sqlite3.connect(self.directory / "ledger.sqlite") as connection:
+        with closing(sqlite3.connect(self.directory / "ledger.sqlite")) as connection, connection:
             connection.executescript("""
                 CREATE TABLE run (
                     id TEXT, policy TEXT, binding BLOB, started REAL, state TEXT,
