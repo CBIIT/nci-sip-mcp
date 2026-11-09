@@ -2,6 +2,7 @@
 
 import hmac
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -9,7 +10,7 @@ import tempfile
 import time
 import traceback
 from contextlib import ExitStack, closing, contextmanager
-from dataclasses import fields, replace
+from dataclasses import FrozenInstanceError, fields, replace
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from nci_si_acceptance.fixture_server import (
     request_key,
 )
 from nci_si_acceptance.request_authorization import (
+    DEFAULT_SECONDS,
     MAX_COUNTER,
     Authorization,
     Limits,
@@ -538,13 +540,22 @@ def test_snapshot_rejects_incoherent_ledger_values(tmp_path, query, value):
 
 
 @contextmanager
-def retirement_run(tmp_path, *, opened=True, total_bytes=12, response_bytes=5, per_logical=1):
+def retirement_run(
+    tmp_path,
+    *,
+    opened=True,
+    total_bytes=12,
+    response_bytes=5,
+    per_logical=1,
+    seconds=DEFAULT_SECONDS,
+):
     grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
     limits = Limits(
         logical=2,
         attempts=2,
         per_logical=per_logical,
         concurrent=2,
+        seconds=seconds,
         response_bytes=response_bytes,
         total_bytes=total_bytes,
     )
@@ -817,6 +828,7 @@ def test_rejected_snapshot_closes_other_participant_admission(tmp_path, invalid)
         pytest.param(OSError("synthetic-private-clock-detail"), "accounting", id="raised-oserror"),
         ("deadline", "deadline"),
         ("close", "closed"),
+        pytest.param("transient", "accounting", id="recovered-receipt-clock"),
     ],
 )
 def test_known_read_survives_later_refusal(tmp_path, monkeypatch, clock, failure):
@@ -824,12 +836,15 @@ def test_known_read_survives_later_refusal(tmp_path, monkeypatch, clock, failure
         with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
             lease.entered()
             with monkeypatch.context() as patch:
+                clock_values = iter([None])
 
                 def monotonic():
                     if clock == "deadline":
                         return run.started + run.authorization.limits.seconds
                     if isinstance(clock, OSError):
                         raise clock
+                    if clock == "transient":
+                        return next(clock_values, run.started)
                     return clock
 
                 def reader(maximum):
@@ -1514,11 +1529,17 @@ def test_unentered_lease_refuses_before_invoking_reader(tmp_path):
         ) == (0, 0, True, "accounting")
 
 
+@pytest.mark.parametrize("boundary,success_state", [("create", "created"), ("register", "open")])
 @pytest.mark.parametrize("read_only", [False, True])
-def test_initialization_closes_real_storage(tmp_path, monkeypatch, read_only):
+def test_storage_boundaries_close_real_connections(
+    tmp_path, monkeypatch, boundary, success_state, read_only
+):
     grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
     authorization = Authorization((grant,), Limits(), "a" * 64)
     original_connect, connections, run = sqlite3.connect, [], None
+    if boundary == "register":
+        run = ControlledRun.create(authorization, tmp_path)
+        run.open()
 
     def connect(*args, **kwargs):
         connection = original_connect(*args, **kwargs)
@@ -1527,19 +1548,25 @@ def test_initialization_closes_real_storage(tmp_path, monkeypatch, read_only):
             connection.execute("PRAGMA query_only=ON")
         return connection
 
+    def invoke_boundary():
+        if boundary == "create":
+            return ControlledRun.create(authorization, tmp_path)
+        run.authorize_participant("worker")
+        return run
+
     try:
         with monkeypatch.context() as patch:
             patch.setattr("nci_si_acceptance.request_budget.sqlite3.connect", connect)
             if read_only:
-                assert refusal(partial(ControlledRun.create, authorization, tmp_path)) == (
+                assert refusal(invoke_boundary) == (
                     RequestPolicyError,
                     "Controlled upstream request refused.",
                     None,
                 )
             else:
-                run = ControlledRun.create(authorization, tmp_path)
+                run = invoke_boundary()
         if run is not None:
-            assert run.snapshot().state == "created"
+            assert run.snapshot().state == ("failed" if read_only else success_state)
         with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
             connections[0].execute("SELECT 1")
     finally:
@@ -1549,7 +1576,9 @@ def test_initialization_closes_real_storage(tmp_path, monkeypatch, read_only):
             run.close()
 
 
-@pytest.mark.parametrize("participant", [None, True, "", "bad name", "x" * 65, "controller"])
+@pytest.mark.parametrize(
+    "participant", [None, True, "", "bad name", "x" * 65, "controller", pytest.param([], id="list")]
+)
 @pytest.mark.parametrize("operation", ["attach", "register"])
 def test_participant_boundary_refuses_unsupported_identity(tmp_path, participant, operation):
     with retirement_run(tmp_path) as (run, _):
@@ -1560,9 +1589,26 @@ def test_participant_boundary_refuses_unsupported_identity(tmp_path, participant
             if operation == "attach"
             else partial(run.authorize_participant, participant)
         )
-        assert refusal(action) == (RequestPolicyError, "Controlled upstream request refused.", None)
+
+        def denied():
+            try:
+                action()
+            except RequestPolicyError as error:
+                assert error.reason == "authorization"
+                raise
+
+        assert refusal(denied) == (RequestPolicyError, "Controlled upstream request refused.", None)
         with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
             assert storage.execute("SELECT name FROM workers").fetchall() == [("controller",)]
+        expected = (
+            ("failed", "authorization")
+            if operation == "register" and participant == "controller"
+            else ("open", None)
+        )
+        snapshot = run.snapshot()
+        assert (snapshot.state, snapshot.failure) == expected
+        if expected[0] == "open":
+            run.check_wait(0)
 
 
 def test_create_refuses_unavailable_parent_storage(tmp_path):
@@ -1577,13 +1623,17 @@ def test_create_refuses_unavailable_parent_storage(tmp_path):
         assert blocked.read_text() == "owned synthetic obstruction"
 
 
-@pytest.mark.parametrize("fault", ["empty-key", "short-key", "long-key", "infinite-origin"])
+@pytest.mark.parametrize(
+    "fault", ["empty-key", "short-key", "long-key", "infinite-origin", "overflow-deadline"]
+)
 def test_persisted_identity_boundary_refuses_corruption(tmp_path, fault):
-    with retirement_run(tmp_path) as (run, _):
+    with retirement_run(
+        tmp_path, seconds=1e308 if fault == "overflow-deadline" else DEFAULT_SECONDS
+    ) as (run, _):
         key = run.directory / "key"
         original, started = key.read_bytes(), run.started
         altered = {"empty-key": b"", "short-key": b"x" * 31, "long-key": b"x" * 33}
-        value = float("inf") if fault == "infinite-origin" else started
+        value = {"infinite-origin": float("inf"), "overflow-deadline": 1e308}.get(fault, started)
         bad_key = altered.get(fault, original)
         identity = json.dumps([run.descriptor.run_id, value], separators=(",", ":")).encode()
         binding = hmac.digest(bad_key, run.authorization.binding(bad_key) + identity, "sha256")
@@ -1600,6 +1650,13 @@ def test_persisted_identity_boundary_refuses_corruption(tmp_path, fault):
                 None,
             )
         finally:
+            # Preserve the actual fault bytes before restoring this fixture for cleanup.
+            (tmp_path / "faulted-identity-ledger.sqlite").write_bytes(
+                (run.directory / "ledger.sqlite").read_bytes()
+            )
+            faulted_key = tmp_path / "faulted-identity-key"
+            faulted_key.write_bytes(key.read_bytes())
+            faulted_key.chmod(0o600)
             key.write_bytes(original)
             run.started = started
             with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage, storage:
@@ -1780,3 +1837,163 @@ def test_expired_created_run_refuses_open(tmp_path, monkeypatch):
         )
         with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
             assert storage.execute("SELECT state FROM run").fetchall() == [("created",)]
+
+
+def test_failed_publication_keeps_the_participant_locally_refused(tmp_path, monkeypatch):
+    with retirement_run(tmp_path) as (run, _):
+        original_open = Path.open
+
+        def unavailable(path, mode="r", *args, **kwargs):
+            if path == run.directory / "failed" and mode == "x":
+                raise OSError("synthetic-private-publication-detail")
+            return original_open(path, mode, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "open", unavailable)
+            with pytest.raises(RequestPolicyError) as initial:
+                run.check_wait(-1)
+        assert (initial.value.reason, str(initial.value), initial.value.__cause__) == (
+            "accounting",
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert "synthetic-private-publication-detail" not in "".join(
+            traceback.format_exception(initial.value)
+        )
+        assert not (run.directory / "failed").exists()
+        with pytest.raises(RequestPolicyError) as later:
+            run.check_wait(0)
+        assert later.value.reason == "closed"
+
+
+def test_minimum_read_keeps_active_and_retired_receipts_truthful(tmp_path):
+    with retirement_run(tmp_path) as (run, grant):
+        returned = []
+
+        def consume():
+            with run.logical(grant) as logical, logical.attempt(response_limit=1) as lease:
+                lease.entered()
+                returned.append(lease.read(lambda maximum: b"x"[:maximum], 1))
+                live = run.snapshot()
+                assert (
+                    live.active,
+                    live.pending_receipts,
+                    live.consumed_body_bytes,
+                    live.reserved_body_bytes,
+                    live.observation_complete,
+                ) == (1, 0, 1, 2, False)
+                with pytest.raises(FrozenInstanceError):
+                    live.consumed_body_bytes = 0
+
+        assert refusal(consume) is None
+        assert returned == [b"x"]
+        retired = run.snapshot()
+        assert (
+            retired.active,
+            retired.pending_receipts,
+            retired.consumed_body_bytes,
+            retired.reserved_body_bytes,
+            retired.observation_complete,
+        ) == (0, 0, 1, 1, True)
+
+
+@pytest.mark.parametrize("change", ["method", "url", "headers", "body", "credential"])
+def test_unapproved_logical_grant_never_enters_the_context(tmp_path, change):
+    with retirement_run(tmp_path) as (run, grant):
+        changes = {
+            "method": {"method": "POST"},
+            "url": {"url": "http://127.0.0.1:9/unapproved"},
+            "headers": {"headers": (("accept", "text/plain"),)},
+            "body": {"body": b"changed"},
+            "credential": {"credential_origin": "http://127.0.0.1:9"},
+        }
+        unapproved, entered = replace(grant, **changes[change]), []
+
+        def reserve():
+            with run.logical(unapproved):
+                entered.append(True)
+
+        assert refusal(reserve) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert entered == []
+        result = run.snapshot()
+        assert (
+            result.logical,
+            result.attempts,
+            result.transport_entries,
+            result.state,
+            result.failure,
+        ) == (0, 0, 0, "failed", "authorization")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Owner-only POSIX mode bits are a POSIX contract")
+def test_created_ledger_files_remain_owner_private_under_permissive_umask(tmp_path):
+    previous = os.umask(0)
+    try:
+        with retirement_run(tmp_path, opened=False) as (run, _):
+            assert [
+                path.stat().st_mode & 0o777
+                for path in (run.directory, run.directory / "key", run.directory / "ledger.sqlite")
+            ] == [0o700, 0o600, 0o600]
+    finally:
+        os.umask(previous)
+
+
+@pytest.mark.parametrize("retired", [None, 2])
+def test_release_refuses_an_invalid_retirement_record(tmp_path, retired):
+    with retirement_run(tmp_path) as (run, grant):
+        lease = retired_lease(run, grant)
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage, storage:
+            storage.execute("UPDATE leases SET retired=? WHERE id=?", (retired, lease.lease_id))
+        with pytest.raises(RequestPolicyError) as rejected:
+            lease.release()
+        assert (rejected.value.reason, str(rejected.value), rejected.value.__cause__) == (
+            "accounting",
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert receipt_quantities(run, lease) == ((0, 5, 5), (5, 0, retired))
+
+
+def test_failed_creator_cannot_reopen_when_the_clock_also_fails(tmp_path, monkeypatch):
+    with retirement_run(tmp_path, opened=False) as (run, _):
+        with pytest.raises(RequestPolicyError) as initial:
+            run.check_wait(-1)
+        assert initial.value.reason == "authorization"
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: None)
+            )
+            with pytest.raises(RequestPolicyError) as rejected:
+                run.open()
+        assert (rejected.value.reason, str(rejected.value), rejected.value.__cause__) == (
+            "closed",
+            "Controlled upstream request refused.",
+            None,
+        )
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
+            assert storage.execute("SELECT state FROM run").fetchall() == [("created",)]
+
+
+def test_worker_open_refuses_as_closed_before_reading_a_broken_marker(tmp_path):
+    with retirement_run(tmp_path) as (run, _):
+        run.authorize_participant("worker")
+        worker = ControlledRun.attach(run.descriptor, run.authorization, participant="worker")
+        marker = run.directory / "failed"
+        marker.mkdir()
+        try:
+            with pytest.raises(RequestPolicyError) as rejected:
+                worker.open()
+            assert (rejected.value.reason, str(rejected.value), rejected.value.__cause__) == (
+                "closed",
+                "Controlled upstream request refused.",
+                None,
+            )
+            with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
+                assert storage.execute("SELECT state FROM run").fetchall() == [("open",)]
+            assert marker.is_dir()
+        finally:
+            marker.rmdir()

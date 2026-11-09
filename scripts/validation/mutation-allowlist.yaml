@@ -442,3 +442,73 @@
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Declared private descriptor consumers read run/policy identities and serialize its directory explicitly. No current runtime consumer uses layout reflection or dynamic attributes; frozen behavior and to_record/from_record conversion do not depend on slots."
+
+# Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+  qualname: "LedgerSnapshot"
+  operator: "boolean:literal"
+  site: "/decorator_list/0/keywords/1/value/0"
+  context: "ec5698fa17abe50feb576d6842c080cd5a3b4de0ec674010d8f2c1e47d9efc3d"
+  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
+  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
+  reason: "Layout-only slots change: documented callers read frozen declared snapshot fields; no layout reflection, dynamic fields or pickle format is part of the private snapshot contract. Frozen assignment and measurement values remain unchanged."
+
+# Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+  qualname: "ControlledRun.snapshot"
+  operator: "boolean:drop:0"
+  site: "/body/0/body/5/value/0/keywords/11/value/0"
+  context: "0bc0e6dfb5e1ffd115fbdadb790aad1469c8c740978a8ead3dabe101fef2af96"
+  original: "d88ea2fcfa71baf2627048901517cae57af041e8ff5ffcba3916e2fcb5581e79"
+  mutated: "656b4a887b603dc985ba0a78ac5c5cb402e2ab188ba5e945c5b208867fe681ea"
+  reason: "Every returned snapshot satisfies pending_receipts <= active. Hence active == 0 implies pending == 0; dropping the pending conjunct cannot change a returned completion flag. Corrupt pending > active is refused by the independently tested cross-field bound."
+
+# Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+  qualname: "ControlledRun._count"
+  operator: "boolean:drop:0"
+  site: "/body/0/test/0"
+  context: "df5d570c77bff95d3edfe4b94336a193ce182974c91a64682fd93bbe4d6afc25"
+  original: "b48e4d23bcf9cfcf79bc64c4d1467db00c511b554b844b5ce6369f55fceb3366"
+  mutated: "906f2117e03fca4a6fee40cabca307bcaa1ae32060a23e227184601c37be8efd"
+  reason: "The owning inputs are STRICT SQLite INTEGER columns and count(*), with NULL rejected. SQLite yields int rather than Python bool; comparison TypeError for NULL is translated at the same connection boundary to the identical terminal accounting refusal. No public call accepts arbitrary _count inputs."
+
+# Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+  qualname: "ControlledRun._connection"
+  operator: "boolean:literal"
+  site: "/body/1/body/1/value/0/keywords/0/value/0"
+  context: "c5758b4ceb53d455e33b21003af23bac80af3915189d0eb0951e0c3a3a418f2c"
+  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
+  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
+  reason: "Conditional host equivalence: when SQLite is compiled with USE_URI, URI parsing already applies even with uri=False; native positive/missing-mode=rw controls are identical. Keep uri=True for portability: on a build where this flag matters, existing successful-run and missing-state controls kill this mutation. This is not a universal URI equivalence."
+
+# Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+  qualname: "AttemptLease._row"
+  operator: "call:remove"
+  site: "/body/1/body/0"
+  context: "46ecf919fff50c174eecdc02d3cf035d8f53a1b4a662125371af35a9accf7c60"
+  original: "444301ac416d5d5f994a87e7efb9ffa99de8d51e5a95b883e3e423b1ee12d9f9"
+  mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
+  reason: "After a missing lookup, the same _row method unconditionally indexes the retired field before returning or causing effects. Missing lookup falls through as None, whose TypeError is translated by the same connection scope into the identical terminal accounting refusal with no byte/refund/entry effect; direct private helper return values are not a caller contract."
+
+# Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+  qualname: "ControlledRun._identity"
+  operator: "boolean:drop:0"
+  site: "/body/5/test/0"
+  context: "28d14feb1a3c7297f62fe446190e1aac284614639bc03e68f212bad30be4bab8"
+  original: "677d79f9924768ddbc0cd6f504904f0094970f567b533287b9d566968a978d17"
+  mutated: "5a59f8b82a2959be009a3fa0164300839ecd13b83e11663cbb808ecb48607b18"
+  reason: "Authorization duration is finite positive. A nonfinite recorded origin necessarily produces a nonfinite origin-plus-duration, so the remaining finite-sum guard rejects it. Finite-origin sum overflow still refuses; separate controls protect that independent bound."
+
+# Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+  qualname: "ControlledRun._count"
+  operator: "boolean:drop:1"
+  site: "/body/0/test/0"
+  context: "df5d570c77bff95d3edfe4b94336a193ce182974c91a64682fd93bbe4d6afc25"
+  original: "b48e4d23bcf9cfcf79bc64c4d1467db00c511b554b844b5ce6369f55fceb3366"
+  mutated: "84791d17fb29a6d8367f912be15fdae1e7826448a0dfacf34dfcf3457100ef85"
+  reason: "SQLite INTEGER/count(*) returns int, never bool; STRICT storage and the fixed sqlite3.Row factory own that type boundary. Removing the bool branch changes no reachable stored counter or terminal accounting refusal, including NULL. Retain the explicit production guard for clarity."

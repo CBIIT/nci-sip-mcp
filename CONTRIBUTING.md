@@ -160,7 +160,7 @@ Invalid clocks or snapshot counters close shared admission. Known receipts may s
 without waiting on an invalid clock; counters are never clamped to manufacture a valid snapshot.
 Retired lease identities remain bounded by admitted attempts. Repeat release validates authority
 before returning without a second refund/decrement; unknown or foreign leases still refuse.
-Snapshots are private typed accounting records, not public summaries or proof of upstream work.
+Snapshots are private immutable typed accounting records, not public summaries or proof of upstream work.
 Callers own, join and reap their children and retain needed private ledger evidence outside
 managed scratch before pruning. This API supplies no automatic supervisor, owner-death
 observation, production transport or furnished-caller protection; those successors remain above.
