@@ -214,9 +214,10 @@ def publish(path: Path, summary: RunSummary) -> None:
     except OSError, ValueError:
         failures.append(RequestPolicyError("accounting"))
     except BaseException as error:
-        _publication_cleanup(temporary, [error])
+        failures.append(error)
         raise
-    _publication_cleanup(temporary, failures)
+    finally:
+        _publication_cleanup(temporary, failures)
 
 
 def _publication_cleanup(temporary: Path | None, failures: list[BaseException]) -> None:
