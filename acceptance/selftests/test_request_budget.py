@@ -26,6 +26,7 @@ from nci_si_acceptance.fixture_server import (
     request_key,
 )
 from nci_si_acceptance.request_authorization import (
+    MAX_COUNTER,
     Authorization,
     Limits,
     RequestGrant,
@@ -487,10 +488,15 @@ def test_snapshot_rejects_incoherent_ledger_values(tmp_path, query, value):
 
 
 @contextmanager
-def retirement_run(tmp_path, *, opened=True):
+def retirement_run(tmp_path, *, opened=True, total_bytes=12, response_bytes=5):
     grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
     limits = Limits(
-        logical=2, attempts=2, per_logical=1, concurrent=2, response_bytes=5, total_bytes=12
+        logical=2,
+        attempts=2,
+        per_logical=1,
+        concurrent=2,
+        response_bytes=response_bytes,
+        total_bytes=total_bytes,
     )
     run = ControlledRun.create(Authorization((grant,), limits, "a" * 64), tmp_path)
     try:
@@ -1139,3 +1145,69 @@ def test_snapshot_requires_one_run_record(tmp_path, layout):
             )
             storage.execute("DELETE FROM run")
             storage.execute("INSERT INTO run SELECT * FROM saved_run")
+
+
+@pytest.mark.parametrize("requested,allowance", [(3, 4), (5, 6), (7, 6)])
+@pytest.mark.parametrize("extra", [False, True])
+def test_response_allowance_includes_only_its_sentinel(tmp_path, requested, allowance, extra):
+    with (
+        retirement_run(tmp_path) as (run, grant),
+        run.logical(grant) as logical,
+        logical.attempt(response_limit=requested) as lease,
+    ):
+        assert run.snapshot().reserved_body_bytes == allowance
+        lease.entered()
+        reads = []
+
+        def reader(maximum):
+            reads.append(maximum)
+            return b"x" * maximum
+
+        observed = refusal(lambda: lease.read(reader, allowance + int(extra)))
+        assert reads == ([] if extra else [allowance])
+        assert observed == (
+            (RequestPolicyError, "Controlled upstream request refused.", None) if extra else None
+        )
+        assert run.snapshot().consumed_body_bytes == (0 if extra else allowance)
+
+
+@pytest.mark.parametrize("total_bytes,exhausted", [(10, True), (11, False)])
+def test_consumed_bytes_leave_room_for_the_next_sentinel(tmp_path, total_bytes, exhausted):
+    with retirement_run(tmp_path, total_bytes=total_bytes) as (run, grant):
+        retired_lease(run, grant)
+
+        def reserve():
+            with run.logical(grant) as logical, logical.attempt(response_limit=5):
+                pass
+
+        assert refusal(reserve) == (
+            (RequestPolicyError, "Controlled upstream request refused.", None)
+            if exhausted
+            else None
+        )
+        snapshot = run.snapshot()
+        assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (
+            2,
+            1 if exhausted else 2,
+            1,
+        )
+        assert (snapshot.reserved_body_bytes, snapshot.consumed_body_bytes) == (5, 5)
+        assert snapshot.failure == ("byte_limit" if exhausted else None)
+
+
+def test_large_reservation_refuses_before_integer_promotion(tmp_path):
+    with (
+        retirement_run(tmp_path, total_bytes=MAX_COUNTER, response_bytes=MAX_COUNTER // 2) as (
+            run,
+            grant,
+        ),
+        run.logical(grant) as first,
+        first.attempt(response_limit=MAX_COUNTER),
+    ):
+        with (
+            pytest.raises(RequestPolicyError) as refused,
+            run.logical(grant) as second,
+            second.attempt(response_limit=MAX_COUNTER),
+        ):
+            pytest.fail("Overflowing reservation was admitted")
+        assert refused.value.reason == "byte_limit"
