@@ -104,6 +104,24 @@ def test_stale_owner_cannot_revive_admission(tmp_path, monkeypatch):
     assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "failed"
 
 
+def test_heartbeat_refresh_admits_beyond_original_stale_window(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    with owner:
+        now = request_budget._clock()
+        with monkeypatch.context() as clock:
+            clock.setattr(request_budget, "_clock", lambda: now + 1)
+            owner.run.heartbeat()
+            clock.setattr(request_budget, "_clock", lambda: now + 2.5)
+            refused = False
+            try:
+                with owner.run.logical(authorization().grants[0]):
+                    pass
+            except RequestPolicyError:
+                refused = True
+            assert refused is False
+            assert owner.run.snapshot().logical == 1
+
+
 def test_terminal_refusal_cannot_publish_completed(tmp_path):
     owner = supervisor(tmp_path)
     with pytest.raises(RequestPolicyError), owner, pytest.raises(RequestPolicyError):
