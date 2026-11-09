@@ -4,7 +4,10 @@ import importlib
 import importlib.util
 import json
 
+import pytest
+
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_si_mcp.http_client import RequestPolicyError
 
 
 def authorization():
@@ -48,3 +51,24 @@ def test_initial_summary_precedes_admission(tmp_path):
     completed = json.loads((run.directory / "summary.json").read_text())
     assert completed == summary | {"state": "completed"}
     assert run.snapshot().state == "closed"
+
+
+def test_failed_initial_publication_never_admits_work(tmp_path, monkeypatch):
+    """A caller trying admission at the publication boundary must still be refused."""
+    owner = supervisor(tmp_path)
+    admitted = []
+
+    def fail_replace(_source, _destination):
+        try:
+            with owner.run.logical(authorization().grants[0]):
+                admitted.append(True)
+        except RequestPolicyError:
+            admitted.append(False)
+        raise OSError("private publication path")
+
+    monkeypatch.setattr("os.replace", fail_replace)
+    with pytest.raises(RequestPolicyError), owner:
+        pytest.fail("A failed initial publication cannot enter the caller body")
+    assert admitted == [False]
+    assert owner.run.snapshot().logical == 0
+    assert not (owner.run.directory / "summary.json").exists()
