@@ -284,19 +284,27 @@ def test_stale_refusal_preserves_post_read_receipt(tmp_path, monkeypatch):
     assert summary["observationComplete"] is True
 
 
-def test_live_observer_after_join_timeout_cannot_claim_complete_observation(tmp_path, monkeypatch):
+def test_live_observer_after_join_timeout_prevents_completed_success(tmp_path, monkeypatch):
     owner = supervisor(tmp_path)
     release = threading.Event()
     owner._observer = threading.Thread(target=lambda: release.wait(5))
     monkeypatch.setattr("nci_si_acceptance.request_supervision.JOIN_SECONDS", 0.05)
     started = time.monotonic()
     try:
-        with pytest.raises(RequestPolicyError), owner:
-            pass
+        with (
+            pytest.raises(RequestPolicyError),
+            owner,
+            owner.run.logical(authorization().grants[0]) as logical,
+            logical.attempt(response_limit=8) as lease,
+        ):
+            lease.entered()
+            assert lease.read(lambda _maximum: b"hello", KNOWN_BODY_BYTES) == b"hello"
         assert time.monotonic() - started < 1
         summary = json.loads((owner.run.directory / "summary.json").read_text())
         assert summary["state"] == "failed"
-        assert summary["observationComplete"] is False
+        assert summary["observationComplete"] is True
+        assert summary["observed"]["bodyBytes"] == KNOWN_BODY_BYTES
+        assert owner.run.snapshot().pending_receipts == 0
     finally:
         release.set()
         owner._observer.join(timeout=1)
