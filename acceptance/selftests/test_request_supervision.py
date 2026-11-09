@@ -589,6 +589,42 @@ def test_one_close_failure_is_one_event_with_prior_failure_preserved(tmp_path, m
     assert owner.run.snapshot().state == "failed" and owner.snapshot()["state"] == "failed"
 
 
+@pytest.mark.parametrize("prior", [False, True])
+def test_real_close_contention_preserves_original_failure_events(tmp_path, monkeypatch, prior):
+    owner = supervisor(tmp_path)
+    original_close = owner.run.close
+    lock = sqlite3.connect(owner.run.directory / "ledger.sqlite")
+    close_errors, prior_errors = [], []
+
+    def close_and_release():
+        try:
+            original_close()
+        except RequestPolicyError as error:
+            close_errors.append(error)
+            raise
+        finally:
+            lock.rollback()
+            lock.close()
+
+    monkeypatch.setattr(owner.run, "close", close_and_release)
+    failure = None
+    try:
+        with owner:
+            if prior:
+                with pytest.raises(RequestPolicyError) as caught:
+                    owner.run._deny("accounting")
+                prior_errors.append(caught.value)
+            lock.execute("BEGIN IMMEDIATE")
+    except (RequestPolicyError, BaseExceptionGroup) as error:
+        failure = error
+    assert type(failure) is (ExceptionGroup if prior else RequestPolicyError)
+    errors = failure.exceptions if prior else (failure,)
+    assert list(errors) == prior_errors + close_errors
+    assert len(close_errors) == 1 and close_errors[0].reason == "accounting"
+    assert not owner._observer.is_alive()
+    assert owner.run.snapshot().state == "failed" and owner.snapshot()["state"] == "failed"
+
+
 def test_attached_constructor_cannot_change_controller_summary(tmp_path):
     owner = supervisor(tmp_path)
     entry = importlib.import_module("nci_si_acceptance.request_supervision")
