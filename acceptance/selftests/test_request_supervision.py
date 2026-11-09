@@ -563,6 +563,32 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
         assert child.poll() is not None and child.stdin.closed
 
 
+@pytest.mark.parametrize("prior", [False, True])
+def test_one_close_failure_is_one_event_with_prior_failure_preserved(tmp_path, monkeypatch, prior):
+    owner = supervisor(tmp_path)
+    failed = []
+
+    def fail_close():
+        failed.append("close")
+        raise OSError("private close diagnostic")
+
+    monkeypatch.setattr(owner.run, "close", fail_close)
+    failure = None
+    try:
+        with owner:
+            if prior:
+                with pytest.raises(RequestPolicyError):
+                    owner.run._deny("transport")
+    except (RequestPolicyError, BaseExceptionGroup) as error:
+        failure = error
+    assert type(failure) is (ExceptionGroup if prior else RequestPolicyError)
+    errors = failure.exceptions if prior else (failure,)
+    expected = ["transport", "accounting"] if prior else ["accounting"]
+    assert [error.reason for error in errors] == expected
+    assert failed == ["close"] and not owner._observer.is_alive()
+    assert owner.run.snapshot().state == "failed" and owner.snapshot()["state"] == "failed"
+
+
 def test_attached_constructor_cannot_change_controller_summary(tmp_path):
     owner = supervisor(tmp_path)
     entry = importlib.import_module("nci_si_acceptance.request_supervision")
