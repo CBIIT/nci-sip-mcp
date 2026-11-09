@@ -294,6 +294,8 @@ def test_attached_child_changed_authorization_has_zero_contacts(tmp_path, change
                 children.append(child)
                 results = release_and_collect(children)
         except RequestPolicyError:
+            # Controller cleanup can surface the expected policy refusal.
+            # Independently verify child rejection and zero receiver contacts below.
             pass
         finally:
             for child in children:

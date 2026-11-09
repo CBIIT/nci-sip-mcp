@@ -224,6 +224,7 @@ class ControlledRun:
             with (self.directory / "failed").open("x") as stream:
                 stream.write(reason)
         except FileExistsError:
+            # An existing marker already closes admission; do not replace it.
             pass
         except OSError:
             # This participant still refuses; inability to publish never authorizes traffic.
