@@ -3,6 +3,7 @@
 import importlib
 import importlib.util
 import json
+import sqlite3
 import subprocess
 import sys
 import time
@@ -170,3 +171,113 @@ def test_registered_short_worker_is_reaped_and_streams_closed(tmp_path):
         nci_si_mcp.__file__,
     ]
     assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "completed"
+
+
+def test_supervised_owner_cannot_open_before_initial_summary(tmp_path):
+    owner = supervisor(tmp_path)
+    with pytest.raises(RequestPolicyError):
+        owner.run.open()
+    assert owner.run.snapshot().state != "open"
+
+
+def test_observer_start_failure_is_sanitized_and_closes_admission(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+
+    def start_failure():
+        raise OSError("private thread startup diagnostic")
+
+    monkeypatch.setattr(owner._observer, "start", start_failure)
+    failure = None
+    try:
+        with owner:
+            pytest.fail("Observer startup failed")
+    except (OSError, RequestPolicyError, BaseExceptionGroup) as error:
+        failure = error
+    assert type(failure) is RequestPolicyError
+    assert str(failure) == "Controlled upstream request refused."
+    assert owner.run.snapshot().state != "open"
+    assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "failed"
+
+
+def test_unresolved_receipt_prevents_normal_context_return(tmp_path):
+    owner = supervisor(tmp_path)
+
+    def lost_read(_maximum):
+        raise OSError("unknown read progress")
+
+    failure = None
+    try:
+        with (
+            owner,
+            owner.run.logical(authorization().grants[0]) as logical,
+            logical.attempt(response_limit=8) as lease,
+            pytest.raises(RequestPolicyError),
+        ):
+            lease.entered()
+            lease.read(lost_read, 1)
+    except (RequestPolicyError, BaseExceptionGroup) as error:
+        failure = error
+    assert type(failure) is RequestPolicyError
+    snapshot = owner.run.snapshot()
+    assert snapshot.active == 1 and snapshot.pending_receipts == 1
+    assert snapshot.reserved_body_bytes == len(b"123456789")
+    assert snapshot.consumed_body_bytes == 0
+    assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "failed"
+
+
+@pytest.mark.parametrize("operation", ["enable", "open", "heartbeat", "unknown_participant"])
+def test_supervision_cannot_restart_or_accept_unknown_participant(tmp_path, operation):
+    owner = supervisor(tmp_path)
+    with owner:
+        owner.run.authorize_participant("known")
+    operations = {
+        "enable": owner.run.enable_supervision,
+        "open": owner.run.open,
+        "heartbeat": owner.run.heartbeat,
+        "unknown_participant": lambda: owner.run.participant_pending("unknown"),
+    }
+    with pytest.raises(RequestPolicyError):
+        operations[operation]()
+    assert owner.run.snapshot().state != "open"
+
+
+@pytest.mark.parametrize("fault", ["missing", "disabled", "duplicate", "invalid"])
+def test_malformed_supervision_never_becomes_unmanaged(tmp_path, fault):
+    owner = supervisor(tmp_path)
+    with owner:
+        pass
+    queries = {
+        "missing": "DELETE FROM supervision",
+        "disabled": "UPDATE supervision SET enabled=0,heartbeat=NULL",
+        "duplicate": "INSERT INTO supervision SELECT * FROM supervision",
+        "invalid": "UPDATE supervision SET heartbeat=NULL",
+    }
+    with sqlite3.connect(owner.run.directory / "ledger.sqlite") as connection:
+        connection.execute(queries[fault])
+    connection.close()
+    with pytest.raises(RequestPolicyError):
+        owner.snapshot()
+
+
+def test_stale_refusal_preserves_post_read_receipt(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    with owner:
+        now = request_budget._clock()
+        with monkeypatch.context() as clock:
+
+            def reader(_maximum):
+                clock.setattr(request_budget, "_clock", lambda: now + 3)
+                return b"hello"
+
+            with (
+                owner.run.logical(authorization().grants[0]) as logical,
+                logical.attempt(response_limit=8) as lease,
+                pytest.raises(RequestPolicyError),
+            ):
+                lease.entered()
+                lease.read(reader, KNOWN_BODY_BYTES)
+    summary = owner.snapshot()
+    assert summary["state"] == "failed"
+    assert summary["observed"]["bodyBytes"] == KNOWN_BODY_BYTES
+    assert summary["reservations"]["bodyBytes"] == KNOWN_BODY_BYTES
+    assert summary["observationComplete"] is True
