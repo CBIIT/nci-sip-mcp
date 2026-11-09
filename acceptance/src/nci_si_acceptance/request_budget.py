@@ -91,6 +91,7 @@ class ControlledRun:
             raise RequestPolicyError("accounting") from None
         self._owner = False
         self._failed: PolicyReason | None = None
+        self._first_failure: BaseException | None = None
 
     @classmethod
     def create(cls, authorization: Authorization, owned_directory: Path) -> Self:
@@ -226,22 +227,23 @@ class ControlledRun:
             if connection is not None:
                 connection.close()
 
-    def _mark_failed(self, reason: PolicyReason) -> bool:
+    def _mark_failed(self, reason: PolicyReason, *, event: BaseException | None = None) -> None:
         self._failed = reason
         try:
             with (self.directory / "failed").open("x") as stream:
                 stream.write(reason)
-            return True
+            self._first_failure = event
         except FileExistsError:
             # An existing marker already closes admission; do not replace it.
-            return False
+            pass
         except OSError:
             # This participant still refuses; inability to publish never authorizes traffic.
             raise RequestPolicyError("accounting") from None
 
     def _deny(self, reason: PolicyReason) -> NoReturn:
-        self._mark_failed(reason)
-        raise RequestPolicyError(reason) from None
+        error = RequestPolicyError(reason)
+        self._mark_failed(reason, event=error)
+        raise error from None
 
     def _count(self, value: object) -> int:
         if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= MAX_COUNTER:

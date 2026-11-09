@@ -470,10 +470,10 @@ def test_real_observer_inspection_failure_is_terminal_and_sanitized(
     monkeypatch.setattr(threading, "excepthook", lambda event: thread_errors.append(event.exc_type))
     original_mark = owner.run._mark_failed
 
-    def mark(reason):
+    def mark(reason, **options):
         if record_fault:
             raise RequestPolicyError("accounting")
-        return original_mark(reason)
+        return original_mark(reason, **options)
 
     monkeypatch.setattr(owner.run, "_mark_failed", mark)
     with subprocess.Popen(

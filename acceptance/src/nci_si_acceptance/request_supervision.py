@@ -44,7 +44,6 @@ class SupervisedRun:
         self._stop = threading.Event()
         self._registrations: list[OwnedChild | None] = []
         self._child_errors: dict[subprocess.Popen[bytes], RequestPolicyError] = {}
-        self._primary_error: BaseException | None = None
         self._observer_error: RequestPolicyError | None = None
         self._observer_cleanup_error: RequestPolicyError | None = None
         self._observer = threading.Thread(target=self._observe, name="controlled-run-observer")
@@ -164,8 +163,7 @@ class SupervisedRun:
 
     def _record_failure(self, error: BaseException, reason: PolicyReason) -> None:
         # Exclusive marker creation proves which event owns the ledger's first failure.
-        if self.run._mark_failed(reason):
-            self._primary_error = error
+        self.run._mark_failed(reason, event=error)
 
     def _join(self) -> None:
         if self._observer.ident is not None:
@@ -248,7 +246,7 @@ class SupervisedRun:
     def _terminal_failure(self) -> None:
         failure = self.run.snapshot().failure
         if failure is not None:
-            raise self._primary_error or RequestPolicyError(failure)
+            raise self.run._first_failure or RequestPolicyError(failure)
 
     @staticmethod
     def _contains(
