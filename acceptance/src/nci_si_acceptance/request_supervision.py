@@ -32,6 +32,9 @@ class OwnedChild:
 
 class SupervisedRun:
     def __init__(self, run: ControlledRun) -> None:
+        if type(run) is not ControlledRun:
+            raise RequestPolicyError("authorization")
+        run.require_supervision_owner()
         self.run = run
         self._state: SummaryState = "incomplete"
         self._entered = False
@@ -41,6 +44,7 @@ class SupervisedRun:
         self._stop = threading.Event()
         self._children: list[OwnedChild] = []
         self._observer_error: RequestPolicyError | None = None
+        self._observer_cleanup_error: RequestPolicyError | None = None
         self._observer = threading.Thread(target=self._observe, name="controlled-run-observer")
 
     @classmethod
@@ -58,6 +62,7 @@ class SupervisedRun:
     def __enter__(self) -> Self:
         if self._entered:
             raise RequestPolicyError("closed")
+        self.run.require_supervision_owner()
         self._entered = True
         try:
             self._publish()
@@ -94,15 +99,29 @@ class SupervisedRun:
 
     def _observe(self) -> None:
         while not self._stop.wait(PULSE_SECONDS):
-            try:
-                self.run.heartbeat()
-                with self._lock:
-                    children = tuple(self._children)
-                for child in children:
-                    self._check_child(child)
-            except RequestPolicyError as error:
-                self._observer_error = error
-                self._stop.set()
+            with self._lock:
+                if self._finishing:
+                    return
+                try:
+                    self._pulse()
+                except RequestPolicyError:
+                    # The ledger retains the original reason; a pulse is not a second event.
+                    self._stop.set()
+                except OSError, RuntimeError, subprocess.SubprocessError:
+                    self._inspection_failed()
+
+    def _pulse(self) -> None:
+        self.run.heartbeat()
+        for child in self._children:
+            self._check_child(child)
+
+    def _inspection_failed(self) -> None:
+        self._observer_error = RequestPolicyError("accounting")
+        try:
+            self.run._mark_failed("accounting")
+        except RequestPolicyError as error:
+            self._observer_cleanup_error = error
+        self._stop.set()
 
     def _check_child(self, child: OwnedChild) -> None:
         code = child.process.poll()
@@ -131,6 +150,8 @@ class SupervisedRun:
         )
         errors = self._collect(actions)
         if errors:
+            if len(errors) == 1:
+                raise errors[0] from None
             raise BaseExceptionGroup("Controlled child cleanup failed.", errors) from None
 
     def _settle_child(self, child: OwnedChild) -> None:
@@ -157,27 +178,56 @@ class SupervisedRun:
         with self._lock:
             self._finishing = True
         # Observer never publishes: only the controller writes initial/final projections.
-        self._stop.set()
-        actions: list[Callable[[], None]] = [self.run.close, self._join]
-        actions.extend(lambda child=child: self._clean_child(child) for child in self._children)
         errors = [initiating] if initiating is not None else []
+        if initiating is None:
+            errors.extend(self._collect([self._terminal_failure]))
+        errors.extend(self._observer_failures(errors, initiating))
+        errors.extend(self._collect([self._close_admission]))
+        self._stop.set()
+        actions: list[Callable[[], None]] = [self._join]
+        actions.extend(lambda child=child: self._clean_child(child) for child in self._children)
         errors.extend(self._collect(actions))
-        if self._observer_error is not None:
-            errors.append(self._observer_error)
+        if self._observer_cleanup_error is not None:
+            errors.append(self._observer_cleanup_error)
         errors.extend(self._collect([lambda: self._finalize(not errors)]))
         if len(errors) > (initiating is not None):
             if len(errors) == 1:
                 raise errors[0] from None
             raise BaseExceptionGroup("Controlled run failed.", errors) from None
 
+    def _terminal_failure(self) -> None:
+        failure = self.run.snapshot().failure
+        if failure is not None:
+            raise RequestPolicyError(failure)
+
+    def _observer_failures(
+        self, errors: list[BaseException], initiating: BaseException | None
+    ) -> list[BaseException]:
+        observed = self._observer_error
+        if observed is None:
+            return []
+        duplicate = any(
+            isinstance(error, RequestPolicyError) and error.reason == observed.reason
+            for error in errors
+        )
+        return [] if initiating is None and duplicate else [observed]
+
+    def _close_admission(self) -> None:
+        errors = self._collect([self.run.close])
+        if errors:
+            errors.extend(self._collect([lambda: self.run._mark_failed("accounting")]))
+            if len(errors) == 1:
+                raise errors[0] from None
+            raise BaseExceptionGroup("Controlled admission closure failed.", errors) from None
+
     def _finalize(self, clean: bool) -> None:
         snapshot = self.run.snapshot()
-        success = clean and snapshot.state == "closed" and snapshot.observation_complete
+        success = all((clean, snapshot.state == "closed", snapshot.observation_complete))
         self._state = "completed" if success else "failed"
         if self._initial_published:
             self._publish()
-        if not snapshot.observation_complete:
-            raise RequestPolicyError("accounting")
+        if clean and (snapshot.state == "failed" or not snapshot.observation_complete):
+            raise RequestPolicyError(snapshot.failure or "accounting")
 
     def __exit__(
         self,

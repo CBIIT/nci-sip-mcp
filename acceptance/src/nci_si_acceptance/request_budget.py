@@ -313,6 +313,16 @@ class ControlledRun:
                 self._deny("authorization")
             connection.execute("UPDATE supervision SET heartbeat=?", (_clock(),))
 
+    def require_supervision_owner(self) -> None:
+        if not self._owner:
+            raise RequestPolicyError("authorization")
+        with self._connection() as connection:
+            enabled, _heartbeat = self._supervision(connection)
+            state = connection.execute("SELECT state FROM run").fetchone()[0]
+            if not enabled or state != "created" or self._failure() is not None:
+                raise RequestPolicyError("authorization")
+            self._fresh(connection, _clock())
+
     def participant_pending(self, participant: str) -> bool:
         _participant(participant)
         with self._connection() as connection:
