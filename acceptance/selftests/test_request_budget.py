@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 import nci_si_acceptance
+import nci_si_mcp
 from conftest import FIXTURES
 from nci_si_acceptance.fixture_server import (
     Fixture,
@@ -39,6 +40,7 @@ from nci_si_mcp.http_client import RequestPolicyError
 # This explicit local consumer exercises shared accounting through the real HttpClient.
 ACTOR = """import json, sys, tempfile
 import nci_si_acceptance
+import nci_si_mcp
 from nci_si_mcp import http_client
 from contextlib import contextmanager
 from pathlib import Path
@@ -125,7 +127,8 @@ for round_number in range(settings.get("rounds", 2)):
         sys.stdin.readline()
 print(json.dumps({
     "accepted": accepted, "refused": refused, "interpreter": sys.executable,
-    "package": nci_si_acceptance.__file__, "tempdir": tempfile.gettempdir(),
+    "package": nci_si_acceptance.__file__, "core": nci_si_mcp.__file__,
+    "tempdir": tempfile.gettempdir(),
 }))
 """
 
@@ -165,8 +168,14 @@ def launch_actor(actor, directory, number, settings, run):
     settings["descriptor"] = run.descriptor.to_record()
     config = directory / f"child-{number}.json"
     config.write_text(json.dumps(settings))
+    # Isolated children must use this execution tree, including mutation snapshots.
+    bootstrap = (
+        "import runpy, sys; sys.path[:0] = sys.argv[1:3]; "
+        "sys.argv = sys.argv[3:]; runpy.run_path(sys.argv[0], run_name='__main__')"
+    )
+    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
     child = subprocess.Popen(  # noqa: S603 - this test wrote the actor and uses its own interpreter.
-        [sys.executable, "-I", str(actor), str(config)],
+        [sys.executable, "-I", "-c", bootstrap, *roots, str(actor), str(config)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -247,6 +256,7 @@ def test_real_children_share_the_logical_request_ceiling(tmp_path):
     assert {Path(row["package"]).resolve() for row in results} == {
         Path(nci_si_acceptance.__file__).resolve()
     }
+    assert {Path(row["core"]).resolve() for row in results} == {Path(nci_si_mcp.__file__).resolve()}
     assert {Path(row["tempdir"]).resolve() for row in results} == {
         Path(tempfile.gettempdir()).resolve()
     }
