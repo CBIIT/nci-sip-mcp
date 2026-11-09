@@ -33,14 +33,25 @@ def failure_leaves(error):
     return [error]
 
 
-def marker_open_failure(monkeypatch, run, active):
+def marker_publication_failure(monkeypatch, run, active, stage="open"):
     original_open = Path.open
     failures = []
 
     def open_marker(path, mode="r", *args, **options):
         if active.is_set() and path == run.directory / "failed" and mode == "x":
-            failures.append("marker")
-            raise PermissionError("private marker publication diagnostic")
+            if stage == "open":
+                failures.append("marker")
+                raise PermissionError("private marker publication diagnostic")
+            stream = original_open(path, mode, *args, **options)
+
+            @contextmanager
+            def after_close():
+                with stream:
+                    yield stream
+                failures.append("marker")
+                raise OSError("synthetic post-close marker publication failure")
+
+            return after_close()
         return original_open(path, mode, *args, **options)
 
     monkeypatch.setattr(Path, "open", open_marker)
@@ -457,13 +468,13 @@ def test_initiating_and_cleanup_failures_remain_in_order(tmp_path, monkeypatch):
 @pytest.mark.parametrize("role,code", [("worker", 7), ("service", 0)])
 @pytest.mark.parametrize("observed", [False, True])
 @pytest.mark.parametrize("prior", [False, True])
-@pytest.mark.parametrize("marker_fault", [False, True])
+@pytest.mark.parametrize("marker_stage", [None, "open", "after_close"])
 def test_unexpected_real_child_exit_closes_admission(
-    tmp_path, monkeypatch, role, code, observed, prior, marker_fault
+    tmp_path, monkeypatch, role, code, observed, prior, marker_stage
 ):
     owner = supervisor(tmp_path)
     active = threading.Event()
-    marker_errors = marker_open_failure(monkeypatch, owner.run, active)
+    marker_errors = marker_publication_failure(monkeypatch, owner.run, active, marker_stage)
     script = "import sys; sys.stdin.buffer.read(1); sys.exit(int(sys.argv[1]))"
     with subprocess.Popen(  # noqa: S603 - fixed child program, owned interpreter.
         [sys.executable, "-I", "-c", script, str(code)],
@@ -478,7 +489,7 @@ def test_unexpected_real_child_exit_closes_admission(
                 if prior:
                     with pytest.raises(RequestPolicyError):
                         owner.run._deny("transport")
-                if marker_fault:
+                if marker_stage is not None:
                     active.set()
                 child.stdin.write(b"x")
                 child.stdin.flush()
@@ -487,11 +498,12 @@ def test_unexpected_real_child_exit_closes_admission(
                     assert owner._stop.wait(3), "The actual observer did not report terminal state"
         except (RequestPolicyError, BaseExceptionGroup) as error:
             failure = error
-        expected = ["transport"] * (1 + prior) + ["accounting"] * marker_fault
+        record_failed = {None: 0, "open": 1, "after_close": int(not prior)}[marker_stage]
+        expected = ["transport"] * (1 + prior) + ["accounting"] * record_failed
         assert type(failure) is (ExceptionGroup if len(expected) > 1 else RequestPolicyError)
         errors = failure_leaves(failure)
         assert [error.reason for error in errors] == expected
-        assert marker_errors == ["marker"] * marker_fault
+        assert marker_errors == ["marker"] * record_failed
         assert child.returncode == code
         assert child.stdin.closed
         assert child.stdout.closed
@@ -599,7 +611,7 @@ def test_real_observer_inspection_failure_is_terminal_and_sanitized(
     monkeypatch.setattr(threading, "excepthook", lambda event: thread_errors.append(event.exc_type))
     original_mark = owner.run._mark_failed
     active = threading.Event()
-    marker_errors = marker_open_failure(monkeypatch, owner.run, active)
+    marker_errors = marker_publication_failure(monkeypatch, owner.run, active)
     with subprocess.Popen(
         [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
         stdin=subprocess.PIPE,
@@ -690,18 +702,18 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("prior", [None, "transport", "accounting", "attached"])
-@pytest.mark.parametrize("marker_fault", [False, True])
+@pytest.mark.parametrize("marker_stage", [None, "open", "after_close"])
 def test_one_close_failure_is_one_event_with_prior_failure_preserved(
-    tmp_path, monkeypatch, prior, marker_fault
+    tmp_path, monkeypatch, prior, marker_stage
 ):
     owner = supervisor(tmp_path)
     failed = []
     active = threading.Event()
-    marker_errors = marker_open_failure(monkeypatch, owner.run, active)
+    marker_errors = marker_publication_failure(monkeypatch, owner.run, active, marker_stage)
 
     def fail_close():
         failed.append("close")
-        if marker_fault:
+        if marker_stage is not None:
             active.set()
         raise OSError("private close diagnostic")
 
@@ -715,7 +727,8 @@ def test_one_close_failure_is_one_event_with_prior_failure_preserved(
                 prior_reason, prior_error = latch_prior_failure(owner, prior)
     except (RequestPolicyError, BaseExceptionGroup) as error:
         failure = error
-    expected = ["accounting"] * (1 + marker_fault)
+    record_failed = {None: 0, "open": 1, "after_close": int(prior is None)}[marker_stage]
+    expected = ["accounting"] * (1 + record_failed)
     if prior:
         expected.insert(0, prior_reason)
     assert type(failure) is (ExceptionGroup if len(expected) > 1 else RequestPolicyError)
@@ -724,7 +737,7 @@ def test_one_close_failure_is_one_event_with_prior_failure_preserved(
         assert errors[0] is prior_error
     assert [error.reason for error in errors] == expected
     assert failed == ["close"]
-    assert marker_errors == ["marker"] * marker_fault
+    assert marker_errors == ["marker"] * record_failed
     assert not owner._observer.is_alive()
     assert owner.run.snapshot().state == "failed"
     assert owner.snapshot()["state"] == "failed"
@@ -763,6 +776,42 @@ def test_real_close_contention_preserves_original_failure_events(tmp_path, monke
     assert len(close_errors) == 1 and close_errors[0].reason == "accounting"
     assert not owner._observer.is_alive()
     assert owner.run.snapshot().state == "failed" and owner.snapshot()["state"] == "failed"
+
+
+@pytest.mark.parametrize("reason,delay", [("deadline", 1801), ("accounting", 0)])
+def test_later_marker_publication_keeps_earlier_local_latch(tmp_path, monkeypatch, reason, delay):
+    owner = supervisor(tmp_path)
+    active = threading.Event()
+    active.set()
+    marker_errors = marker_publication_failure(monkeypatch, owner.run, active)
+    close_calls = []
+
+    def fail_close():
+        close_calls.append("close")
+        raise OSError("synthetic later close failure")
+
+    monkeypatch.setattr(owner.run, "close", fail_close)
+    failure = None
+    try:
+        with owner:
+            with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as lock:
+                if reason == "accounting":
+                    lock.execute("BEGIN IMMEDIATE")
+                try:
+                    with pytest.raises(RequestPolicyError) as inner:
+                        owner.run.check_wait(delay)
+                finally:
+                    lock.rollback()
+            assert inner.value.reason == "accounting"
+            assert owner.run.snapshot().failure == reason
+            active.clear()
+    except (RequestPolicyError, BaseExceptionGroup) as error:
+        failure = error
+    assert type(failure) is ExceptionGroup
+    assert [error.reason for error in failure_leaves(failure)] == [reason, "accounting"]
+    assert (owner.run.directory / "failed").read_text() == reason
+    assert marker_errors == ["marker"] and close_calls == ["close"]
+    assert not owner._observer.is_alive() and owner.snapshot()["state"] == "failed"
 
 
 def test_attached_constructor_cannot_change_controller_summary(tmp_path):

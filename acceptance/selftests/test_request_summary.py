@@ -209,9 +209,14 @@ def test_interrupted_initial_publication_retains_failure_and_cleanup(
 
     monkeypatch.setattr("os.fsync", interrupt)
     monkeypatch.setattr(module.Path, "unlink", unlink)
-    with pytest.raises(BaseExceptionGroup if cleanup_fault else interruption) as caught, owner:
-        pytest.fail("Interrupted publication must not open admission")
-    errors = caught.value.exceptions if cleanup_fault else (caught.value,)
+    failure = None
+    try:
+        with owner:
+            pytest.fail("Interrupted publication must not open admission")
+    except (BaseExceptionGroup, RequestPolicyError, KeyboardInterrupt, SystemExit) as error:
+        failure = error
+    assert type(failure) is (BaseExceptionGroup if cleanup_fault else interruption)
+    errors = failure.exceptions if cleanup_fault else (failure,)
     assert errors[0] is initiating
     assert [type(error) for error in errors] == [interruption] + [
         RequestPolicyError
