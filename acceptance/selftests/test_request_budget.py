@@ -1,5 +1,6 @@
 """Shared controlled-run accounting at real process and HTTP caller boundaries."""
 
+import hmac
 import json
 import sqlite3
 import subprocess
@@ -147,14 +148,15 @@ def run_context(base, directory, limits):
 
 
 def stop_actor(child):
-    if child.poll() is not None:
-        return
-    child.terminate()
-    try:
-        child.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        child.kill()
-        child.wait(timeout=2)
+    if child.poll() is None:
+        child.terminate()
+        try:
+            child.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=2)
+    if child.stdout is not None and not child.stdout.closed:
+        child.communicate(timeout=2)
 
 
 def launch_actor(actor, directory, number, settings, run):
@@ -1535,3 +1537,162 @@ def test_initialization_closes_real_storage(tmp_path, monkeypatch, read_only):
             connection.close()
         if run is not None:
             run.close()
+
+
+@pytest.mark.parametrize("participant", [None, True, "", "bad name", "x" * 65, "controller"])
+@pytest.mark.parametrize("operation", ["attach", "register"])
+def test_participant_boundary_refuses_unsupported_identity(tmp_path, participant, operation):
+    with retirement_run(tmp_path) as (run, _):
+        action = (
+            partial(
+                ControlledRun.attach, run.descriptor, run.authorization, participant=participant
+            )
+            if operation == "attach"
+            else partial(run.authorize_participant, participant)
+        )
+        assert refusal(action) == (RequestPolicyError, "Controlled upstream request refused.", None)
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
+            assert storage.execute("SELECT name FROM workers").fetchall() == [("controller",)]
+
+
+def test_create_refuses_unavailable_parent_storage(tmp_path):
+    with retirement_run(tmp_path) as (run, _):
+        blocked = tmp_path / "not-a-directory"
+        blocked.write_text("owned synthetic obstruction")
+        assert refusal(partial(ControlledRun.create, run.authorization, blocked)) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert blocked.read_text() == "owned synthetic obstruction"
+
+
+@pytest.mark.parametrize("fault", ["empty-key", "short-key", "long-key", "infinite-origin"])
+def test_persisted_identity_boundary_refuses_corruption(tmp_path, fault):
+    with retirement_run(tmp_path) as (run, _):
+        key = run.directory / "key"
+        original, started = key.read_bytes(), run.started
+        altered = {"empty-key": b"", "short-key": b"x" * 31, "long-key": b"x" * 33}
+        value = float("inf") if fault == "infinite-origin" else started
+        bad_key = altered.get(fault, original)
+        identity = json.dumps([run.descriptor.run_id, value], separators=(",", ":")).encode()
+        binding = hmac.digest(bad_key, run.authorization.binding(bad_key) + identity, "sha256")
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
+            original_binding = storage.execute("SELECT binding FROM run").fetchone()[0]
+        try:
+            key.write_bytes(bad_key)
+            # Bind the altered state so a later HMAC check cannot hide the owning shape guard.
+            with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage, storage:
+                storage.execute("UPDATE run SET started=?,binding=?", (value, binding))
+            assert refusal(run.snapshot) == (
+                RequestPolicyError,
+                "Controlled upstream request refused.",
+                None,
+            )
+        finally:
+            key.write_bytes(original)
+            run.started = started
+            with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage, storage:
+                storage.execute("UPDATE run SET started=?,binding=?", (started, original_binding))
+
+
+@pytest.mark.parametrize("operation", ["attempt", "read"])
+@pytest.mark.parametrize("maximum", [None, True, 0, -1, 1.5, MAX_COUNTER + 1])
+def test_invalid_lease_limits_refuse_before_reader(tmp_path, operation, maximum):
+    with (
+        retirement_run(tmp_path) as (run, grant),
+        run.logical(grant) as logical,
+        ExitStack() as leases,
+    ):
+        lease = (
+            leases.enter_context(logical.attempt(response_limit=5)) if operation == "read" else None
+        )
+        reads = []
+        if lease is not None:
+            lease.entered()
+
+        def reader(count):
+            reads.append(count)
+            return b"known"[:count]
+
+        action = (
+            partial(lease.read, reader, maximum)
+            if lease is not None
+            else lambda: leases.enter_context(logical.attempt(response_limit=maximum))
+        )
+        with pytest.raises(RequestPolicyError) as refused:
+            action()
+        expected = (
+            "response_limit"
+            if operation == "read" and maximum == MAX_COUNTER + 1
+            else "authorization"
+        )
+        assert (refused.value.reason, str(refused.value)) == (
+            expected,
+            "Controlled upstream request refused.",
+        )
+        assert reads == []
+        assert run.snapshot().consumed_body_bytes == 0
+
+
+@pytest.mark.parametrize("operation,pending", [("entry", 0), ("pending-read", 6)])
+def test_duplicate_entry_and_pending_read_refuse_without_consumption(tmp_path, operation, pending):
+    with (
+        retirement_run(tmp_path) as (run, grant),
+        run.logical(grant) as logical,
+        logical.attempt(response_limit=5) as lease,
+    ):
+        lease.entered()
+        reads = []
+
+        def inner_reader(maximum):
+            reads.append(maximum)
+            return b"x"[:maximum]
+
+        def reader(_maximum):
+            return lease.read(inner_reader, 1)
+
+        action = lease.entered if operation == "entry" else partial(lease.read, reader, 6)
+        assert refusal(action) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert reads == []
+        assert receipt_quantities(run, lease) == ((1, 6, 0), (0, pending, 0))
+        assert run.snapshot().transport_entries == 1
+
+
+@pytest.mark.parametrize("payload", [None, "known", bytearray(b"known"), b"too-long"])
+def test_reader_payload_shape_and_bound_refuse_without_receipt(tmp_path, payload):
+    with retirement_run(tmp_path) as (run, grant):
+        with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
+            lease.entered()
+            assert refusal(lambda: lease.read(lambda _maximum: payload, 6)) == (
+                RequestPolicyError,
+                "Controlled upstream request refused.",
+                None,
+            )
+            assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 6, 0))
+        assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 6, 0))
+
+
+def test_receipt_pending_mismatch_preserves_unknown_progress(tmp_path):
+    with (
+        retirement_run(tmp_path) as (run, grant),
+        run.logical(grant) as logical,
+        logical.attempt(response_limit=5) as lease,
+    ):
+        lease.entered()
+
+        def reader(maximum):
+            with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage, storage:
+                storage.execute("UPDATE leases SET pending=2 WHERE id=?", (lease.lease_id,))
+            return b"known"[:maximum]
+
+        assert refusal(partial(lease.read, reader, 6)) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 2, 0))
