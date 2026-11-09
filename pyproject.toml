@@ -150,6 +150,8 @@ testpaths = ["tests"]
 pythonpath = ["tests", "scripts/validation"]
 
 [tool.coverage.run]
+# PDM supplies an absolute root, including for children started from another directory.
+data_file = "${PDM_PROJECT_ROOT?}/tmp/coverage/unit/.coverage"
 branch = true
 source = ["nci_si_mcp", "ncit_index", "scripts"]
 # Every script is measured except these, each named with its reason. The patterns start with

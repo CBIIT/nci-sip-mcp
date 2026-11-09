@@ -87,6 +87,19 @@ self-test and prepared-fixture baselines itself; unit remains serial. Any baseli
 names its domain and fails the gate. The shard summary's `baseline_domains` records freshly
 computed domain outcomes and seconds; imported runs leave that list empty.
 
+Ordinary `pdm run test` stores combined coverage in `tmp/coverage/unit/.coverage`;
+`pdm run acceptance-selftest` uses `tmp/coverage/harness/.coverage`. PDM supplies the required
+absolute root so children and xdist workers share their command's scratch destination even
+when changing directory; configuration loading without that root refuses. A successful run
+combines and removes its parallel files; the next serial run replaces the combined data.
+Use `pdm run coverage report` or `pdm run coverage report --rcfile=acceptance/pyproject.toml`
+to read those defaults; replace `report` with `erase` only after all evidence consumers finish.
+Before rerunning an interrupted or failed run, verify its owned writers have stopped and
+preserve its exact coverage directory in a separately named evidence archive. Never combine
+failed data into a corrected rerun. Concurrent runs need separate worktrees or explicit unique
+`COVERAGE_FILE` destinations. Generated CI configurations and canonical mutation scratch retain
+their explicit consumer-owned destinations and existing combination/export contracts.
+
 Beyond the server and the suite, the repository holds the documentation site, the validation
 companion and the benchmark tooling; these are their entry points.
 
