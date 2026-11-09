@@ -27,6 +27,39 @@ from nci_si_mcp.http_client import RequestPolicyError
 KNOWN_BODY_BYTES = 5
 
 
+def failure_leaves(error):
+    if isinstance(error, BaseExceptionGroup):
+        return [leaf for child in error.exceptions for leaf in failure_leaves(child)]
+    return [error]
+
+
+def marker_open_failure(monkeypatch, run, active):
+    original_open = Path.open
+    failures = []
+
+    def open_marker(path, mode="r", *args, **options):
+        if active.is_set() and path == run.directory / "failed" and mode == "x":
+            failures.append("marker")
+            raise PermissionError("private marker publication diagnostic")
+        return original_open(path, mode, *args, **options)
+
+    monkeypatch.setattr(Path, "open", open_marker)
+    return failures
+
+
+def latch_prior_failure(owner, origin):
+    run = owner.run
+    if origin == "attached":
+        run.authorize_participant("prior")
+        run = request_budget.ControlledRun.attach(
+            run.descriptor, authorization(), participant="prior"
+        )
+    reason = "transport" if origin == "transport" else "accounting"
+    with pytest.raises(RequestPolicyError) as caught:
+        run._deny(reason)
+    return reason, caught.value if run is owner.run else None
+
+
 def authorization():
     return Authorization((RequestGrant("GET", "http://127.0.0.1:9/probe", ()),), Limits(), "a" * 64)
 
@@ -414,8 +447,13 @@ def test_initiating_and_cleanup_failures_remain_in_order(tmp_path, monkeypatch):
 @pytest.mark.parametrize("role,code", [("worker", 7), ("service", 0)])
 @pytest.mark.parametrize("observed", [False, True])
 @pytest.mark.parametrize("prior", [False, True])
-def test_unexpected_real_child_exit_closes_admission(tmp_path, role, code, observed, prior):
+@pytest.mark.parametrize("marker_fault", [False, True])
+def test_unexpected_real_child_exit_closes_admission(
+    tmp_path, monkeypatch, role, code, observed, prior, marker_fault
+):
     owner = supervisor(tmp_path)
+    active = threading.Event()
+    marker_errors = marker_open_failure(monkeypatch, owner.run, active)
     script = "import sys; sys.stdin.buffer.read(1); sys.exit(int(sys.argv[1]))"
     with subprocess.Popen(  # noqa: S603 - fixed child program, owned interpreter.
         [sys.executable, "-I", "-c", script, str(code)],
@@ -430,19 +468,24 @@ def test_unexpected_real_child_exit_closes_admission(tmp_path, role, code, obser
                 if prior:
                     with pytest.raises(RequestPolicyError):
                         owner.run._deny("transport")
+                if marker_fault:
+                    active.set()
                 child.stdin.write(b"x")
                 child.stdin.flush()
                 child.wait(timeout=5)
                 if observed:
-                    with pytest.raises(RequestPolicyError):
-                        owner._pulse()
+                    assert owner._stop.wait(3), "The actual observer did not report terminal state"
         except (RequestPolicyError, BaseExceptionGroup) as error:
             failure = error
-        assert type(failure) is (ExceptionGroup if prior else RequestPolicyError)
-        errors = failure.exceptions if prior else (failure,)
-        assert [error.reason for error in errors] == ["transport"] * (2 if prior else 1)
+        expected = ["transport"] * (1 + prior) + ["accounting"] * marker_fault
+        assert type(failure) is (ExceptionGroup if len(expected) > 1 else RequestPolicyError)
+        errors = failure_leaves(failure)
+        assert [error.reason for error in errors] == expected
+        assert marker_errors == ["marker"] * marker_fault
         assert child.returncode == code
-        assert child.stdin.closed and child.stdout.closed and child.stderr.closed
+        assert child.stdin.closed
+        assert child.stdout.closed
+        assert child.stderr.closed
     assert owner.run.snapshot().state == "failed"
     assert owner.snapshot()["state"] == "failed"
 
@@ -545,13 +588,8 @@ def test_real_observer_inspection_failure_is_terminal_and_sanitized(
     thread_errors = []
     monkeypatch.setattr(threading, "excepthook", lambda event: thread_errors.append(event.exc_type))
     original_mark = owner.run._mark_failed
-
-    def mark(reason, **options):
-        if record_fault:
-            raise RequestPolicyError("accounting")
-        return original_mark(reason, **options)
-
-    monkeypatch.setattr(owner.run, "_mark_failed", mark)
+    active = threading.Event()
+    marker_errors = marker_open_failure(monkeypatch, owner.run, active)
     with subprocess.Popen(
         [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
         stdin=subprocess.PIPE,
@@ -565,6 +603,7 @@ def test_real_observer_inspection_failure_is_terminal_and_sanitized(
                 inspected.set()
                 if record_fault:
                     original_mark("transport")
+                    active.set()
                 raise OSError("private observer inspection diagnostic")
             return original_poll()
 
@@ -583,6 +622,7 @@ def test_real_observer_inspection_failure_is_terminal_and_sanitized(
             ["transport", "accounting", "accounting"] if record_fault else ["accounting"]
         )
         assert thread_errors == []
+        assert marker_errors == ["marker"] * record_fault
         assert child.returncode == 0
     assert owner.snapshot()["state"] == "failed"
 
@@ -639,30 +679,45 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
         assert child.poll() is not None and child.stdin.closed
 
 
-@pytest.mark.parametrize("prior", [False, True])
-def test_one_close_failure_is_one_event_with_prior_failure_preserved(tmp_path, monkeypatch, prior):
+@pytest.mark.parametrize("prior", [None, "transport", "accounting", "attached"])
+@pytest.mark.parametrize("marker_fault", [False, True])
+def test_one_close_failure_is_one_event_with_prior_failure_preserved(
+    tmp_path, monkeypatch, prior, marker_fault
+):
     owner = supervisor(tmp_path)
     failed = []
+    active = threading.Event()
+    marker_errors = marker_open_failure(monkeypatch, owner.run, active)
 
     def fail_close():
         failed.append("close")
+        if marker_fault:
+            active.set()
         raise OSError("private close diagnostic")
 
     monkeypatch.setattr(owner.run, "close", fail_close)
     failure = None
+    prior_error = None
+    prior_reason = None
     try:
         with owner:
             if prior:
-                with pytest.raises(RequestPolicyError):
-                    owner.run._deny("transport")
+                prior_reason, prior_error = latch_prior_failure(owner, prior)
     except (RequestPolicyError, BaseExceptionGroup) as error:
         failure = error
-    assert type(failure) is (ExceptionGroup if prior else RequestPolicyError)
-    errors = failure.exceptions if prior else (failure,)
-    expected = ["transport", "accounting"] if prior else ["accounting"]
+    expected = ["accounting"] * (1 + marker_fault)
+    if prior:
+        expected.insert(0, prior_reason)
+    assert type(failure) is (ExceptionGroup if len(expected) > 1 else RequestPolicyError)
+    errors = failure_leaves(failure)
+    if prior_error is not None:
+        assert errors[0] is prior_error
     assert [error.reason for error in errors] == expected
-    assert failed == ["close"] and not owner._observer.is_alive()
-    assert owner.run.snapshot().state == "failed" and owner.snapshot()["state"] == "failed"
+    assert failed == ["close"]
+    assert marker_errors == ["marker"] * marker_fault
+    assert not owner._observer.is_alive()
+    assert owner.run.snapshot().state == "failed"
+    assert owner.snapshot()["state"] == "failed"
 
 
 @pytest.mark.parametrize("prior", [False, True])
@@ -687,9 +742,8 @@ def test_real_close_contention_preserves_original_failure_events(tmp_path, monke
     try:
         with owner:
             if prior:
-                with pytest.raises(RequestPolicyError) as caught:
-                    owner.run._deny("accounting")
-                prior_errors.append(caught.value)
+                _reason, error = latch_prior_failure(owner, "accounting")
+                prior_errors.append(error)
             lock.execute("BEGIN IMMEDIATE")
     except (RequestPolicyError, BaseExceptionGroup) as error:
         failure = error
