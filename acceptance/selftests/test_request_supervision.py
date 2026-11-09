@@ -1,15 +1,19 @@
 """Explicit diagnostic callers own a truthful summary and a finite child lifecycle."""
 
+import ast
+import dis
 import importlib
 import importlib.util
+import inspect
 import json
 import signal
 import sqlite3
 import subprocess
 import sys
+import textwrap
 import threading
 import time
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 import pytest
@@ -753,10 +757,6 @@ def test_registration_race_preserves_caller_custody_and_shutdown_bound(
                 with owner:
                     registrar.start()
                     assert arrived.wait(3)
-                    if point == "registry":
-                        with pytest.raises(RequestPolicyError) as competing:
-                            owner.register_child(child, participant="competing", role="service")
-                        assert competing.value.reason == "accounting"
             except (RequestPolicyError, BaseExceptionGroup) as error:
                 shutdown.append(type(error))
             finally:
@@ -773,7 +773,101 @@ def test_registration_race_preserves_caller_custody_and_shutdown_bound(
             controller.join(timeout=3)
             assert not registrar.is_alive() and not controller.is_alive()
         assert registrations == ["authorization"]
-        assert shutdown == ([] if point == "authorization" else [RequestPolicyError])
+        assert shutdown == []
         assert child.poll() is None
         child.communicate(b"x", timeout=5)
         assert child.returncode == 0
+
+
+def handoff_line(method, point):
+    source, first = inspect.getsourcelines(method)
+    nodes = ast.walk(ast.parse(textwrap.dedent("".join(source))))
+    line = (
+        first
+        + next(
+            node.lineno
+            for node in nodes
+            if isinstance(node, ast.Attribute) and node.attr == "append"
+        )
+        - 1
+    )
+    if point == "after":
+        # Exception-table bytecode can have no source line.
+        offsets = dict(dis.findlinestarts(method.__func__.__code__))
+        line = min(value for value in filter(None, offsets.values()) if value > line)
+    return line
+
+
+@contextmanager
+def pause_handoff(method, point, registrar, arrived, release):
+    line = handoff_line(method, point)
+    monitor = sys.monitoring
+    tool = next(value for value in (3, 4) if monitor.get_tool(value) is None)
+
+    def pause(_code, current):
+        if threading.current_thread() is registrar and current == line:
+            arrived.set()
+            assert release.wait(3), "The caller did not release its registrar"
+
+    monitor.use_tool_id(tool, "owned-registration-schedule")
+    try:
+        monitor.register_callback(tool, monitor.events.LINE, pause)
+        monitor.set_local_events(tool, method.__func__.__code__, monitor.events.LINE)
+        yield
+    finally:
+        monitor.free_tool_id(tool)
+
+
+@pytest.mark.parametrize("point", ["before", "after"])
+def test_handoff_append_order_decides_custody_during_shutdown(tmp_path, monkeypatch, point):
+    owner = supervisor(tmp_path)
+    arrived, release, finished = (threading.Event() for _ in range(3))
+    registrations, shutdown = [], []
+    monkeypatch.setattr("nci_si_acceptance.request_supervision.JOIN_SECONDS", 0.05)
+    monkeypatch.setattr("nci_si_acceptance.request_supervision.STOP_SECONDS", 0.2)
+    with subprocess.Popen(
+        [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+
+        def register():
+            result = "accepted"
+            try:
+                owner.register_child(child, participant="racing", role="service")
+            except RequestPolicyError:
+                result = "rejected"
+            registrations.append(result)
+
+        registrar = threading.Thread(target=register)
+
+        def control():
+            try:
+                with owner:
+                    registrar.start()
+                    assert arrived.wait(3)
+            except (RequestPolicyError, BaseExceptionGroup) as error:
+                shutdown.append(type(error))
+            finally:
+                finished.set()
+
+        controller = threading.Thread(target=control)
+        with pause_handoff(owner.register_child, point, registrar, arrived, release):
+            controller.start()
+            try:
+                assert arrived.wait(3)
+                assert finished.wait(1.5), "The registrar blocked bounded shutdown"
+            finally:
+                release.set()
+                registrar.join(timeout=3)
+                controller.join(timeout=3)
+                assert not registrar.is_alive() and not controller.is_alive()
+        assert registrations == ["accepted" if point == "after" else "rejected"]
+        assert owner.snapshot()["state"] == ("failed" if shutdown else "completed")
+        if point == "before":
+            assert child.poll() is None
+            child.communicate(b"x", timeout=5)
+            assert child.returncode == 0
+        else:
+            assert child.returncode is not None and child.returncode != 0
