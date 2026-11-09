@@ -226,14 +226,15 @@ class ControlledRun:
             if connection is not None:
                 connection.close()
 
-    def _mark_failed(self, reason: PolicyReason) -> None:
+    def _mark_failed(self, reason: PolicyReason) -> bool:
         self._failed = reason
         try:
             with (self.directory / "failed").open("x") as stream:
                 stream.write(reason)
+            return True
         except FileExistsError:
             # An existing marker already closes admission; do not replace it.
-            pass
+            return False
         except OSError:
             # This participant still refuses; inability to publish never authorizes traffic.
             raise RequestPolicyError("accounting") from None

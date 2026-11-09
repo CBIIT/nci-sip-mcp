@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -15,7 +15,7 @@ from nci_si_acceptance.request_authorization import Authorization
 from nci_si_acceptance.request_budget import ControlledRun
 from nci_si_acceptance.request_summary import RunSummary, project, publish
 from nci_si_mcp.http_client import RequestPolicyError
-from nci_si_mcp.validation import ChildRole, SummaryState
+from nci_si_mcp.validation import ChildRole, PolicyReason, SummaryState
 
 # One missed pulse is tolerated by the ledger's two-second stale deadline.
 PULSE_SECONDS = 1.0
@@ -41,9 +41,10 @@ class SupervisedRun:
         self._entered = False
         self._initial_published = False
         self._finishing = False
-        self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._children: list[OwnedChild] = []
+        self._registrations: list[OwnedChild | None] = []
+        self._child_errors: dict[subprocess.Popen[bytes], RequestPolicyError] = {}
+        self._primary_error: RequestPolicyError | None = None
         self._observer_error: RequestPolicyError | None = None
         self._observer_cleanup_error: RequestPolicyError | None = None
         self._observer = threading.Thread(target=self._observe, name="controlled-run-observer")
@@ -95,15 +96,26 @@ class SupervisedRun:
             raise RequestPolicyError("authorization")
         self.run.authorize_participant(participant)
         child = OwnedChild(process, participant, role)
-        if not self._lock.acquire(blocking=False):
-            raise RequestPolicyError("accounting")
-        try:
-            if self._registered(process, participant) or self._finishing:
-                raise RequestPolicyError("authorization")
-            # The caller releases its start barrier only after this transfer succeeds.
-            self._children.append(child)
-        finally:
-            self._lock.release()
+        if self._registered(process, participant):
+            raise RequestPolicyError("authorization")
+        # Atomic append orders a complete offer against shutdown's seal. No check/act gap.
+        self._registrations.append(child)
+        if not any(accepted is child for accepted in self._children):
+            raise RequestPolicyError("authorization")
+
+    @property
+    def _children(self) -> tuple[OwnedChild, ...]:
+        accepted: list[OwnedChild] = []
+        # Python 3.14 list.copy/append are atomic; iteration over the live list is not.
+        for child in self._registrations.copy():
+            if child is None:
+                break
+            if not any(
+                old.process is child.process or old.participant == child.participant
+                for old in accepted
+            ):
+                accepted.append(child)
+        return tuple(accepted)
 
     def _registered(self, process: subprocess.Popen[bytes], participant: str) -> bool:
         return any(
@@ -130,7 +142,7 @@ class SupervisedRun:
     def _inspection_failed(self) -> None:
         self._observer_error = RequestPolicyError("accounting")
         try:
-            self.run._mark_failed("accounting")
+            self._record_failure(self._observer_error, "accounting")
         except RequestPolicyError as error:
             self._observer_cleanup_error = error
         self._stop.set()
@@ -140,9 +152,20 @@ class SupervisedRun:
         if code is None:
             return
         if code != 0 or child.role == "service":
-            self.run._deny("transport")
-        if self.run.participant_pending(child.participant):
-            self.run._deny("accounting")
+            reason: PolicyReason = "transport"
+        elif self.run.participant_pending(child.participant):
+            reason = "accounting"
+        else:
+            return
+        error = RequestPolicyError(reason)
+        if self._child_errors.setdefault(child.process, error) is error:
+            self._record_failure(error, reason)
+            raise error
+
+    def _record_failure(self, error: RequestPolicyError, reason: PolicyReason) -> None:
+        # Exclusive marker creation proves which event owns the ledger's first failure.
+        if self.run._mark_failed(reason):
+            self._primary_error = error
 
     def _join(self) -> None:
         if self._observer.ident is not None:
@@ -175,7 +198,7 @@ class SupervisedRun:
         self._check_child(child)
 
     @staticmethod
-    def _collect(actions: list[Callable[[], None]]) -> list[BaseException]:
+    def _collect(actions: Iterable[Callable[[], object]]) -> list[BaseException]:
         errors: list[BaseException] = []
         for action in actions:
             try:
@@ -190,46 +213,54 @@ class SupervisedRun:
         self._finishing = True
         # Observer never publishes: only the controller writes initial/final projections.
         errors = [initiating] if initiating is not None else []
-        if initiating is None:
-            errors.extend(self._collect([self._terminal_failure]))
-        primary_errors = errors.copy()
-        errors.extend(self._collect([self._close_admission]))
-        errors.extend(self._collect([self._seal_registry]))
-        self._stop.set()
-        actions: list[Callable[[], None]] = [self._join]
-        actions.extend(lambda child=child: self._clean_child(child) for child in self._children)
-        errors.extend(self._collect(actions))
-        errors.extend(self._observer_failures(primary_errors, initiating))
-        if self._observer_cleanup_error is not None:
-            errors.append(self._observer_cleanup_error)
+        self._cleanup(errors, terminal=initiating is None)
         errors.extend(self._collect([lambda: self._finalize(not errors)]))
         if len(errors) > (initiating is not None):
             if len(errors) == 1:
                 raise errors[0] from None
             raise BaseExceptionGroup("Controlled run failed.", errors) from None
 
+    def _cleanup(self, errors: list[BaseException], *, terminal: bool) -> None:
+        errors.extend(self._collect([self._close_admission]))
+        errors.extend(self._collect([self._seal_registry]))
+        self._stop.set()
+        errors.extend(self._collect([self._join]))
+        if terminal:
+            errors[:0] = self._collect([self._terminal_failure])
+        actions: list[Callable[[], None]] = [
+            lambda child=child: self._clean_child(child) for child in self._children
+        ]
+        errors.extend(self._collect(actions))
+        errors.extend(self._observed_failures(errors))
+
+    def _observed_failures(self, errors: list[BaseException]) -> list[BaseException]:
+        observed = list(self._child_errors.values())
+        if self._observer_error is not None:
+            observed.append(self._observer_error)
+        if self._observer_cleanup_error is not None:
+            observed.append(self._observer_cleanup_error)
+        return [error for error in observed if not self._contains(errors, error)]
+
     def _seal_registry(self) -> None:
-        # Failure retains custody and forbids completed success; never wait on registration.
-        if not self._lock.acquire(blocking=False):
-            raise RequestPolicyError("accounting")
-        self._lock.release()
+        self._registrations.append(None)
 
     def _terminal_failure(self) -> None:
         failure = self.run.snapshot().failure
         if failure is not None:
-            raise RequestPolicyError(failure)
+            raise self._primary_error or RequestPolicyError(failure)
 
-    def _observer_failures(
-        self, errors: list[BaseException], initiating: BaseException | None
-    ) -> list[BaseException]:
-        observed = self._observer_error
-        if observed is None:
-            return []
-        duplicate = any(
-            isinstance(error, RequestPolicyError) and error.reason == observed.reason
+    @staticmethod
+    def _contains(
+        errors: list[BaseException] | tuple[BaseException, ...], event: BaseException
+    ) -> bool:
+        return any(
+            error is event
+            or (
+                isinstance(error, BaseExceptionGroup)
+                and SupervisedRun._contains(error.exceptions, event)
+            )
             for error in errors
         )
-        return [] if initiating is None and duplicate else [observed]
 
     def _close_admission(self) -> None:
         errors = self._collect([self.run.close])

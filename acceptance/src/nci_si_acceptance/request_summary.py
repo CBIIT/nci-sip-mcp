@@ -153,7 +153,11 @@ def _relationships(value: RunSummary) -> None:
                 <= min(limits["attempts"], reserved["logical"] * limits["per_logical"]),
                 observed["transportEntries"] <= reserved["attempts"],
                 observed["bodyBytes"] <= reserved["bodyBytes"] <= limits["total_bytes"],
+                reserved["bodyBytes"] <= reserved["attempts"] * (limits["response_bytes"] + 1),
+                observed["bodyBytes"]
+                <= observed["transportEntries"] * (limits["response_bytes"] + 1),
                 observed["peakActive"] <= min(limits["concurrent"], reserved["attempts"]),
+                reserved["attempts"] == 0 or observed["peakActive"] >= 1,
                 not value["observationComplete"] or reserved["bodyBytes"] == observed["bodyBytes"],
             )
         )
