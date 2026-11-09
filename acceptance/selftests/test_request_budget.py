@@ -44,6 +44,8 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, build_opener
 from nci_si_mcp.http_client import HttpClient, RequestPolicyError
+from nci_si_mcp.bounds import CallDeadlineError, deadline_scope
+from nci_si_mcp.http_client import UpstreamUnavailableError
 from nci_si_mcp.request_policy import Exchange
 
 http_client._OPENER = build_opener(ProxyHandler({}), http_client._SameOriginRedirects())
@@ -71,8 +73,13 @@ class ActorPolicy:
                 return Exchange(response.status, dict(response.headers), body)
     def _enter_transport(self, lease, on_start, timeout_seconds):
         # This local actor declares entry here; receiver contacts remain independent.
+        if settings.get("entry_fault") == "callback":
+            with deadline_scope(0):
+                on_start()
         on_start()
         lease.entered()
+        if settings.get("entry_fault") == "opening":
+            raise OSError("synthetic local opening failure")
         try:
             return build_opener(ProxyHandler({})).open(
                 self.request_snapshot, timeout=timeout_seconds
@@ -106,10 +113,12 @@ client = HttpClient(
 accepted, refused = 0, []
 for round_number in range(settings.get("rounds", 2)):
     try:
-        client.get_json("/api/v1/version")
+        client.get_json(settings.get("path", "/api/v1/version"))
         accepted += 1
     except RequestPolicyError as error:
         refused.append(error.reason)
+    except (CallDeadlineError, UpstreamUnavailableError) as error:
+        refused.append(type(error).__name__)
     if round_number == 0 and settings.get("barrier", False):
         Path(sys.argv[1]).with_suffix(".round1").write_text("finished")
         sys.stdin.readline()
@@ -1244,3 +1253,206 @@ def test_large_reservation_refuses_before_integer_promotion(tmp_path):
         ):
             pytest.fail("Overflowing reservation was admitted")
         assert refused.value.reason == "byte_limit"
+
+
+def test_unavailable_receipt_storage_retains_uncertainty(tmp_path):
+    with retirement_run(tmp_path) as (run, grant):
+        with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
+            lease.entered()
+            storage = sqlite3.connect(run.directory / "ledger.sqlite")
+            returned = []
+
+            def reader(maximum):
+                storage.execute("BEGIN IMMEDIATE")
+                returned.append(b"known"[:maximum])
+                return returned[-1]
+
+            try:
+                with pytest.raises(RequestPolicyError) as refused:
+                    lease.read(reader, 6)
+                assert refused.value.reason == "accounting"
+            finally:
+                storage.rollback()
+                storage.close()
+            assert returned == [b"known"]
+            assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 6, 0))
+        assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 6, 0))
+    snapshot = run.snapshot()
+    assert (snapshot.active, snapshot.pending_receipts, snapshot.observation_complete) == (
+        1,
+        1,
+        False,
+    )
+    with sqlite3.connect(run.directory / "ledger.sqlite") as storage:
+        storage.execute("UPDATE run SET active=0")
+    assert refusal(run.snapshot) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+
+
+@pytest.mark.parametrize("fault", [OSError, ValueError])
+def test_reader_failure_retains_unknown_progress(tmp_path, fault):
+    with (
+        retirement_run(tmp_path) as (run, grant),
+        run.logical(grant) as logical,
+        logical.attempt(response_limit=5) as lease,
+    ):
+        lease.entered()
+
+        def reader(_maximum):
+            raise fault("synthetic-private-reader-detail")
+
+        with pytest.raises(RequestPolicyError) as refused:
+            lease.read(reader, 6)
+        assert refused.value.reason == "transport"
+        assert "synthetic-private-reader-detail" not in "".join(
+            traceback.format_exception(refused.value)
+        )
+        assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 6, 0))
+    assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 6, 0))
+
+
+def test_unavailable_release_keeps_known_bytes_until_cleanup(tmp_path):
+    with retirement_run(tmp_path) as (run, grant):
+        with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
+            lease.entered()
+            assert lease.read(lambda maximum: b"known"[:maximum], 6) == b"known"
+            storage = sqlite3.connect(run.directory / "ledger.sqlite")
+            try:
+                storage.execute("BEGIN IMMEDIATE")
+                with pytest.raises(RequestPolicyError) as refused:
+                    lease.release()
+                assert refused.value.reason == "accounting"
+            finally:
+                storage.rollback()
+                storage.close()
+            assert receipt_quantities(run, lease) == ((1, 6, 5), (5, 0, 0))
+        assert receipt_quantities(run, lease) == ((0, 5, 5), (5, 0, 1))
+
+
+def test_reaped_child_does_not_reclaim_unknown_progress(tmp_path):
+    actor = tmp_path / "reaped.py"
+    actor.write_text(HELD_ACTOR)
+    with tiny_run(tmp_path) as (run, grant, limits, upstream):
+        child = launch_actor(actor, tmp_path, 0, {"url": grant.url, "limits": limits}, run)
+        try:
+            child.stdin.write(b"ready\n")
+            child.stdin.flush()
+            wait_for_first_round([tmp_path / "child-0.reading"])
+            stop_actor(child)
+            assert child.poll() is not None
+            run.close()
+            snapshot = run.snapshot()
+            assert (
+                snapshot.state,
+                snapshot.failure,
+                snapshot.active,
+                snapshot.pending_receipts,
+            ) == ("closed", None, 1, 1)
+            assert (
+                snapshot.reserved_body_bytes,
+                snapshot.consumed_body_bytes,
+                snapshot.observation_complete,
+            ) == (6, 0, False)
+            assert len(upstream.log()) == 1
+        finally:
+            stop_actor(child)
+
+
+@pytest.mark.parametrize(
+    "delay,reason",
+    [
+        (0, None),
+        (0.5, None),
+        (-1, "authorization"),
+        (True, "authorization"),
+        (False, "authorization"),
+        (None, "authorization"),
+        ("1", "authorization"),
+        (float("nan"), "authorization"),
+        (float("inf"), "authorization"),
+        (float("-inf"), "authorization"),
+        (1 << 4096, "authorization"),
+        ("deadline", "deadline"),
+    ],
+)
+def test_wait_boundary(tmp_path, monkeypatch, delay, reason):
+    with retirement_run(tmp_path) as (run, _), monkeypatch.context() as patch:
+        patch.setattr(
+            "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: run.started)
+        )
+        if delay == "deadline":
+            delay = run.authorization.limits.seconds
+        if reason is None:
+            run.check_wait(delay)
+            snapshot = run.snapshot()
+            assert (snapshot.state, snapshot.logical, snapshot.attempts) == ("open", 0, 0)
+        else:
+            with pytest.raises(RequestPolicyError) as refused:
+                run.check_wait(delay)
+            assert (refused.value.reason, str(refused.value)) == (
+                reason,
+                "Controlled upstream request refused.",
+            )
+
+
+def test_storage_failure_suppresses_private_traceback(tmp_path):
+    with retirement_run(tmp_path / "synthetic-private-storage-detail") as (run, _):
+        key = run.directory / "key"
+        saved = run.directory / "key.saved"
+        key.rename(saved)
+        try:
+            with pytest.raises(RequestPolicyError) as refused:
+                run.snapshot()
+            assert (refused.value.reason, str(refused.value)) == (
+                "accounting",
+                "Controlled upstream request refused.",
+            )
+            assert "synthetic-private-storage-detail" not in "".join(
+                traceback.format_exception(refused.value)
+            )
+        finally:
+            saved.rename(key)
+
+
+@pytest.mark.parametrize(
+    "fault,entries,reason",
+    [("callback", 0, "CallDeadlineError"), ("opening", 1, "UpstreamUnavailableError")],
+)
+def test_callback_and_declared_entry_do_not_imply_receiver_contact(
+    tmp_path, fault, entries, reason
+):
+    actor = tmp_path / "entry.py"
+    actor.write_text(ACTOR)
+    with tiny_run(tmp_path) as (run, grant, limits, upstream):
+        settings = {
+            "url": grant.url,
+            "base": grant.url.removesuffix("/owned"),
+            "path": "/owned",
+            "headers": [],
+            "limits": limits,
+            "rounds": 1,
+            "entry_fault": fault,
+        }
+        child = launch_actor(actor, tmp_path, 0, settings, run)
+        try:
+            result = release_and_collect([child])[0]
+            assert (result["accepted"], result["refused"]) == (0, [reason])
+            snapshot = run.snapshot()
+            assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (
+                1,
+                1,
+                entries,
+            )
+            assert (
+                snapshot.active,
+                snapshot.pending_receipts,
+                snapshot.reserved_body_bytes,
+                snapshot.consumed_body_bytes,
+                snapshot.observation_complete,
+            ) == (0, 0, 0, 0, True)
+            assert upstream.log() == []
+        finally:
+            stop_actor(child)
