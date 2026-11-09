@@ -1137,8 +1137,9 @@ def handoff_line(method, point):
 
 
 @contextmanager
-def pause_handoff(method, point, registrar, arrived, release):
-    line = handoff_line(method, point)
+def pause_handoff(method, point, registrar, arrived, release, *, line=None):
+    if line is None:
+        line = handoff_line(method, point)
     monitor = sys.monitoring
     tool = next(value for value in (3, 4) if monitor.get_tool(value) is None)
 
@@ -1238,3 +1239,46 @@ def test_unmanaged_heartbeat_refuses_implicit_supervision(tmp_path):
     assert caught.value.reason == "authorization"
     assert not (run.directory / "summary.json").exists()
     run.close()
+
+
+def test_competing_local_failure_keeps_first_completed_latch(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    active = threading.Event()
+    active.set()
+    marker_errors = marker_publication_failure(monkeypatch, owner.run, active)
+    arrived, release = threading.Event(), threading.Event()
+    worker_errors = []
+
+    def actor():
+        try:
+            owner.run.check_wait(float("nan"))
+        except RequestPolicyError as error:
+            worker_errors.append(error.reason)
+
+    thread = threading.Thread(target=actor)
+    source, first = inspect.getsourcelines(owner.run._mark_failed)
+    statement = ast.parse(textwrap.dedent("".join(source))).body[0].body[0]
+    if isinstance(statement, ast.If):
+        statement = statement.body[0]
+    line = first + statement.lineno - 1
+    with (
+        pytest.raises(RequestPolicyError) as outer,
+        owner,
+        pause_handoff(owner.run._mark_failed, "before", thread, arrived, release, line=line),
+    ):
+        thread.start()
+        try:
+            assert arrived.wait(3), "The actor did not reach its first-latch boundary"
+            with pytest.raises(RequestPolicyError) as inner:
+                owner.run.check_wait(1801)
+            assert inner.value.reason == "accounting"
+            assert owner.run.snapshot().failure == "deadline"
+        finally:
+            release.set()
+            thread.join(timeout=3)
+            assert not thread.is_alive()
+        assert owner.run.snapshot().failure == "deadline"
+    assert outer.value.reason == "deadline"
+    assert worker_errors == ["accounting"]
+    assert marker_errors == ["marker", "marker"]
+    assert not owner._observer.is_alive()
