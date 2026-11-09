@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 import traceback
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import fields, replace
 from functools import partial
 from pathlib import Path
@@ -400,7 +400,7 @@ def test_real_sqlite_contention_closes_admission(tmp_path):
     with tiny_run(tmp_path) as (run, grant, limits, upstream):
         child = launch_actor(actor, tmp_path, 0, {"url": grant.url, "limits": limits}, run)
         try:
-            with sqlite3.connect(run.directory / "ledger.sqlite") as blocker:
+            with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
                 blocker.execute("BEGIN IMMEDIATE")
                 started = time.monotonic()
                 with pytest.raises(RequestPolicyError) as refused:
@@ -508,7 +508,10 @@ def test_snapshot_rejects_incoherent_ledger_values(tmp_path, query, value):
         if query is None:
             (run.directory / "failed").write_text(value)
         else:
-            with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+            with (
+                closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection,
+                connection,
+            ):
                 connection.execute(query, (value,))
         assert refusal(run.snapshot) == (
             RequestPolicyError,
@@ -768,7 +771,10 @@ def test_rejected_snapshot_closes_other_participant_admission(tmp_path, invalid)
         run.authorize_participant("other")
         other = ControlledRun.attach(run.descriptor, run.authorization, participant="other")
         if invalid:
-            with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+            with (
+                closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection,
+                connection,
+            ):
                 connection.execute("UPDATE run SET logical=?", (-1,))
             with pytest.raises(RequestPolicyError) as rejected:
                 run.snapshot()
@@ -786,7 +792,7 @@ def test_rejected_snapshot_closes_other_participant_admission(tmp_path, invalid)
             (RequestPolicyError, "Controlled upstream request refused.", None) if invalid else None
         )
         assert observed == expected
-        with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection, connection:
             quantities = connection.execute("SELECT logical,attempts,entered FROM run").fetchone()
         assert quantities == ((-1, 0, 0) if invalid else (1, 1, 1))
 
@@ -890,7 +896,7 @@ def test_only_controller_can_change_run_lifecycle(tmp_path, operation):
             "Controlled upstream request refused.",
             None,
         )
-        with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection, connection:
             state = connection.execute("SELECT state FROM run").fetchone()[0]
             workers = connection.execute("SELECT name FROM workers ORDER BY name").fetchall()
         assert state == ("closed" if operation == "attach_closed" else "open")
@@ -931,7 +937,7 @@ def changed_run_identity(run, change, monkeypatch):
     }
     key = run.directory / "key"
     original_key = key.read_bytes()
-    with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+    with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection, connection:
         original = connection.execute("SELECT id,policy,started FROM run").fetchone()
     changed = list(original)
     index, value = stored.get(change, (2, run.started))
@@ -943,19 +949,25 @@ def changed_run_identity(run, change, monkeypatch):
             if change == "key":
                 key.write_bytes(b"changed".ljust(32, b"!"))
             if change in stored:
-                with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+                with (
+                    closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection,
+                    connection,
+                ):
                     connection.execute("UPDATE run SET id=?,policy=?,started=?", changed)
             yield
         finally:
             if change == "key":
                 key.write_bytes(original_key)
             if change in stored:
-                with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+                with (
+                    closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection,
+                    connection,
+                ):
                     connection.execute("UPDATE run SET id=?,policy=?,started=?", original)
 
 
 def receipt_quantities(run, lease):
-    with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+    with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection, connection:
         ledger = connection.execute("SELECT active,reserved,consumed FROM run").fetchone()
         receipt = connection.execute(
             "SELECT consumed,pending,retired FROM leases WHERE id=?", (lease.lease_id,)
@@ -1163,7 +1175,8 @@ def test_other_process_holds_concurrency_until_its_receipt(tmp_path):
 def test_snapshot_requires_one_run_record(tmp_path, layout):
     with (
         retirement_run(tmp_path) as (run, _),
-        sqlite3.connect(run.directory / "ledger.sqlite") as storage,
+        closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage,
+        storage,
     ):
         storage.execute("CREATE TEMP TABLE saved_run AS SELECT * FROM run")
         storage.execute(
@@ -1283,7 +1296,7 @@ def test_unavailable_receipt_storage_retains_uncertainty(tmp_path):
         1,
         False,
     )
-    with sqlite3.connect(run.directory / "ledger.sqlite") as storage:
+    with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage, storage:
         storage.execute("UPDATE run SET active=0")
     assert refusal(run.snapshot) == (
         RequestPolicyError,
