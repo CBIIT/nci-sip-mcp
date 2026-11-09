@@ -16,6 +16,8 @@ from nci_si_acceptance import request_budget
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_mcp.http_client import RequestPolicyError
 
+KNOWN_BODY_BYTES = 5
+
 
 def authorization():
     return Authorization((RequestGrant("GET", "http://127.0.0.1:9/probe", ()),), Limits(), "a" * 64)
@@ -101,6 +103,27 @@ def test_terminal_refusal_cannot_publish_completed(tmp_path):
     summary = json.loads((owner.run.directory / "summary.json").read_text())
     assert summary["state"] == "failed"
     assert summary["observationComplete"] is True
+
+
+def test_caught_refusal_preserves_failed_state_and_five_known_bytes(tmp_path):
+    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    original = authorization()
+    auth = Authorization(original.grants, Limits(logical=1), original.policy_sha256)
+    owner = entry.SupervisedRun.create(auth, tmp_path)
+    with owner:
+        with (
+            owner.run.logical(auth.grants[0]) as logical,
+            logical.attempt(response_limit=8) as lease,
+        ):
+            lease.entered()
+            assert lease.read(lambda _maximum: b"hello", 5) == b"hello"
+        with pytest.raises(RequestPolicyError), owner.run.logical(auth.grants[0]):
+            pytest.fail("The second logical request exceeds its ceiling")
+    summary = json.loads((owner.run.directory / "summary.json").read_text())
+    assert summary["state"] == "failed"
+    assert summary["observationComplete"] is True
+    assert summary["observed"]["bodyBytes"] == KNOWN_BODY_BYTES
+    assert summary["reservations"]["bodyBytes"] == KNOWN_BODY_BYTES
 
 
 def test_registered_short_worker_is_reaped_and_streams_closed(tmp_path):

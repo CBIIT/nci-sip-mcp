@@ -9,6 +9,8 @@ import pytest
 
 from nci_si_mcp.http_client import RequestPolicyError
 
+FAILURE_COUNT = 2
+
 
 def reader():
     name = "nci_si_acceptance.request_summary"
@@ -90,3 +92,53 @@ def test_completed_reader_requires_complete_observation(tmp_path):
     operation = reader()
     with pytest.raises(RequestPolicyError):
         operation(path, run_id="b" * 32, policy_sha256="a" * 64)
+
+
+def test_completed_reader_rejects_unresolved_capacity(tmp_path):
+    path = tmp_path / "summary.json"
+    value = record() | {"state": "completed", "observationComplete": True}
+    value["observed"]["bodyBytes"] = 5
+    value["reservations"]["bodyBytes"] = 6
+    path.write_text(json.dumps(value))
+    operation = reader()
+    with pytest.raises(RequestPolicyError):
+        operation(path, run_id="b" * 32, policy_sha256="a" * 64)
+
+
+def test_write_and_cleanup_failures_are_both_sanitized(tmp_path, monkeypatch):
+    module = importlib.import_module("nci_si_acceptance.request_summary")
+
+    def replace_failure(_source, _target):
+        raise OSError("private initiating path")
+
+    def unlink_failure(_path, **_options):
+        raise PermissionError("private cleanup path")
+
+    monkeypatch.setattr(module.os, "replace", replace_failure)
+    monkeypatch.setattr(module.Path, "unlink", unlink_failure)
+    failure = None
+    try:
+        module.publish(tmp_path / "summary.json", record())
+    except (OSError, RequestPolicyError, ExceptionGroup) as error:
+        failure = error
+    assert isinstance(failure, ExceptionGroup)
+    assert len(failure.exceptions) == FAILURE_COUNT
+    assert all(type(error) is RequestPolicyError for error in failure.exceptions)
+    assert all(str(error) == "Controlled upstream request refused." for error in failure.exceptions)
+    assert "private" not in repr(failure)
+
+
+def test_successful_replace_needs_no_second_cleanup(tmp_path, monkeypatch):
+    module = importlib.import_module("nci_si_acceptance.request_summary")
+
+    def unlink_failure(_path, **_options):
+        raise PermissionError("private cleanup path")
+
+    monkeypatch.setattr(module.Path, "unlink", unlink_failure)
+    failure = None
+    try:
+        module.publish(tmp_path / "summary.json", record())
+    except OSError as error:
+        failure = type(error).__name__
+    assert failure is None
+    assert json.loads((tmp_path / "summary.json").read_text()) == record()
