@@ -44,7 +44,7 @@ class SupervisedRun:
         self._stop = threading.Event()
         self._registrations: list[OwnedChild | None] = []
         self._child_errors: dict[subprocess.Popen[bytes], RequestPolicyError] = {}
-        self._primary_error: RequestPolicyError | None = None
+        self._primary_error: BaseException | None = None
         self._observer_error: RequestPolicyError | None = None
         self._observer_cleanup_error: RequestPolicyError | None = None
         self._observer = threading.Thread(target=self._observe, name="controlled-run-observer")
@@ -162,7 +162,7 @@ class SupervisedRun:
             self._record_failure(error, reason)
             raise error
 
-    def _record_failure(self, error: RequestPolicyError, reason: PolicyReason) -> None:
+    def _record_failure(self, error: BaseException, reason: PolicyReason) -> None:
         # Exclusive marker creation proves which event owns the ledger's first failure.
         if self.run._mark_failed(reason):
             self._primary_error = error
@@ -226,7 +226,8 @@ class SupervisedRun:
         self._stop.set()
         errors.extend(self._collect([self._join]))
         if terminal:
-            errors[:0] = self._collect([self._terminal_failure])
+            known = self._collect([self._terminal_failure])
+            errors[:0] = [error for error in known if not self._contains(errors, error)]
         actions: list[Callable[[], None]] = [
             lambda child=child: self._clean_child(child) for child in self._children
         ]
@@ -265,7 +266,7 @@ class SupervisedRun:
     def _close_admission(self) -> None:
         errors = self._collect([self.run.close])
         if errors:
-            errors.extend(self._collect([lambda: self.run._mark_failed("accounting")]))
+            errors.extend(self._collect([lambda: self._record_failure(errors[0], "accounting")]))
             if len(errors) == 1:
                 raise errors[0] from None
             raise BaseExceptionGroup("Controlled admission closure failed.", errors) from None
