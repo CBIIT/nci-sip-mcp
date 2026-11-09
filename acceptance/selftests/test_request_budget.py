@@ -538,12 +538,12 @@ def test_snapshot_rejects_incoherent_ledger_values(tmp_path, query, value):
 
 
 @contextmanager
-def retirement_run(tmp_path, *, opened=True, total_bytes=12, response_bytes=5):
+def retirement_run(tmp_path, *, opened=True, total_bytes=12, response_bytes=5, per_logical=1):
     grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
     limits = Limits(
         logical=2,
         attempts=2,
-        per_logical=1,
+        per_logical=per_logical,
         concurrent=2,
         response_bytes=response_bytes,
         total_bytes=total_bytes,
@@ -1706,3 +1706,77 @@ def test_receipt_pending_mismatch_preserves_unknown_progress(tmp_path):
             None,
         )
         assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 2, 0))
+
+
+@pytest.mark.parametrize("operation", ["register", "logical", "attempt", "entry", "read", "wait"])
+@pytest.mark.parametrize("barrier", ["closed", "failed", "deadline"])
+def test_terminal_admission_refuses_new_work(tmp_path, monkeypatch, operation, barrier):
+    with retirement_run(tmp_path, per_logical=2) as (run, grant):
+        with (
+            run.logical(grant) as logical,
+            logical.attempt(response_limit=5) as lease,
+            ExitStack() as resources,
+        ):
+            if operation == "read":
+                lease.entered()
+            if barrier == "closed":
+                run.close()
+            elif barrier == "failed":
+                with pytest.raises(RequestPolicyError) as initial:
+                    run.check_wait(-1)
+                assert initial.value.reason == "authorization"
+            else:
+                monkeypatch.setattr(
+                    "nci_si_acceptance.request_budget.time",
+                    SimpleNamespace(
+                        monotonic=lambda: run.started + run.authorization.limits.seconds
+                    ),
+                )
+            reads = []
+
+            def reader(maximum):
+                reads.append(maximum)
+                return b"known"[:maximum]
+
+            actions = {
+                "register": partial(run.authorize_participant, "late"),
+                "logical": lambda: resources.enter_context(run.logical(grant)),
+                "attempt": lambda: resources.enter_context(logical.attempt(response_limit=5)),
+                "entry": lease.entered,
+                "read": partial(lease.read, reader, 6),
+                "wait": partial(run.check_wait, 0),
+            }
+            with pytest.raises(RequestPolicyError) as refused:
+                actions[operation]()
+            assert (
+                type(refused.value),
+                refused.value.reason,
+                str(refused.value),
+                refused.value.__cause__,
+            ) == (
+                RequestPolicyError,
+                "deadline" if barrier == "deadline" else "closed",
+                "Controlled upstream request refused.",
+                None,
+            )
+            assert reads == []
+            assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 0, 0))
+            with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
+                assert storage.execute("SELECT name FROM workers").fetchall() == [("controller",)]
+        assert receipt_quantities(run, lease) == ((0, 0, 0), (0, 0, 1))
+
+
+def test_expired_created_run_refuses_open(tmp_path, monkeypatch):
+    with retirement_run(tmp_path, opened=False) as (run, _):
+        monkeypatch.setattr(
+            "nci_si_acceptance.request_budget.time",
+            SimpleNamespace(monotonic=lambda: run.started + run.authorization.limits.seconds),
+        )
+        with pytest.raises(RequestPolicyError) as refused:
+            run.open()
+        assert (refused.value.reason, str(refused.value)) == (
+            "deadline",
+            "Controlled upstream request refused.",
+        )
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
+            assert storage.execute("SELECT state FROM run").fetchall() == [("created",)]
