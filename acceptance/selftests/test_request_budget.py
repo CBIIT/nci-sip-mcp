@@ -1456,3 +1456,34 @@ def test_callback_and_declared_entry_do_not_imply_receiver_contact(
             assert upstream.log() == []
         finally:
             stop_actor(child)
+
+
+def test_unentered_lease_refuses_before_invoking_reader(tmp_path):
+    with retirement_run(tmp_path) as (run, grant):
+        with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
+            reads = []
+
+            def reader(maximum):
+                reads.append(maximum)
+                return b"known"[:maximum]
+
+            assert refusal(lambda: lease.read(reader, 6)) == (
+                RequestPolicyError,
+                "Controlled upstream request refused.",
+                None,
+            )
+            assert reads == []
+            snapshot = run.snapshot()
+            assert (
+                snapshot.transport_entries,
+                snapshot.consumed_body_bytes,
+                snapshot.pending_receipts,
+            ) == (0, 0, 0)
+            assert receipt_quantities(run, lease) == ((1, 6, 0), (0, 0, 0))
+        snapshot = run.snapshot()
+        assert (
+            snapshot.active,
+            snapshot.reserved_body_bytes,
+            snapshot.observation_complete,
+            snapshot.failure,
+        ) == (0, 0, True, "accounting")
