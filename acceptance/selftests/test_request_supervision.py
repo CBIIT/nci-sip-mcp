@@ -347,18 +347,23 @@ def test_unexpected_real_child_exit_closes_admission(tmp_path, role, code, obser
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     ) as child:
-        with pytest.raises(BaseExceptionGroup if prior else RequestPolicyError) as caught, owner:
-            owner.register_child(child, participant="child", role=role)
-            if prior:
-                with pytest.raises(RequestPolicyError):
-                    owner.run._deny("transport")
-            child.stdin.write(b"x")
-            child.stdin.flush()
-            child.wait(timeout=5)
-            if observed:
-                with pytest.raises(RequestPolicyError):
-                    owner._pulse()
-        errors = caught.value.exceptions if prior else (caught.value,)
+        failure = None
+        try:
+            with owner:
+                owner.register_child(child, participant="child", role=role)
+                if prior:
+                    with pytest.raises(RequestPolicyError):
+                        owner.run._deny("transport")
+                child.stdin.write(b"x")
+                child.stdin.flush()
+                child.wait(timeout=5)
+                if observed:
+                    with pytest.raises(RequestPolicyError):
+                        owner._pulse()
+        except (RequestPolicyError, BaseExceptionGroup) as error:
+            failure = error
+        assert type(failure) is (ExceptionGroup if prior else RequestPolicyError)
+        errors = failure.exceptions if prior else (failure,)
         assert [error.reason for error in errors] == ["transport"] * (2 if prior else 1)
         assert child.returncode == code
         assert child.stdin.closed and child.stdout.closed and child.stderr.closed
