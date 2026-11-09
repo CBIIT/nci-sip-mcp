@@ -3,11 +3,13 @@
 import importlib
 import importlib.util
 import json
+import signal
 import sqlite3
 import subprocess
 import sys
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -516,3 +518,166 @@ def test_closed_constructor_cannot_overwrite_completed_summary(tmp_path):
     with pytest.raises((RequestPolicyError, BaseExceptionGroup)), entry.SupervisedRun(owner.run):
         pytest.fail("A completed run cannot restart")
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("owner_state", ["paused", "lost"])
+def test_actual_controller_loss_refuses_attached_participant(tmp_path, owner_state):
+    descriptor = tmp_path / "controller.json"
+    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
+    script = """
+import sys,json
+from pathlib import Path
+sys.path[:0] = sys.argv[1:3]
+from nci_si_acceptance.request_authorization import Authorization,Limits,RequestGrant
+from nci_si_acceptance.request_supervision import SupervisedRun
+auth=Authorization((RequestGrant('GET','http://127.0.0.1:9/probe',()),),Limits(),'a'*64)
+with SupervisedRun.create(auth,Path(sys.argv[4])) as owner:
+    owner.run.authorize_participant('participant')
+    temporary=Path(sys.argv[3]+'.tmp')
+    temporary.write_text(json.dumps(owner.run.descriptor.to_record()))
+    temporary.replace(sys.argv[3])
+    sys.stdin.buffer.read(1)
+"""
+    with subprocess.Popen(  # noqa: S603 - explicit owned controller with injected source roots.
+        [sys.executable, "-I", "-c", script, *roots, str(descriptor), str(tmp_path / "runs")],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as controller:
+        deadline = time.monotonic() + 5
+        while not descriptor.exists():
+            assert time.monotonic() < deadline and controller.poll() is None
+            time.sleep(0.01)
+        run = request_budget.ControlledRun.attach(
+            request_budget.RunDescriptor.from_record(json.loads(descriptor.read_text())),
+            authorization(),
+            participant="participant",
+        )
+        if owner_state == "paused":
+            controller.send_signal(signal.SIGSTOP)
+        else:
+            controller.terminate()
+            controller.wait(timeout=5)
+        try:
+            time.sleep(3)  # Independent headroom beyond the declared two-second stale window.
+            with pytest.raises(RequestPolicyError) as caught:
+                run.check_wait(0)
+            assert caught.value.reason == "accounting"
+            assert run.snapshot().logical == 0
+        finally:
+            if owner_state == "paused":
+                controller.send_signal(signal.SIGCONT)
+            controller.communicate(b"x", timeout=5)
+        assert controller.returncode != 0
+    expected = "failed" if owner_state == "paused" else "incomplete"
+    assert json.loads((run.directory / "summary.json").read_text())["state"] == expected
+
+
+@pytest.mark.parametrize("operation", ["heartbeat", "pending", "snapshot"])
+def test_new_supervision_operations_recheck_private_identity(tmp_path, operation):
+    owner = supervisor(tmp_path)
+    actions = {
+        "heartbeat": owner.run.heartbeat,
+        "pending": lambda: owner.run.participant_pending("registered"),
+        "snapshot": owner.snapshot,
+    }
+    with pytest.raises(RequestPolicyError), owner:
+        owner.run.authorize_participant("registered")
+        actions[operation]()
+        with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as db, db:
+            db.execute("UPDATE run SET policy=?", ("b" * 64,))
+        try:
+            with pytest.raises(RequestPolicyError) as caught:
+                actions[operation]()
+            assert caught.value.reason == "authorization"
+        finally:
+            with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as db, db:
+                db.execute("UPDATE run SET policy=?", ("a" * 64,))
+
+
+def test_actual_unreaped_child_failure_preserves_initiating_exception(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    module = importlib.import_module("nci_si_acceptance.request_supervision")
+    original_stop = module.stop_child
+    initiating = KeyError("initiating caller failure")
+
+    def fail_reap(_process, *, seconds):
+        raise subprocess.TimeoutExpired(["owned-child"], seconds)
+
+    monkeypatch.setattr(module, "stop_child", fail_reap)
+    with subprocess.Popen(
+        [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+        try:
+            with pytest.raises(BaseExceptionGroup) as caught, owner:
+                owner.register_child(child, participant="service", role="service")
+                raise initiating
+            assert tuple(type(error) for error in caught.value.exceptions) == (
+                KeyError,
+                RequestPolicyError,
+            )
+            assert caught.value.exceptions[0] is initiating
+            assert child.poll() is None
+            assert owner.snapshot()["state"] == "failed"
+        finally:
+            original_stop(child, seconds=0.05)
+        assert child.poll() is not None
+
+
+def test_paused_real_observer_cannot_bypass_shutdown_budget(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    arrived, release, leaving, finished = (threading.Event() for _ in range(4))
+    original_pulse = owner._pulse
+    failures = []
+
+    def paused_pulse():
+        original_pulse()
+        arrived.set()
+        assert release.wait(3), "The caller did not release its owned observer"
+
+    def run():
+        try:
+            with owner:
+                assert arrived.wait(3), "The real observer did not reach its pulse"
+                leaving.set()
+        except (RequestPolicyError, BaseExceptionGroup) as error:
+            failures.append(error)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(owner, "_pulse", paused_pulse)
+    monkeypatch.setattr("nci_si_acceptance.request_supervision.JOIN_SECONDS", 0.05)
+    controller = threading.Thread(target=run)
+    controller.start()
+    try:
+        assert leaving.wait(3)
+        assert finished.wait(0.5), "Observer pause bypassed the bounded shutdown failure"
+        assert owner.run.snapshot().state != "open"
+        assert len(failures) == 1 and type(failures[0]) is RequestPolicyError
+        assert owner.snapshot()["state"] == "failed"
+        assert owner.snapshot()["observationComplete"] is True
+    finally:
+        release.set()
+        controller.join(timeout=3)
+        owner._observer.join(timeout=3)
+        assert not controller.is_alive() and not owner._observer.is_alive()
+
+
+@pytest.mark.parametrize("role", ["unknown", None, [], 1])
+def test_invalid_role_keeps_child_with_caller(tmp_path, role):
+    owner = supervisor(tmp_path)
+    with subprocess.Popen(
+        [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+        with owner:
+            with pytest.raises(RequestPolicyError):
+                owner.register_child(child, participant="rejected", role=role)
+            assert child.poll() is None
+            child.communicate(b"x", timeout=5)
+        assert child.returncode == 0

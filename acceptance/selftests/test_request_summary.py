@@ -4,9 +4,11 @@ import copy
 import importlib
 import importlib.util
 import json
+import threading
 
 import pytest
 
+from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_mcp.http_client import RequestPolicyError
 
 FAILURE_COUNT = 2
@@ -142,3 +144,114 @@ def test_successful_replace_needs_no_second_cleanup(tmp_path, monkeypatch):
         failure = type(error).__name__
     assert failure is None
     assert json.loads((tmp_path / "summary.json").read_text()) == record()
+
+
+def managed(directory):
+    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    auth = Authorization((RequestGrant("GET", "http://127.0.0.1:9/probe", ()),), Limits(), "a" * 64)
+    return entry.SupervisedRun.create(auth, directory)
+
+
+@pytest.mark.parametrize("phase", ["initial", "final"])
+@pytest.mark.parametrize("fault", ["write", "flush", "fsync", "replace"])
+def test_initial_and_final_publication_faults_are_terminal(tmp_path, monkeypatch, phase, fault):
+    module = importlib.import_module("nci_si_acceptance.request_summary")
+    original_factory = module.tempfile.NamedTemporaryFile
+    owner = managed(tmp_path)
+    initial = None
+
+    def fail(*_args, **_kwargs):
+        raise OSError("private publication diagnostic")
+
+    def failing_file(**options):
+        stream = original_factory(**options)
+        monkeypatch.setattr(stream, fault, fail)
+        return stream
+
+    def install():
+        if fault in {"write", "flush"}:
+            monkeypatch.setattr(module.tempfile, "NamedTemporaryFile", failing_file)
+        else:
+            monkeypatch.setattr(module.os, fault, fail)
+
+    if phase == "initial":
+        install()
+    with pytest.raises(RequestPolicyError) as caught, owner:
+        initial = (owner.run.directory / "summary.json").read_bytes()
+        install()
+    assert str(caught.value) == "Controlled upstream request refused."
+    assert owner.run.snapshot().state != "open"
+    path = owner.run.directory / "summary.json"
+    if initial is None:
+        assert not path.exists()
+        assert owner.run.snapshot().logical == 0
+    else:
+        assert path.read_bytes() == initial
+        assert json.loads(initial)["state"] == "incomplete"
+
+
+def test_new_failed_run_cannot_reuse_old_completed_summary(tmp_path, monkeypatch):
+    first = managed(tmp_path)
+    with first:
+        pass
+    path = first.run.directory / "summary.json"
+    original = path.read_bytes()
+    second = managed(tmp_path)
+
+    def fail(_source, _target):
+        raise OSError("synthetic initial publication failure")
+
+    monkeypatch.setattr("os.replace", fail)
+    with pytest.raises(RequestPolicyError), second:
+        pytest.fail("The fresh run cannot complete its initial publication")
+    assert first.run.directory != second.run.directory
+    assert path.read_bytes() == original
+    assert not (second.run.directory / "summary.json").exists()
+
+
+def test_reader_sees_whole_old_or_new_record_during_publication(tmp_path, monkeypatch):
+    module = importlib.import_module("nci_si_acceptance.request_summary")
+    path = tmp_path / "summary.json"
+    original, updated = record(), record()
+    updated["observed"]["bodyBytes"] = 5
+    module.publish(path, original)
+    midway, proceed = threading.Event(), threading.Event()
+    failures = []
+
+    def partial_dump(value, stream, **_options):
+        payload = json.dumps(value)
+        middle = len(payload) // 2
+        stream.write(payload[:middle])
+        stream.flush()
+        midway.set()
+        assert proceed.wait(3), "The reader did not release its owned writer"
+        stream.write(payload[middle:])
+
+    def write():
+        try:
+            module.publish(path, updated)
+        except (RequestPolicyError, BaseExceptionGroup) as error:
+            failures.append(type(error).__name__)
+
+    monkeypatch.setattr(module.json, "dump", partial_dump)
+    writer = threading.Thread(target=write)
+    writer.start()
+    try:
+        assert midway.wait(3), "The writer did not reach its partial temporary write"
+        assert read(path) == original
+    finally:
+        proceed.set()
+        writer.join(timeout=3)
+        assert not writer.is_alive()
+    assert failures == []
+    assert read(path) == updated
+
+
+@pytest.mark.parametrize("path", [None, "summary.json", True])
+def test_reader_refuses_invalid_path_before_attribute_access(path):
+    failure = None
+    try:
+        read(path)
+    except (AttributeError, RequestPolicyError) as error:
+        failure = error
+    assert type(failure) is RequestPolicyError
