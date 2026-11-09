@@ -469,21 +469,47 @@ def test_explicit_attachment_and_receipt_snapshot(tmp_path):
         ("UPDATE run SET consumed=?", 2),
         ("UPDATE run SET peak=?", 5),
         ("UPDATE run SET state=?", "unexpected"),
+        ("UPDATE run SET logical=?", None),
+        ("UPDATE run SET logical=?", -1),
+        ("UPDATE run SET attempts=?", -1),
+        ("UPDATE run SET reserved=?", -1),
+        ("UPDATE run SET entered=?", -1),
+        ("UPDATE run SET consumed=?", -1),
+        ("UPDATE run SET active=?", -1),
+        ("UPDATE run SET peak=?", -1),
+        ("UPDATE run SET logical=?", 3),
+        ("UPDATE run SET logical=2,attempts=?", 4),
+        ("UPDATE run SET logical=1,attempts=?", 3),
+        ("UPDATE run SET logical=1,attempts=1,entered=?", 2),
+        ("UPDATE run SET logical=1,attempts=1,active=?", 1),
+        ("UPDATE run SET logical=1,attempts=2,peak=?", 2),
+        ("UPDATE run SET peak=?", 1),
+        ("UPDATE run SET reserved=?", 13),
+        (None, "unexpected"),
     ],
 )
 def test_snapshot_rejects_incoherent_ledger_values(tmp_path, query, value):
     grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
-    run = ControlledRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
+    limits = Limits(
+        logical=2, attempts=3, per_logical=2, concurrent=1, response_bytes=5, total_bytes=12
+    )
+    run = ControlledRun.create(Authorization((grant,), limits, "a" * 64), tmp_path)
     try:
         run.open()
-        with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
-            connection.execute(query, (value,))
+        if query is None:
+            (run.directory / "failed").write_text(value)
+        else:
+            with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+                connection.execute(query, (value,))
         assert refusal(run.snapshot) == (
             RequestPolicyError,
             "Controlled upstream request refused.",
             None,
         )
     finally:
+        if query is None:
+            (tmp_path / "faulted-failure.txt").write_bytes((run.directory / "failed").read_bytes())
+            (run.directory / "failed").unlink()
         run.close()
 
 
@@ -757,29 +783,36 @@ def test_rejected_snapshot_closes_other_participant_admission(tmp_path, invalid)
 
 
 @pytest.mark.parametrize(
-    "clock",
+    "clock,failure",
     [
-        None,
-        float("nan"),
-        pytest.param(OSError("synthetic-private-clock-detail"), id="raised-oserror"),
+        (None, "accounting"),
+        (float("nan"), "accounting"),
+        pytest.param(OSError("synthetic-private-clock-detail"), "accounting", id="raised-oserror"),
+        ("deadline", "deadline"),
+        ("close", "closed"),
     ],
 )
-def test_known_read_survives_clock_failure(tmp_path, monkeypatch, clock):
+def test_known_read_survives_later_refusal(tmp_path, monkeypatch, clock, failure):
     with retirement_run(tmp_path) as (run, grant):
         with run.logical(grant) as logical, logical.attempt(response_limit=5) as lease:
             lease.entered()
             with monkeypatch.context() as patch:
 
                 def monotonic():
+                    if clock == "deadline":
+                        return run.started + run.authorization.limits.seconds
                     if isinstance(clock, OSError):
                         raise clock
                     return clock
 
                 def reader(maximum):
-                    patch.setattr(
-                        "nci_si_acceptance.request_budget.time",
-                        SimpleNamespace(monotonic=monotonic),
-                    )
+                    if clock == "close":
+                        run.close()
+                    else:
+                        patch.setattr(
+                            "nci_si_acceptance.request_budget.time",
+                            SimpleNamespace(monotonic=monotonic),
+                        )
                     return b"known"[:maximum]
 
                 def read():
@@ -801,7 +834,7 @@ def test_known_read_survives_clock_failure(tmp_path, monkeypatch, clock):
                 snapshot.reserved_body_bytes,
                 snapshot.consumed_body_bytes,
                 snapshot.failure,
-            ) == ("failed", 1, 0, 6, 5, "accounting")
+            ) == ("failed", 1, 0, 6, 5, failure)
         snapshot = run.snapshot()
         assert (
             snapshot.active,
