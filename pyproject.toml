@@ -228,6 +228,9 @@ paths = ["src", "tests", "scripts", "acceptance"]
 min_confidence = 60
 ignore_decorators = ["@mcp.tool", "@tool", "@mcp.resource", "@resource", "@pytest.fixture"]
 ignore_names = [
+    # Diagnostic TypedDict wire keys are consumed through exact JSON validation/serialization.
+    "bodyBytes", "transportEntries", "peakActive", "schemaVersion", "runId", "policySha256",
+    "reservations", "denials", "observationComplete",
     # Uvicorn reads this externally assigned shutdown flag in its server loop.
     "should_exit",
     # Principal equality binds the tenant too; dataclasses reads this field implicitly.
