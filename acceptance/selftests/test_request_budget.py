@@ -797,3 +797,51 @@ def test_known_read_survives_clock_failure(tmp_path, monkeypatch, clock):
             snapshot.consumed_body_bytes,
             snapshot.observation_complete,
         ) == (0, 0, 5, 5, True)
+
+
+@pytest.mark.parametrize("directory_exists", [False, True])
+def test_attach_never_creates_missing_state(tmp_path, directory_exists):
+    with retirement_run(tmp_path) as (run, _):
+        missing = tmp_path / "missing"
+        if directory_exists:
+            missing.mkdir()
+        descriptor = replace(run.descriptor, directory=missing)
+        assert refusal(
+            lambda: ControlledRun.attach(descriptor, run.authorization, participant="worker")
+        ) == (RequestPolicyError, "Controlled upstream request refused.", None)
+        assert not (missing / "ledger.sqlite").exists()
+        assert not (missing / "key").exists()
+        assert (run.snapshot().state, run.snapshot().logical) == ("open", 0)
+
+
+@pytest.mark.parametrize("operation", ["open", "register", "close", "reopen", "attach_closed"])
+def test_only_controller_can_change_run_lifecycle(tmp_path, operation):
+    with retirement_run(tmp_path) as (run, _):
+        run.authorize_participant("worker")
+        worker = ControlledRun.attach(run.descriptor, run.authorization, participant="worker")
+        if operation == "attach_closed":
+            run.close()
+        calls = {
+            "open": worker.open,
+            "register": lambda: worker.authorize_participant("unauthorized"),
+            "close": worker.close,
+            "reopen": run.open,
+            "attach_closed": lambda: ControlledRun.attach(
+                run.descriptor, run.authorization, participant="worker"
+            ),
+        }
+        assert refusal(calls[operation]) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        with sqlite3.connect(run.directory / "ledger.sqlite") as connection:
+            state = connection.execute("SELECT state FROM run").fetchone()[0]
+            workers = connection.execute("SELECT name FROM workers ORDER BY name").fetchall()
+        assert state == ("closed" if operation == "attach_closed" else "open")
+        assert workers == [("controller",), ("worker",)]
+        assert (run.snapshot().state, run.snapshot().logical, run.snapshot().attempts) == (
+            "failed",
+            0,
+            0,
+        )
