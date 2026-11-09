@@ -336,7 +336,9 @@ def test_initiating_and_cleanup_failures_remain_in_order(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("role,code", [("worker", 7), ("service", 0)])
-def test_unexpected_real_child_exit_closes_admission(tmp_path, role, code):
+@pytest.mark.parametrize("observed", [False, True])
+@pytest.mark.parametrize("prior", [False, True])
+def test_unexpected_real_child_exit_closes_admission(tmp_path, role, code, observed, prior):
     owner = supervisor(tmp_path)
     script = "import sys; sys.stdin.buffer.read(1); sys.exit(int(sys.argv[1]))"
     with subprocess.Popen(  # noqa: S603 - fixed child program, owned interpreter.
@@ -345,11 +347,19 @@ def test_unexpected_real_child_exit_closes_admission(tmp_path, role, code):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     ) as child:
-        with pytest.raises((RequestPolicyError, BaseExceptionGroup)), owner:
+        with pytest.raises(BaseExceptionGroup if prior else RequestPolicyError) as caught, owner:
             owner.register_child(child, participant="child", role=role)
+            if prior:
+                with pytest.raises(RequestPolicyError):
+                    owner.run._deny("transport")
             child.stdin.write(b"x")
             child.stdin.flush()
             child.wait(timeout=5)
+            if observed:
+                with pytest.raises(RequestPolicyError):
+                    owner._pulse()
+        errors = caught.value.exceptions if prior else (caught.value,)
+        assert [error.reason for error in errors] == ["transport"] * (2 if prior else 1)
         assert child.returncode == code
         assert child.stdin.closed and child.stdout.closed and child.stderr.closed
     assert owner.run.snapshot().state == "failed"

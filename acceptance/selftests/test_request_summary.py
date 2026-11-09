@@ -53,6 +53,36 @@ def test_reader_preserves_known_bytes_in_failed_uncertain_run(tmp_path):
 
 
 @pytest.mark.parametrize(
+    "counts,complete,accepted",
+    [
+        ((0, 0, 5, 0, 5, 0), True, False),
+        ((0, 0, 1, 0, 0, 0), False, False),
+        ((1, 1, 5, 0, 5, 1), True, False),
+        ((1, 1, 10, 0, 0, 1), False, False),
+        ((1, 2, 10, 1, 10, 1), True, False),
+        ((1, 1, 0, 0, 0, 0), True, False),
+        ((1, 1, 9, 1, 9, 1), True, True),
+        ((1, 1, 0, 1, 0, 1), True, True),
+        ((1, 1, 9, 0, 0, 1), False, True),
+        ((1, 1, 0, 0, 0, 1), True, True),
+        ((1, 2, 18, 1, 5, 2), False, True),
+    ],
+)
+def test_reader_enforces_attempt_and_entry_byte_capacity(tmp_path, counts, complete, accepted):
+    logical, attempts, reserved, entries, known, peak = counts
+    value = record() | {"observationComplete": complete}
+    value["reservations"] = {"logical": logical, "attempts": attempts, "bodyBytes": reserved}
+    value["observed"] = {"transportEntries": entries, "bodyBytes": known, "peakActive": peak}
+    path = tmp_path / "summary.json"
+    path.write_text(json.dumps(value))
+    if accepted:
+        assert read(path) == value
+    else:
+        with pytest.raises(RequestPolicyError):
+            read(path)
+
+
+@pytest.mark.parametrize(
     "section,key,value",
     [
         (None, "schemaVersion", True),
