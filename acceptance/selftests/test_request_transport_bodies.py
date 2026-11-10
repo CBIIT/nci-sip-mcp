@@ -54,12 +54,14 @@ def owned_run(tmp_path, receiver, *, response_bytes=64, total_bytes=8194):
             0,
         ),
         (b"Content-Encoding: gzip\r\nContent-Length: 12\r\n", b'{"ok": true}', 0),
+        (b"Content-Length: " + b"9" * 5000 + b"\r\n", b'{"ok": true}', 0),
     ],
     ids=[
         "truncated-valid-json",
         "conflicting-length",
         "conflicting-framing",
         "unsupported-encoding",
+        "unrepresentable-declared-length",
     ],
 )
 def test_invalid_framing_cannot_return_success(tmp_path, fields, body, known):
@@ -72,6 +74,8 @@ def test_invalid_framing_cannot_return_success(tmp_path, fields, body, known):
         assert snapshot.transport_entries == 1
         assert snapshot.consumed_body_bytes == known
         assert snapshot.pending_receipts == 0
+        assert snapshot.active == 0
+        assert (snapshot.state, snapshot.observation_complete) == ("failed", True)
 
 
 @pytest.mark.parametrize(
