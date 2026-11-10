@@ -204,7 +204,8 @@ caller exception remains first when additional cleanup failures require a `BaseE
 The controller alone publishes initial/final summaries; the observer never writes them.
 Failed final publication preserves the last file and reports a failed public snapshot.
 `request_summary.read_summary(path, run_id=..., policy_sha256=...)` validates the separate
-exact diagnostic schema and identity. `denials: null` means counts were not measured.
+exact diagnostic schema and identity; malformed serialized records refuse with `accounting`.
+`denials: null` means counts were not measured.
 Known bytes remain known after failure; unresolved receipts retain capacity and prevent
 completion. Private descriptors, ledger files and raw synthetic evidence are separate from
 these sanitized summaries. This API activates no production transport or furnished caller.

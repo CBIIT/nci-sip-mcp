@@ -196,7 +196,7 @@ def read_summary(path: Path, *, run_id: str, policy_sha256: str) -> RunSummary:
     try:
         value: object = json.loads(path.read_text())
         return validate_summary(value, run_id=run_id, policy_sha256=policy_sha256)
-    except OSError, ValueError, OverflowError:
+    except OSError, ValueError, OverflowError, RequestPolicyError:
         raise RequestPolicyError("accounting") from None
 
 
