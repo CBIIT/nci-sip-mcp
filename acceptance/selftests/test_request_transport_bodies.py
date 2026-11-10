@@ -1,7 +1,7 @@
 """Physical HTTP framing must not turn partial or ambiguous bytes into success."""
 
 from http import HTTPStatus
-from http.client import HTTPException, HTTPResponse
+from http.client import HTTPConnection, HTTPException, HTTPResponse
 from pathlib import Path
 from threading import Event
 
@@ -9,16 +9,21 @@ import pytest
 from http_receiver import WireReceiver
 
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_si_acceptance.request_budget import AttemptLease
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_acceptance.request_transport import ControlledHttpPolicy
 from nci_si_mcp import bounds
 from nci_si_mcp.bounds import CallDeadlineError, deadline_scope
+from nci_si_mcp.cadsr import CaDSRClient
+from nci_si_mcp.config import Settings
+from nci_si_mcp.errors import PlatformError
 from nci_si_mcp.http_client import (
     HttpClient,
     RequestPolicyError,
     UpstreamError,
     UpstreamRejectedError,
 )
+from nci_si_mcp.request_policy import using_request_policy
 
 # The independently scripted JSON document below has twelve wire bytes.
 JSON_BYTES = 12
@@ -314,3 +319,93 @@ def test_known_retryable_response_spends_a_separate_lease(tmp_path, first):
         assert snapshot.active == snapshot.pending_receipts == 0
         assert all(wait == 0 for wait in waits)
         assert snapshot.consumed_body_bytes == (24 if first.startswith(b"HTTP/1.1 200") else 12)
+
+
+@pytest.mark.parametrize("body", [b"not-json", b'"\xff"', b'{"apiResponse":{"type":"E"}}'])
+def test_provider_preserves_existing_terminal_parser(tmp_path, body):
+    reply = f"HTTP/1.1 200 OK\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
+    with WireReceiver([reply]) as receiver:
+        owner = owned_run(tmp_path, receiver)
+        records = []
+        with owner, pytest.raises(PlatformError) as caught:
+            client = owned_client(receiver, owner, attempts=3)
+            client.on_request = records.append
+            client.get_json("/owned")
+        assert caught.value.code == "upstream_unavailable"
+        assert caught.value.details == {"surface": "owned", "attempts": 1}
+        assert [record.failure for record in records] == ["unusable_response"]
+        assert (receiver.contacts, owner.run.snapshot().consumed_body_bytes) == (1, len(body))
+
+
+def test_form_absence_is_interpreted_by_existing_consumer(tmp_path):
+    body = b'{"form":null,"apiResponse":{"type":"E"}}'
+    reply = f"HTTP/1.1 200 OK\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
+    path = "/NCIFormAPI.v2_0:NciFormApiRad/Form/5406471"
+    with WireReceiver([reply]) as receiver:
+        grant = RequestGrant("GET", receiver.origin + path, (("accept", "application/json"),))
+        owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
+        with owner, using_request_policy(ControlledHttpPolicy(owner.run)):
+            client = CaDSRClient(Settings(cadsr_base_url=receiver.origin))
+            with pytest.raises(PlatformError) as caught:
+                client.get_form("5406471")
+        assert caught.value.code == "not_found"
+        assert caught.value.details == {"identifiers": ["5406471"]}
+        assert [request[1] for request in receiver.requests] == [path]
+        assert owner.run.snapshot().consumed_body_bytes == len(body)
+
+
+@pytest.mark.parametrize(
+    "stage,limit,reason,initiating,active",
+    [
+        ("close", 64, "transport", None, 0),
+        ("close", 11, "response_limit", "RequestPolicyError", 0),
+        ("release", 64, "accounting", None, 1),
+    ],
+)
+def test_expected_cleanup_preserves_policy_reason_and_retirement(
+    tmp_path, monkeypatch, stage, limit, reason, initiating, active
+):
+    original = HTTPConnection.close
+
+    def fail_close(connection):
+        original(connection)
+        raise OSError("PRIVATE-CONNECTION-CLOSE")
+
+    def fail_release(_lease):
+        raise RequestPolicyError("accounting")
+
+    if stage == "close":
+        monkeypatch.setattr(HTTPConnection, "close", fail_close)
+    else:
+        monkeypatch.setattr(AttemptLease, "release", fail_release)
+    with WireReceiver() as receiver:
+        owner = owned_run(tmp_path, receiver)
+        with (
+            pytest.raises((RequestPolicyError, BaseExceptionGroup)),
+            owner,
+            pytest.raises(RequestPolicyError) as caught,
+        ):
+            owned_client(receiver, owner, limit=limit, attempts=3).get_json("/owned")
+        error = caught.value
+        assert type(error).__name__ == "TransportCleanupError"
+        assert error.reason == reason
+        assert error.details == {}
+        assert (type(error.initiating).__name__ if error.initiating else None) == initiating
+        assert [type(item).__name__ for item in error.cleanup_errors] == [
+            "OSError" if stage == "close" else "RequestPolicyError"
+        ]
+        snapshot = owner.run.snapshot()
+        assert (snapshot.consumed_body_bytes, snapshot.active, receiver.contacts) == (12, active, 1)
+        assert snapshot.observation_complete is (not active)
+        assert owner.snapshot()["state"] == "failed"
+
+
+@pytest.mark.parametrize("limit", [False, 0, -1, 1.5])
+def test_malformed_client_limit_refuses_before_reservation_or_io(tmp_path, limit):
+    with WireReceiver() as receiver:
+        owner = owned_run(tmp_path, receiver)
+        with pytest.raises(RequestPolicyError) as caught, owner:
+            owned_client(receiver, owner, limit=limit).get_json("/owned")
+        assert caught.value.reason == "authorization"
+        snapshot = owner.run.snapshot()
+        assert (snapshot.attempts, snapshot.transport_entries, receiver.contacts) == (0, 0, 0)
