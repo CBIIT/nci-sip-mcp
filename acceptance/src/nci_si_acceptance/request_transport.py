@@ -1,5 +1,6 @@
 """Explicit exact-grant HTTP transport for an already supervised diagnostic run."""
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -125,22 +126,47 @@ class _Request:
         return connection.getresponse()
 
     def _read(self, response: HTTPResponse, lease: AttemptLease, success_limit: int) -> Exchange:
+        self._framing(response)
         policy_limit = self.run.authorization.limits.response_bytes
         limit = min(success_limit, policy_limit) + 1
         if response.status >= HTTPStatus.MULTIPLE_CHOICES:
             limit = min(ERROR_BYTES, policy_limit + 1)
-        body = bytearray()
-        while len(body) < limit:
-            chunk = lease.read(lambda maximum: _read_chunk(response, maximum), limit - len(body))
-            check_deadline()
-            body.extend(chunk)
-            if not chunk:
-                break
+        body = _body(response, lease, limit)
         if len(body) > policy_limit:
             self.run.refuse("response_limit")
         if response.status < HTTPStatus.MULTIPLE_CHOICES and len(body) > success_limit:
             self.run.refuse("response_limit")
+        if response.length and len(body) < limit:
+            raise HTTPException("Controlled upstream response framing failed.")
         return Exchange(response.status, _response_headers(response), bytes(body))
+
+    def _framing(self, response: HTTPResponse) -> None:
+        lengths = response.headers.get_all("Content-Length", [])
+        transfers = response.headers.get_all("Transfer-Encoding", [])
+        encodings = response.headers.get_all("Content-Encoding", [])
+        if lengths and transfers:
+            self.run.refuse("transport")
+        _one_field(self.run, lengths, r"[0-9]+")
+        _one_field(self.run, transfers, "chunked")
+        _one_field(self.run, encodings, "identity")
+
+
+def _one_field(run: ControlledRun, values: list[str], pattern: str) -> None:
+    if len(values) > 1:
+        run.refuse("transport")
+    if values and re.fullmatch(pattern, values[0].strip().lower()) is None:
+        run.refuse("transport")
+
+
+def _body(response: HTTPResponse, lease: AttemptLease, limit: int) -> bytearray:
+    body = bytearray()
+    while len(body) < limit:
+        chunk = lease.read(lambda maximum: _read_chunk(response, maximum), limit - len(body))
+        check_deadline()
+        body.extend(chunk)
+        if not chunk:
+            break
+    return body
 
 
 def _read_chunk(response: HTTPResponse, maximum: int) -> bytes:
