@@ -4,8 +4,10 @@ This component consumer tests the entry handshake, not the production provider's
 """
 
 import socket
+import struct
 from contextlib import contextmanager, nullcontext
 from http.client import HTTPConnection
+from threading import Event, Thread
 from urllib.parse import urlsplit
 
 import pytest
@@ -26,6 +28,46 @@ from nci_si_mcp.errors import correlated
 from nci_si_mcp.http_client import HttpClient, RequestPolicyError
 from nci_si_mcp.invocation import call
 from nci_si_mcp.request_policy import Exchange
+
+
+@contextmanager
+def entry_origin(case, receiver):
+    if case != "connection-failure":
+        yield receiver.base_url("evs"), []
+        return
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(0.05)
+        stop, accepted, failures = Event(), [], []
+
+        def reset_connection():
+            while not stop.is_set():
+                try:
+                    connection, _address = listener.accept()
+                    with connection:
+                        accepted.append(1)
+                        # Abort the owned connection without accepting an HTTP request.
+                        connection.setsockopt(
+                            socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+                        )
+                    return
+                except TimeoutError:
+                    continue
+                except OSError:
+                    if not stop.is_set():
+                        failures.append("owned connection receiver failed")
+                    return
+
+        thread = Thread(target=reset_connection)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{listener.getsockname()[1]}", accepted
+        finally:
+            stop.set()
+            thread.join(2)
+            assert not thread.is_alive()
+            assert failures == []
 
 
 class ClosingStart:
@@ -84,6 +126,8 @@ class EntryConsumer:
     def open(self, connection, path):
         connection.request("GET", path)
         self.response = connection.getresponse()
+        if self.case == "closed-after-entry":
+            self.run.close()
         return self.response
 
     def fail_receipt(self):
@@ -91,30 +135,26 @@ class EntryConsumer:
 
 
 CASES = (
-    # case, entries, bytes, active, reserved, pending, core, contacts, summary, outer
+    # case, entries, bytes, active, reserved, pending, core, fixture requests, summary, outer
     ("success", 1, 12, 0, 12, 0, 1, 1, "completed", None),
     ("final-refusal", 0, 0, 0, 0, 0, 0, 0, "failed", "closed"),
     ("callback-denial", 0, 0, 0, 0, 0, 0, 0, "completed", None),
     ("connection-failure", 1, 0, 0, 0, 0, 1, 0, "completed", None),
     ("receipt-failure", 0, 0, 1, 33, 1, 1, 1, "failed", "accounting"),
+    ("closed-after-entry", 1, 0, 0, 0, 0, 1, 1, "failed", "closed"),
 )
 
 
 @pytest.mark.parametrize("expected", CASES, ids=[row[0] for row in CASES])
 def test_handshake_entry_receipts(tmp_path, monkeypatch, expected):
-    case, entries, known, active, reserved, pending, core, contacts, state, reason = expected
+    case, entries, known, active, reserved, pending, core, fixture_requests, state, reason = (
+        expected
+    )
     fixtures = FixtureSet(
         {request_key("evs", "GET", "/owned", {}): Fixture("owned", (Response(body={"ok": True}),))},
         {},
     )
-    # Keeping a non-listening bound socket owns the refused destination without a port-reuse gap.
-    with FixtureServer(fixtures) as receiver, socket.socket() as refused_socket:
-        refused_socket.bind(("127.0.0.1", 0))
-        base = (
-            f"http://127.0.0.1:{refused_socket.getsockname()[1]}"
-            if case == "connection-failure"
-            else receiver.base_url("evs")
-        )
+    with FixtureServer(fixtures) as receiver, entry_origin(case, receiver) as (base, tcp_contacts):
         grant = RequestGrant("GET", base + "/owned", (("accept", "application/json"),))
         authorization = Authorization((grant,), Limits(response_bytes=32, total_bytes=66), "a" * 64)
         owner = SupervisedRun.create(authorization, tmp_path)
@@ -148,7 +188,14 @@ def test_handshake_entry_receipts(tmp_path, monkeypatch, expected):
             snapshot.reserved_body_bytes,
             snapshot.pending_receipts,
         ) == (entries, known, active, reserved, pending)
-        assert (audit.outbound_requests, len(hooks), len(receiver.log())) == (core, core, contacts)
+        assert (audit.outbound_requests, len(hooks), len(receiver.log())) == (
+            core,
+            core,
+            fixture_requests,
+        )
+        if case == "connection-failure":
+            assert tcp_contacts == [1]
+            assert consumer.response is None
         assert outer == reason
         summary = read_summary(
             owner.run.directory / "summary.json",
