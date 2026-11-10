@@ -212,6 +212,8 @@ class SupervisedRun:
         errors = [initiating] if initiating is not None else []
         self._cleanup(errors, terminal=initiating is None)
         errors.extend(self._collect([lambda: self._finalize(not errors)]))
+        if errors:
+            self._state = "failed"
         if len(errors) > (initiating is not None):
             if len(errors) == 1:
                 raise errors[0] from None

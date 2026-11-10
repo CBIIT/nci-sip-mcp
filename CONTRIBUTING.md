@@ -202,6 +202,7 @@ ledger's original reason. Observer notification does not duplicate that failure.
 caller exception remains first when additional cleanup failures require a `BaseExceptionGroup`.
 
 The controller alone publishes initial/final summaries; the observer never writes them.
+Failed final publication preserves the last file and reports a failed public snapshot.
 `request_summary.read_summary(path, run_id=..., policy_sha256=...)` validates the separate
 exact diagnostic schema and identity. `denials: null` means counts were not measured.
 Known bytes remain known after failure; unresolved receipts retain capacity and prevent
