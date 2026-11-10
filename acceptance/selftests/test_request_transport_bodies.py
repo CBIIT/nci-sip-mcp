@@ -1,12 +1,20 @@
 """Physical HTTP framing must not turn partial or ambiguous bytes into success."""
 
+from http import HTTPStatus
+from http.client import HTTPException, HTTPResponse
+
 import pytest
 from http_receiver import WireReceiver
 
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.http_client import HttpClient, UpstreamError
+from nci_si_mcp.http_client import (
+    HttpClient,
+    RequestPolicyError,
+    UpstreamError,
+    UpstreamRejectedError,
+)
 
 # The independently scripted JSON document below has twelve wire bytes.
 JSON_BYTES = 12
@@ -96,3 +104,47 @@ def test_unknown_chunk_progress_closes_admission_without_retry(tmp_path):
         assert (snapshot.active, snapshot.pending_receipts) == (1, 1)
         assert snapshot.consumed_body_bytes == 0
         assert snapshot.observation_complete is False
+
+
+@pytest.mark.parametrize(
+    "length,body,empty", [(0, b"", True), (4, b"nope", False), (4, b"", False)]
+)
+def test_error_read_completeness_preserves_status_classification(tmp_path, length, body, empty):
+    reply = f"HTTP/1.1 404 Private status\r\nContent-Length: {length}\r\n\r\n".encode() + body
+    with WireReceiver([reply]) as receiver:
+        owner = owned_run(tmp_path, receiver)
+        with owner, pytest.raises(UpstreamError) as caught:
+            owned_client(receiver, owner).get_json("/owned")
+        assert isinstance(caught.value, UpstreamRejectedError)
+        assert caught.value.empty_body is empty
+        assert caught.value.details["status"] == HTTPStatus.NOT_FOUND
+        assert (receiver.contacts, owner.run.snapshot().consumed_body_bytes) == (1, len(body))
+
+
+def test_cleanup_retains_sanitized_initiating_and_close_failures(tmp_path, monkeypatch):
+    original = HTTPResponse.close
+    failed = set()
+
+    def close_then_fail(response):
+        original(response)
+        if id(response) not in failed:
+            failed.add(id(response))
+            raise OSError("PRIVATE-CLOSE-DETAIL")
+
+    monkeypatch.setattr(HTTPResponse, "close", close_then_fail)
+    reply = b'HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n{"ok": true}'
+    with WireReceiver([reply]) as receiver:
+        owner = owned_run(tmp_path, receiver)
+        with pytest.raises(UpstreamError) as caught, owner:
+            owned_client(receiver, owner).get_json("/owned")
+        error = caught.value
+        assert isinstance(error, RequestPolicyError)
+        assert type(error).__name__ == "TransportCleanupError"
+        assert isinstance(error.initiating, HTTPException)
+        assert str(error.initiating) == "Controlled upstream response framing failed."
+        assert tuple(map(str, error.cleanup_errors)) == (
+            "Controlled upstream transport cleanup failed.",
+        )
+        assert error.details == {}
+        assert "PRIVATE" not in repr(error)
+        assert owner.run.snapshot().consumed_body_bytes == JSON_BYTES
