@@ -512,3 +512,22 @@
   original: "b48e4d23bcf9cfcf79bc64c4d1467db00c511b554b844b5ce6369f55fceb3366"
   mutated: "84791d17fb29a6d8367f912be15fdae1e7826448a0dfacf34dfcf3457100ef85"
   reason: "SQLite INTEGER/count(*) returns int, never bool; STRICT storage and the fixed sqlite3.Row factory own that type boundary. Removing the bool branch changes no reachable stored counter or terminal accounting refusal, including NULL. Retain the explicit production guard for clarity."
+
+# Reviewer-approved #467 conditional equivalents: issuecomment-6756044103; SURVIVED at16c21fd.
+- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+  qualname: "OwnedChild"
+  operator: "boolean:literal"
+  site: "/decorator_list/0/keywords/0/value/0"
+  context: "25f9f523044985afa04f5affb5c842a30d80fd0d2000152d63f58b2da320b808"
+  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
+  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
+  reason: "Conditional equivalence under the documented supervisor API: it creates and retains OwnedChild internally, never writes its fields or hashes the record, and returns no record from register_child. Removing frozen changes generated setters/hash for direct record users but no declared admission, custody, snapshot or cleanup behavior. Keep frozen=True as the static design safeguard; public mutable-record exposure would invalidate this rationale."
+
+- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+  qualname: "OwnedChild"
+  operator: "boolean:literal"
+  site: "/decorator_list/0/keywords/1/value/0"
+  context: "25f9f523044985afa04f5affb5c842a30d80fd0d2000152d63f58b2da320b808"
+  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
+  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
+  reason: "Layout-only change to the internally retained child record. The supervisor reads only process, participant and role; no declared API observes a record dictionary, slots, weak references, dynamic attributes or pickle layout. Frozen fields and all admission, custody and cleanup behavior remain unchanged. Keep slots=True in production."

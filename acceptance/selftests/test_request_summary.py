@@ -103,6 +103,7 @@ def test_reader_enforces_attempt_and_entry_byte_capacity(tmp_path, counts, compl
         (None, "runId", "Z" * 32),
         (None, "policySha256", "c" * 64),
         (None, "state", "closed"),
+        (None, "state", []),
         (None, "observationComplete", 1),
         (None, "denials", {}),
         (None, "path", "/private/credential"),
@@ -132,8 +133,13 @@ def test_reader_rejects_invalid_summary(tmp_path, section, key, value):
     target[key] = value
     path.write_text(json.dumps(invalid))
     operation = reader()
-    with pytest.raises(RequestPolicyError, match=r"^Controlled upstream request refused[.]$"):
+    failure = None
+    try:
         operation(path, run_id="b" * 32, policy_sha256="a" * 64)
+    except (RequestPolicyError, TypeError, KeyError, AttributeError) as error:
+        failure = error
+    assert isinstance(failure, RequestPolicyError)
+    assert str(failure) == "Controlled upstream request refused."
 
 
 def test_completed_reader_requires_complete_observation(tmp_path):
@@ -360,3 +366,10 @@ def test_reader_refuses_invalid_path_before_attribute_access(path):
     except (AttributeError, RequestPolicyError) as error:
         failure = error
     assert type(failure) is RequestPolicyError
+
+
+def test_reader_refuses_matching_malformed_identity(tmp_path):
+    path = tmp_path / "summary.json"
+    path.write_text(json.dumps(record() | {"runId": "Z" * 32}))
+    with pytest.raises(RequestPolicyError):
+        reader()(path, run_id="Z" * 32, policy_sha256="a" * 64)
