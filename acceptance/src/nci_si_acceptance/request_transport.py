@@ -84,21 +84,40 @@ def _unexpected(initiating: BaseException | None, failures: list[BaseException])
     return any(_sanitized(error) is None for error in errors)
 
 
+def _cleanup_reason(errors: list[BaseException | None]) -> PolicyReason:
+    for error in errors:
+        if isinstance(error, RequestPolicyError):
+            return error.reason
+    return "transport"
+
+
+def _latch_cleanup(
+    run: ControlledRun, initiating: BaseException | None, failures: list[BaseException]
+) -> PolicyReason:
+    reason = _cleanup_reason([initiating, *failures])
+    try:
+        run._mark_failed(reason, event=initiating)
+    except BaseException as error:  # noqa: BLE001 - publication failures accompany the original failure
+        failures.append(error)
+    try:
+        return run._failure() or reason
+    except BaseException as error:  # noqa: BLE001 - preserve failed first-reason observation as well
+        failures.append(error)
+        return reason
+
+
 def _cleanup_failure(
     run: ControlledRun, initiating: BaseException | None, failures: list[BaseException]
 ) -> None:
     original = _sanitized(initiating) if initiating else None
+    reason = _latch_cleanup(run, initiating, failures)
     if _unexpected(initiating, failures):
         raise BaseExceptionGroup(
             "Controlled transport and cleanup failed.",
             ([initiating] if initiating is not None else []) + failures,
         ) from None
-    reason = original.reason if isinstance(original, RequestPolicyError) else "transport"
     cleanup = tuple(map(_cleanup_expected, failures))
-    try:
-        run.refuse(reason)
-    except RequestPolicyError as refusal:
-        raise TransportCleanupError(refusal.reason, original, cleanup) from None
+    raise TransportCleanupError(reason, original, cleanup) from None
 
 
 @contextmanager
