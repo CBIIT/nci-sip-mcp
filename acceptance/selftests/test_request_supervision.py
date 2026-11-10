@@ -150,14 +150,15 @@ def test_stale_owner_cannot_revive_admission(tmp_path, monkeypatch):
     assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "failed"
 
 
-def test_heartbeat_refresh_admits_beyond_original_stale_window(tmp_path, monkeypatch):
+@pytest.mark.parametrize("elapsed", [0, 1.5, 2])
+def test_heartbeat_refresh_preserves_inclusive_freshness_window(tmp_path, monkeypatch, elapsed):
     owner = supervisor(tmp_path)
     with owner:
         now = request_budget._clock()
         with monkeypatch.context() as clock:
             clock.setattr(request_budget, "_clock", lambda: now + 1)
             owner.run.heartbeat()
-            clock.setattr(request_budget, "_clock", lambda: now + 2.5)
+            clock.setattr(request_budget, "_clock", lambda: now + 1 + elapsed)
             refused = False
             try:
                 with owner.run.logical(authorization().grants[0]):
