@@ -223,6 +223,9 @@ class _Request:
         lengths = response.headers.get_all("Content-Length", [])
         transfers = response.headers.get_all("Transfer-Encoding", [])
         encodings = response.headers.get_all("Content-Encoding", [])
+        # A present declaration rejected by the HTTP parser must not become EOF framing.
+        if lengths and response.length is None:
+            self.run.refuse("transport")
         if lengths and transfers:
             self.run.refuse("transport")
         _one_field(self.run, lengths, r"[0-9]+")
