@@ -139,7 +139,45 @@ def test_reader_rejects_invalid_summary(tmp_path, section, key, value):
     except (RequestPolicyError, TypeError, KeyError, AttributeError) as error:
         failure = error
     assert isinstance(failure, RequestPolicyError)
+    assert failure.reason == "accounting"
     assert str(failure) == "Controlled upstream request refused."
+
+
+@pytest.mark.parametrize(
+    "key,value,accepted",
+    [
+        ("seconds", 0, False),
+        ("seconds", -0.5, False),
+        ("seconds", float("nan"), False),
+        ("seconds", float("inf"), False),
+        ("seconds", -float("inf"), False),
+        ("seconds", True, False),
+        ("seconds", "10", False),
+        ("seconds", 0.5, True),
+        ("logical", 0, False),
+        ("logical", 1, True),
+        ("per_logical", 4, False),
+        ("per_logical", 3, True),
+        ("concurrent", 4, False),
+        ("concurrent", 3, True),
+        ("total_bytes", 8, False),
+        ("total_bytes", 9, True),
+    ],
+)
+def test_serialized_limit_failure_is_accounting(tmp_path, key, value, accepted):
+    summary = record()
+    summary["reservations"] = {"logical": 0, "attempts": 0, "bodyBytes": 0}
+    summary["observed"] = {"transportEntries": 0, "bodyBytes": 0, "peakActive": 0}
+    summary["limits"][key] = value
+    path = tmp_path / "summary.json"
+    path.write_text(json.dumps(summary))
+    if accepted:
+        assert read(path) == summary
+    else:
+        with pytest.raises(RequestPolicyError) as failure:
+            read(path)
+        assert failure.value.reason == "accounting"
+        assert str(failure.value) == "Controlled upstream request refused."
 
 
 def test_completed_reader_requires_complete_observation(tmp_path):
