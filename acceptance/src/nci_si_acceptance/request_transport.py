@@ -280,7 +280,7 @@ def _body(response: HTTPResponse, lease: AttemptLease, limit: int) -> bytearray:
 
 def _read_chunk(response: HTTPResponse, maximum: int) -> bytes:
     try:
-        return response.read(maximum)
+        return response.read1(maximum)
     except HTTPException:
         # The lease must retain unknown progress before a core retry can be considered.
         raise OSError("Controlled upstream response read failed.") from None
