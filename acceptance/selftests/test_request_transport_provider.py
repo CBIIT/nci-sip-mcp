@@ -1,16 +1,17 @@
 """Production provider contracts observed through HttpClient and real owned sockets."""
 
+import ssl
 from contextlib import contextmanager
 from importlib import import_module, util
 from urllib.request import Request
 
 import pytest
-from http_receiver import WireReceiver
+from http_receiver import WireReceiver, tls_certificate
 
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import correlated
-from nci_si_mcp.http_client import HttpClient, RequestPolicyError
+from nci_si_mcp.http_client import HttpClient, RequestPolicyError, UpstreamError
 from nci_si_mcp.invocation import call
 
 
@@ -225,3 +226,48 @@ def test_redirect_never_moves_credentials_or_exposes_private_fields(tmp_path, st
         assert fields["authorization"] == secret
         assert receiver.requests[0][1] == "/allowed"
         assert secret not in repr(grant)
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+def test_tls_verification_precedes_credential_http(tmp_path, monkeypatch, trusted):
+    server_context, certificate = tls_certificate(tmp_path)
+    if trusted:
+        client_context = ssl.create_default_context(cafile=certificate)
+        assert client_context.check_hostname is True
+        assert client_context.verify_mode == ssl.CERT_REQUIRED
+        monkeypatch.setattr(ssl, "_create_default_https_context", lambda: client_context)
+    with WireReceiver(tls=server_context) as receiver:
+        credential = "synthetic-loopback-only"
+        grant = RequestGrant(
+            "GET",
+            receiver.origin + "/owned",
+            (
+                ("accept", "application/json"),
+                ("authorization", credential),
+            ),
+            credential_origin=receiver.origin,
+        )
+        owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
+        result = None
+        with owner:
+            client = HttpClient(
+                receiver.origin,
+                label="owned",
+                timeout_seconds=1,
+                max_attempts=1,
+                retry_backoff_seconds=0,
+                max_response_bytes=64,
+                size_bound="owned",
+                credentials={"Authorization": credential},
+                request_policy=provider(owner.run),
+            )
+            try:
+                result = client.get_json("/owned")
+            except UpstreamError as error:
+                result = type(error).__name__
+        assert result == ({"ok": True} if trusted else "UpstreamUnavailableError")
+        assert receiver.contacts == 1
+        assert len(receiver.requests) == int(trusted)
+        if trusted:
+            assert dict(receiver.requests[0][2])["authorization"] == credential
+        assert owner.run.snapshot().transport_entries == 1
