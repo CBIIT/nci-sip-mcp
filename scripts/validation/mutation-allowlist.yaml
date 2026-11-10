@@ -454,11 +454,12 @@
   reason: "Layout-only slots change: documented callers read frozen declared snapshot fields; no layout reflection, dynamic fields or pickle format is part of the private snapshot contract. Frozen assignment and measurement values remain unchanged."
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+# Reviewed #474 rekey: issuecomment-6780656194; historical SURVIVED retained.
 - file: "acceptance/src/nci_si_acceptance/request_budget.py"
   qualname: "ControlledRun.snapshot"
   operator: "boolean:drop:0"
   site: "/body/0/body/5/value/0/keywords/11/value/0"
-  context: "0bc0e6dfb5e1ffd115fbdadb790aad1469c8c740978a8ead3dabe101fef2af96"
+  context: "2cdfbf91c8166fcae58d8c84243992a679420a2b84a4984cef8e61857c5ca3ef"
   original: "d88ea2fcfa71baf2627048901517cae57af041e8ff5ffcba3916e2fcb5581e79"
   mutated: "656b4a887b603dc985ba0a78ac5c5cb402e2ab188ba5e945c5b208867fe681ea"
   reason: "Every returned snapshot satisfies pending_receipts <= active. Hence active == 0 implies pending == 0; dropping the pending conjunct cannot change a returned completion flag. Corrupt pending > active is refused by the independently tested cross-field bound."
@@ -484,21 +485,23 @@
   reason: "Conditional host equivalence: when SQLite is compiled with USE_URI, URI parsing already applies even with uri=False; native positive/missing-mode=rw controls are identical. Keep uri=True for portability: on a build where this flag matters, existing successful-run and missing-state controls kill this mutation. This is not a universal URI equivalence."
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+# Reviewed #474 rekey: issuecomment-6780656194; historical SURVIVED retained.
 - file: "acceptance/src/nci_si_acceptance/request_budget.py"
   qualname: "AttemptLease._row"
   operator: "call:remove"
   site: "/body/1/body/0"
-  context: "46ecf919fff50c174eecdc02d3cf035d8f53a1b4a662125371af35a9accf7c60"
+  context: "b8a653b547b86ce0a985de462e7154da35d723daf177162a3663973a9234b082"
   original: "444301ac416d5d5f994a87e7efb9ffa99de8d51e5a95b883e3e423b1ee12d9f9"
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "After a missing lookup, the same _row method unconditionally indexes the retired field before returning or causing effects. Missing lookup falls through as None, whose TypeError is translated by the same connection scope into the identical terminal accounting refusal with no byte/refund/entry effect; direct private helper return values are not a caller contract."
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+# Reviewed #474 rekey: issuecomment-6780656194; historical SURVIVED retained.
 - file: "acceptance/src/nci_si_acceptance/request_budget.py"
   qualname: "ControlledRun._identity"
   operator: "boolean:drop:0"
-  site: "/body/5/test/0"
-  context: "79ddef308b4a1d07290183a4bf6d34c1047f31231127d16b8166a238c9faf346"
+  site: "/body/6/test/0"
+  context: "9a246ef52fbab84bd20754960e81cf4ea1de07f3d7430c3c426ee1790663ecac"
   original: "677d79f9924768ddbc0cd6f504904f0094970f567b533287b9d566968a978d17"
   mutated: "5a59f8b82a2959be009a3fa0164300839ecd13b83e11663cbb808ecb48607b18"
   reason: "Authorization duration is finite positive. A nonfinite recorded origin necessarily produces a nonfinite origin-plus-duration, so the remaining finite-sum guard rejects it. Finite-origin sum overflow still refuses; separate controls protect that independent bound."
