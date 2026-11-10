@@ -3,6 +3,7 @@
 from http import HTTPStatus
 from http.client import HTTPException, HTTPResponse
 from pathlib import Path
+from threading import Event
 
 import pytest
 from http_receiver import WireReceiver
@@ -10,6 +11,8 @@ from http_receiver import WireReceiver
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_acceptance.request_transport import ControlledHttpPolicy
+from nci_si_mcp import bounds
+from nci_si_mcp.bounds import CallDeadlineError, deadline_scope
 from nci_si_mcp.http_client import (
     HttpClient,
     RequestPolicyError,
@@ -203,3 +206,31 @@ def test_unexpected_cleanup_closes_admission_when_group_is_caught(
         assert snapshot.failure == (prior_reason or "transport")
         assert owner.snapshot()["state"] == "failed"
         assert (snapshot.active, snapshot.pending_receipts, receiver.contacts) == (0, 0, 1)
+
+
+def test_deadline_checks_after_known_fragment_before_waiting_for_more(tmp_path, monkeypatch):
+    clock, finished = [0.0], Event()
+    monkeypatch.setattr(bounds, "monotonic", lambda: clock[0])
+
+    def partial(handler):
+        clock[0] = 2.0
+        handler.wfile.write(b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{"ok": ')
+        handler.wfile.flush()
+        assert finished.wait(2), "The client did not stop its owned partial response"
+
+    with WireReceiver([partial]) as receiver:
+        owner = owned_run(tmp_path, receiver)
+        with pytest.raises((UpstreamError, CallDeadlineError)) as caught, owner, deadline_scope(1):
+            try:
+                owned_client(receiver, owner).get_json("/owned")
+            finally:
+                finished.set()
+        assert isinstance(caught.value, CallDeadlineError)
+        snapshot = owner.run.snapshot()
+        assert (snapshot.consumed_body_bytes, snapshot.active, snapshot.pending_receipts) == (
+            7,
+            0,
+            0,
+        )
+        assert receiver.contacts == 1
+        assert snapshot.observation_complete is True

@@ -58,6 +58,9 @@ class WireHandler(BaseHTTPRequestHandler):
             else b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{"ok": true}'
         )
         try:
+            if callable(reply):
+                reply(self)
+                return
             self.wfile.write(reply)
         except BrokenPipeError, ConnectionResetError:
             # A deliberate client refusal can close before the scripted response finishes.
