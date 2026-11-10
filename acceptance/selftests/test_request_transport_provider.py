@@ -45,6 +45,9 @@ def test_exact_authorized_request_reaches_owned_receiver(tmp_path, monkeypatch, 
                 label="owned",
                 max_attempts=1,
                 timeout_seconds=1,
+                retry_backoff_seconds=0,
+                max_response_bytes=64,
+                size_bound="owned",
                 request_policy=provider(owner.run),
             )
             result = (
