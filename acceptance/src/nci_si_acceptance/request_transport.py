@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.client import HTTPConnection, HTTPException, HTTPResponse, HTTPSConnection
+from typing import NoReturn
 from urllib.parse import urlsplit
 from urllib.request import Request
 
@@ -96,7 +97,8 @@ def _latch_cleanup(
 ) -> PolicyReason:
     reason = _cleanup_reason([initiating, *failures])
     try:
-        run._mark_failed(reason, event=initiating)
+        # Full errors propagate below; the supervisor's marker selects a policy reason.
+        run._mark_failed(reason)
     except BaseException as error:  # noqa: BLE001 - publication failures accompany the original failure
         failures.append(error)
     try:
@@ -108,7 +110,7 @@ def _latch_cleanup(
 
 def _cleanup_failure(
     run: ControlledRun, initiating: BaseException | None, failures: list[BaseException]
-) -> None:
+) -> NoReturn:
     original = _sanitized(initiating) if initiating else None
     reason = _latch_cleanup(run, initiating, failures)
     if _unexpected(initiating, failures):
@@ -141,6 +143,21 @@ def _request_headers(request: Request) -> tuple[tuple[str, str], ...]:
         for fields in (request.headers, request.unredirected_hdrs)
         for name, value in fields.items()
     )
+
+
+@contextmanager
+def _transport_errors(run: ControlledRun) -> Iterator[None]:
+    """Normalize expected transport errors before resource cleanup handles their context."""
+    try:
+        yield
+    except TimeoutError:
+        raise TimeoutError("Controlled upstream transport timed out.") from None
+    except HTTPException:
+        raise HTTPException("Controlled upstream response framing failed.") from None
+    except OSError:
+        raise OSError("Controlled upstream transport failed.") from None
+    except BaseExceptionGroup as error:
+        _cleanup_failure(run, error.exceptions[0], list(error.exceptions[1:]))
 
 
 def _response_headers(response: HTTPResponse) -> dict[str, str]:
@@ -193,7 +210,7 @@ class _Request:
     ) -> Exchange:
         if type(response_limit) is not int or response_limit <= 0:
             self.run.refuse("authorization")
-        with _resources(self.run) as cleanup:
+        with _resources(self.run) as cleanup, _transport_errors(self.run):
             admission = self.logical.attempt(response_limit=max(response_limit, ERROR_BYTES))
             lease = admission.__enter__()
             cleanup.append(lambda: admission.__exit__(None, None, None))
@@ -201,21 +218,14 @@ class _Request:
             connection_type = HTTPSConnection if scheme == "https" else HTTPConnection
             connection = connection_type(host, port, timeout=self.run.timeout(timeout_seconds))
             cleanup.append(connection.close)
-            try:
-                response = lease.transport(on_start, lambda: self._open(connection))
-                cleanup.append(response.close)
-                return self._read(response, lease, response_limit)
-            except TimeoutError:
-                raise TimeoutError("Controlled upstream transport timed out.") from None
-            except HTTPException:
-                raise HTTPException("Controlled upstream response framing failed.") from None
-            except OSError:
-                raise OSError("Controlled upstream transport failed.") from None
+            response = lease.transport(on_start, lambda: self._open(connection))
+            cleanup.append(response.close)
+            return self._read(response, lease, response_limit)
 
     def _open(self, connection: HTTPConnection) -> HTTPResponse:
         parts = urlsplit(self.grant.url)
         target = parts.path or "/"
-        if parts.query:
+        if "?" in self.grant.url:
             target += "?" + parts.query
         connection.putrequest(self.grant.method, target, skip_accept_encoding=True)
         for name, value in self.grant.headers:
