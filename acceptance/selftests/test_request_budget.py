@@ -2171,3 +2171,39 @@ def test_entry_transition_refuses_inconsistent_persisted_state(
                     "UPDATE leases SET entered=0,entry_pending=0,pending=0 WHERE id=?",
                     (lease.lease_id,),
                 )
+
+
+def test_old_entry_schema_refuses_attachment_without_migration(tmp_path):
+    with retirement_run(tmp_path) as (run, _grant):
+        run.authorize_participant("worker")
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
+            with storage:
+                storage.execute("ALTER TABLE leases DROP COLUMN entry_pending")
+            try:
+                with pytest.raises(RequestPolicyError) as refused:
+                    ControlledRun.attach(run.descriptor, run.authorization, participant="worker")
+                assert (refused.value.reason, str(refused.value), refused.value.__cause__) == (
+                    "accounting",
+                    "Controlled upstream request refused.",
+                    None,
+                )
+                assert tuple(row[1] for row in storage.execute("PRAGMA table_info(leases)")) == (
+                    "id",
+                    "request",
+                    "participant",
+                    "allowance",
+                    "consumed",
+                    "pending",
+                    "entered",
+                    "retired",
+                )
+                assert storage.execute(
+                    "SELECT entered,active,reserved,logical,attempts FROM run"
+                ).fetchone() == (0, 0, 0, 0, 0)
+            finally:
+                # Restore only the owned old-schema fixture for normal close/cleanup.
+                with storage:
+                    storage.execute("ALTER TABLE leases ADD COLUMN entry_pending INTEGER")
+        with pytest.raises(RequestPolicyError) as closed:
+            run.check_wait(0)
+        assert closed.value.reason == "closed"
