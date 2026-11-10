@@ -1363,3 +1363,21 @@ def test_suspended_closure_cannot_keep_renewing_caller_authority(tmp_path, monke
         assert not controller.is_alive() and not owner._observer.is_alive()
     assert [error.reason for error in outcomes] == ["accounting"]
     assert owner.snapshot()["state"] == "failed"
+
+
+@pytest.mark.parametrize("state", ["failed", "completed"])
+def test_initial_summary_must_be_incomplete_before_admission(tmp_path, state):
+    owner = supervisor(tmp_path)
+    path = owner.run.directory / "summary.json"
+    value = owner.snapshot() | {"state": state}
+    path.write_text(json.dumps(value))
+    reader = importlib.import_module("nci_si_acceptance.request_summary").read_summary
+    assert reader(path, run_id=owner.run.descriptor.run_id, policy_sha256="a" * 64) == value
+    try:
+        with pytest.raises(RequestPolicyError) as caught:
+            owner.run.open()
+        assert caught.value.reason == "accounting"
+        assert owner.run.snapshot().state == "failed"
+        assert owner.run.snapshot().logical == 0
+    finally:
+        owner.run.close()
