@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 import nci_si_acceptance
+import nci_si_acceptance.request_budget as request_budget_module
 import nci_si_mcp
 from conftest import FIXTURES
 from nci_si_acceptance.fixture_server import (
@@ -1999,3 +2000,59 @@ def test_worker_open_refuses_as_closed_before_reading_a_broken_marker(tmp_path):
             assert marker.is_dir()
         finally:
             marker.rmdir()
+
+
+@pytest.mark.parametrize(
+    "maximum",
+    [True, 0, -1, float("nan"), float("inf"), "1", 10**400],
+    ids=["boolean", "zero", "negative", "nan", "infinite", "string", "overflow"],
+)
+def test_transport_timeout_refuses_invalid_maximum(tmp_path, maximum):
+    with retirement_run(tmp_path) as (run, _grant):
+        assert hasattr(run, "timeout"), "Transport timeout must use guarded ledger time."
+        with pytest.raises(RequestPolicyError) as refused:
+            run.timeout(maximum)
+        assert refused.value.reason == "authorization"
+        assert run.snapshot().failure == "authorization"
+
+
+def test_transport_timeout_uses_verified_run_origin(tmp_path, monkeypatch):
+    with retirement_run(tmp_path) as (run, _grant):
+        assert hasattr(run, "timeout"), "Transport timeout must use guarded ledger time."
+        origin = run.started
+        monkeypatch.setattr(request_budget_module, "_clock", lambda: origin + 2)
+        expected_remaining = 1798.0
+        assert run.timeout(2000) == expected_remaining
+        assert run.timeout(1) == 1.0
+        run.close()
+        with pytest.raises(RequestPolicyError) as refused:
+            run.timeout(1)
+        assert refused.value.reason == "closed"
+
+
+@pytest.mark.parametrize("operation", ["timeout", "refuse"])
+def test_transport_seams_validate_identity(tmp_path, operation):
+    with retirement_run(tmp_path) as (run, _grant):
+        assert hasattr(run, operation), (
+            "Transport gates must validate the existing ledger identity."
+        )
+        original = run.descriptor
+        run.descriptor = replace(original, run_id="b" * 32)
+        try:
+            with pytest.raises(RequestPolicyError) as refused:
+                getattr(run, operation)(1 if operation == "timeout" else "transport")
+            assert refused.value.reason == "authorization"
+        finally:
+            run.descriptor = original
+
+
+def test_transport_refusal_keeps_first_reason_and_validates_reason(tmp_path):
+    with retirement_run(tmp_path) as (run, _grant):
+        assert hasattr(run, "refuse"), "Transport refusal must retain the first shared failure."
+        with pytest.raises(RequestPolicyError) as first:
+            run.refuse("not-a-policy-reason")
+        assert first.value.reason == "authorization"
+        with pytest.raises(RequestPolicyError) as later:
+            run.refuse("transport")
+        assert later.value.reason == "authorization"
+        assert run.snapshot().failure == "authorization"
