@@ -22,7 +22,10 @@ def provider(run):
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
-def test_exact_authorized_request_reaches_owned_receiver(tmp_path, monkeypatch, method):
+@pytest.mark.parametrize("authorized_target", ["/owned?raw=a%20b&x=1", "/owned?"])
+def test_exact_authorized_request_reaches_owned_receiver(
+    tmp_path, monkeypatch, method, authorized_target
+):
     with WireReceiver() as receiver, WireReceiver() as proxy:
         for name in (
             "http_proxy",
@@ -40,7 +43,7 @@ def test_exact_authorized_request_reaches_owned_receiver(tmp_path, monkeypatch, 
         if method == "POST":
             headers += (("content-type", "application/json"),)
             body = b'{"query": "alpha"}'
-        grant = RequestGrant(method, receiver.origin + "/owned?raw=a%20b&x=1", headers, body)
+        grant = RequestGrant(method, receiver.origin + authorized_target, headers, body)
         owner = SupervisedRun.create(
             Authorization((grant,), Limits(response_bytes=64, total_bytes=8194), "a" * 64), tmp_path
         )
@@ -56,9 +59,9 @@ def test_exact_authorized_request_reaches_owned_receiver(tmp_path, monkeypatch, 
                 request_policy=provider(owner.run),
             )
             result = (
-                client.get_json("/owned?raw=a%20b&x=1")
+                client.get_json(authorized_target)
                 if method == "GET"
-                else client.post_json("/owned?raw=a%20b&x=1", {"query": "alpha"})
+                else client.post_json(authorized_target, {"query": "alpha"})
             )
         assert result == {"ok": True}
         assert receiver.contacts == 1
@@ -73,7 +76,7 @@ def test_exact_authorized_request_reaches_owned_receiver(tmp_path, monkeypatch, 
         ]
         if body is not None:
             expected_headers.append(("content-length", "18"))
-        assert (actual_method, target, actual_body) == (method, "/owned?raw=a%20b&x=1", body or b"")
+        assert (actual_method, target, actual_body) == (method, authorized_target, body or b"")
         assert sorted((key.lower(), value) for key, value in physical) == sorted(expected_headers)
         snapshot = owner.run.snapshot()
         assert (

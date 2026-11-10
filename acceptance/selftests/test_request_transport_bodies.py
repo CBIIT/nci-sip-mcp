@@ -1,5 +1,7 @@
 """Physical HTTP framing must not turn partial or ambiguous bytes into success."""
 
+import sqlite3
+import traceback
 from http import HTTPStatus
 from http.client import HTTPConnection, HTTPException, HTTPResponse
 from pathlib import Path
@@ -16,13 +18,14 @@ from nci_si_mcp import bounds
 from nci_si_mcp.bounds import CallDeadlineError, deadline_scope
 from nci_si_mcp.cadsr import CaDSRClient
 from nci_si_mcp.config import Settings
-from nci_si_mcp.errors import PlatformError
+from nci_si_mcp.errors import PlatformError, correlated
 from nci_si_mcp.http_client import (
     HttpClient,
     RequestPolicyError,
     UpstreamError,
     UpstreamRejectedError,
 )
+from nci_si_mcp.invocation import call
 from nci_si_mcp.request_policy import using_request_policy
 
 # The independently scripted JSON document below has twelve wire bytes.
@@ -409,3 +412,105 @@ def test_malformed_client_limit_refuses_before_reservation_or_io(tmp_path, limit
         assert caught.value.reason == "authorization"
         snapshot = owner.run.snapshot()
         assert (snapshot.attempts, snapshot.transport_entries, receiver.contacts) == (0, 0, 0)
+
+
+def entry_receipt_fault(owner, monkeypatch, after_commit):
+    if not after_commit:
+        with sqlite3.connect(owner.run.directory / "ledger.sqlite") as connection:
+            connection.execute(
+                "CREATE TRIGGER reject_receipt BEFORE UPDATE OF entered ON leases "
+                "WHEN NEW.entered=1 BEGIN SELECT RAISE(FAIL,'synthetic receipt failure'); END"
+            )
+        return
+    original, armed = sqlite3.connect, [True]
+
+    class ReceiptConnection(sqlite3.Connection):
+        receipted = False
+
+        def execute(self, sql, *args, **kwargs):
+            result = super().execute(sql, *args, **kwargs)
+            if sql == "UPDATE run SET entered=entered+1":
+                self.receipted = True
+            return result
+
+        def close(self):
+            super().close()
+            if armed[0] and self.receipted:
+                armed[0] = False
+                raise OSError("PRIVATE-RECEIPT-CLOSE")
+
+    def connect(database, *args, **kwargs):
+        ledger = owner.run.directory / "ledger.sqlite"
+        if str(database).partition("?")[0] in (str(ledger), ledger.as_uri()):
+            kwargs["factory"] = ReceiptConnection
+        return original(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+
+
+@pytest.mark.parametrize("after_commit,entries,active,pending", [(False, 0, 1, 1), (True, 1, 0, 0)])
+def test_expected_transport_and_entry_receipt_failures_have_fixed_public_record(
+    tmp_path, monkeypatch, after_commit, entries, active, pending
+):
+    with WireReceiver([b"PRIVATE-INVALID-STATUS\r\n\r\n"]) as receiver:
+        grant = RequestGrant(
+            "GET",
+            receiver.origin + "/owned",
+            (
+                ("accept", "application/json"),
+                ("x-correlation-id", "policy-test"),
+            ),
+        )
+        owner = SupervisedRun.create(
+            Authorization((grant,), Limits(response_bytes=64), "a" * 64), tmp_path
+        )
+        entry_receipt_fault(owner, monkeypatch, after_commit)
+        result, records = None, []
+        with (
+            pytest.raises((RequestPolicyError, BaseExceptionGroup, HTTPException)) as outer,
+            correlated("policy-test"),
+            owner,
+        ):
+            client = owned_client(receiver, owner, attempts=3)
+            client.on_request = records.append
+            result = call("controlled-http", lambda: client.get_json("/owned"))
+        snapshot = owner.run.snapshot()
+        assert (len(records), receiver.contacts, snapshot.transport_entries) == (1, 1, entries)
+        assert (snapshot.active, snapshot.pending_receipts, snapshot.consumed_body_bytes) == (
+            active,
+            pending,
+            0,
+        )
+        assert snapshot.observation_complete is (not pending)
+        assert owner.snapshot()["state"] == "failed"
+        assert result == {
+            "error": {
+                "code": "upstream_unavailable",
+                "message": "Controlled upstream request refused. Retry later.",
+                "correlationId": "policy-test",
+            }
+        }
+        assert "PRIVATE" not in "".join(traceback.format_exception(outer.value))
+
+
+@pytest.mark.parametrize("kind", [RuntimeError, KeyboardInterrupt])
+def test_unexpected_entry_failure_is_not_normalized_with_receipt_failure(
+    tmp_path, monkeypatch, kind
+):
+    fault = kind("PRIVATE-ENTRY-BUG")
+    original = HTTPConnection.getresponse
+
+    def response_then_fail(connection):
+        original(connection).close()
+        raise fault
+
+    with WireReceiver() as receiver:
+        owner = owned_run(tmp_path, receiver)
+        entry_receipt_fault(owner, monkeypatch, False)
+        monkeypatch.setattr(HTTPConnection, "getresponse", response_then_fail)
+        with pytest.raises(BaseExceptionGroup) as caught, owner:
+            owned_client(receiver, owner).get_json("/owned")
+        assert caught.value.exceptions[0] is fault
+        assert isinstance(caught.value.exceptions[1], RequestPolicyError)
+        snapshot = owner.run.snapshot()
+        assert (snapshot.active, snapshot.pending_receipts, receiver.contacts) == (1, 1, 1)
