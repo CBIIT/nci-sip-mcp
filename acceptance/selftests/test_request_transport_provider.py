@@ -1,13 +1,15 @@
 """Production provider contracts observed through HttpClient and real owned sockets."""
 
+from contextlib import contextmanager
 from importlib import import_module, util
+from urllib.request import Request
 
 import pytest
 from http_receiver import WireReceiver
 
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_mcp.http_client import HttpClient
+from nci_si_mcp.http_client import HttpClient, RequestPolicyError
 
 
 def provider(run):
@@ -82,3 +84,92 @@ def test_exact_authorized_request_reaches_owned_receiver(tmp_path, monkeypatch, 
             1,
             12,
         )
+
+
+class MutatingPolicy:
+    def __init__(self, policy, other):
+        self.policy, self.other = policy, other
+
+    @contextmanager
+    def request(self, request):
+        with self.policy.request(request) as controlled:
+            request.full_url = self.other + "/changed"
+            request.method, request.data = "POST", b"changed"
+            request.headers.clear()
+            request.add_unredirected_header("Authorization", "PRIVATE-MUTATION")
+            yield controlled
+
+
+def test_admitted_snapshot_keeps_wire_and_audit_truthful(tmp_path):
+    with WireReceiver() as receiver, WireReceiver() as other:
+        grant = RequestGrant("GET", receiver.origin + "/owned", (("accept", "application/json"),))
+        owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
+        records = []
+        with owner:
+            client = HttpClient(
+                receiver.origin,
+                label="owned",
+                timeout_seconds=1,
+                max_attempts=1,
+                retry_backoff_seconds=0,
+                max_response_bytes=64,
+                size_bound="owned",
+                request_policy=MutatingPolicy(provider(owner.run), other.origin),
+            )
+            client.on_request = records.append
+            assert client.get_json("/owned") == {"ok": True}
+        assert (receiver.contacts, other.contacts) == (1, 0)
+        method, target, fields, body = receiver.requests[0]
+        assert (method, target, body) == ("GET", "/owned", b"")
+        assert "authorization" not in {name.lower() for name, _ in fields}
+        assert [(record.method, record.url) for record in records] == [
+            ("GET", receiver.origin + "/owned")
+        ]
+
+
+@pytest.mark.parametrize("field", ["method", "url", "headers", "data", "duplicate"])
+def test_unmatched_request_refuses_before_logical_admission(tmp_path, field):
+    with WireReceiver() as receiver:
+        grant = RequestGrant(
+            "GET", receiver.origin + "/owned?x=1", (("accept", "application/json"),)
+        )
+        owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
+        request = Request(grant.url, headers={"Accept": "application/json"})  # noqa: S310 - owned HTTP
+        changes = {"method": "POST", "url": receiver.origin + "/owned?x=2", "data": b"changed"}
+        if field in changes:
+            setattr(request, "full_url" if field == "url" else field, changes[field])
+        elif field == "headers":
+            request.add_header("X-Extra", "ungranted")
+        else:
+            request.add_unredirected_header("Accept", "application/json")
+        with pytest.raises(RequestPolicyError), owner, provider(owner.run).request(request):
+            pytest.fail("Unmatched requests must never be admitted")
+        snapshot = owner.run.snapshot()
+        assert (receiver.contacts, snapshot.logical, snapshot.transport_entries) == (0, 0, 0)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Host",
+        "Content-Length",
+        "Transfer-Encoding",
+        "Connection",
+        "Proxy-Authorization",
+        "Proxy-Connection",
+        "Expect",
+        "Upgrade",
+        "TE",
+        "Trailer",
+        "Accept-Encoding",
+        "Cookie",
+    ],
+)
+def test_transport_headers_are_refused_even_when_granted(tmp_path, name):
+    with WireReceiver() as receiver:
+        grant = RequestGrant("GET", receiver.origin + "/owned", ((name, "override"),))
+        owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
+        request = Request(grant.url, headers={name: "override"})  # noqa: S310 - owned HTTP
+        with pytest.raises(RequestPolicyError), owner, provider(owner.run).request(request):
+            pytest.fail("Transport framing overrides must never be admitted")
+        assert receiver.contacts == owner.run.snapshot().logical == 0
