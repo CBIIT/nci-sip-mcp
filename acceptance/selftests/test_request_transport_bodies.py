@@ -75,7 +75,8 @@ def test_invalid_framing_cannot_return_success(tmp_path, fields, body, known):
         assert snapshot.consumed_body_bytes == known
         assert snapshot.pending_receipts == 0
         assert snapshot.active == 0
-        assert (snapshot.state, snapshot.observation_complete) == ("failed", True)
+        assert snapshot.observation_complete is True
+        assert owner.snapshot()["state"] == "failed"
 
 
 @pytest.mark.parametrize(
