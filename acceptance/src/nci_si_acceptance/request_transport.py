@@ -1,7 +1,7 @@
 """Explicit exact-grant HTTP transport for an already supervised diagnostic run."""
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -11,8 +11,10 @@ from urllib.request import Request
 
 from nci_si_acceptance.request_authorization import RequestGrant, destination
 from nci_si_acceptance.request_budget import AttemptLease, ControlledRun, LogicalRequest
-from nci_si_mcp.bounds import check_deadline
+from nci_si_mcp.bounds import CallDeadlineError, RequestBudgetError, check_deadline
+from nci_si_mcp.http_client import RequestPolicyError
 from nci_si_mcp.request_policy import ControlledRequest, Exchange, TransportStart
+from nci_si_mcp.validation import PolicyReason
 
 # These fields belong to direct transport framing, not caller-selected request content.
 TRANSPORT_HEADERS = frozenset(
@@ -33,6 +35,85 @@ TRANSPORT_HEADERS = frozenset(
 )
 # Core error classification consumes a bounded prefix, independently of the success limit.
 ERROR_BYTES = 4096
+
+
+class TransportCleanupError(RequestPolicyError):
+    """Fixed public refusal with separately retained sanitized expected failures."""
+
+    def __init__(
+        self,
+        reason: PolicyReason,
+        initiating: Exception | None,
+        cleanup_errors: tuple[Exception, ...],
+    ) -> None:
+        super().__init__(reason)
+        self.initiating, self.cleanup_errors = initiating, cleanup_errors
+
+
+def _sanitized(error: BaseException) -> Exception | None:
+    if isinstance(error, (RequestPolicyError, CallDeadlineError, RequestBudgetError)):
+        return error
+    if isinstance(error, TimeoutError):
+        return TimeoutError("Controlled upstream transport timed out.")
+    if isinstance(error, HTTPException):
+        return HTTPException("Controlled upstream response framing failed.")
+    if isinstance(error, OSError):
+        return OSError("Controlled upstream transport failed.")
+    return None
+
+
+def _close(resources: list[Callable[[], object]]) -> list[BaseException]:
+    failures: list[BaseException] = []
+    for close in reversed(resources):
+        try:
+            close()
+        except BaseException as error:  # noqa: BLE001 - retain every cleanup failure; never discard bugs
+            # Cleanup ownership requires attempting every resource, including on interruption.
+            failures.append(error)
+    return failures
+
+
+def _cleanup_expected(error: BaseException) -> Exception:
+    if isinstance(error, RequestPolicyError):
+        return RequestPolicyError(error.reason)
+    return OSError("Controlled upstream transport cleanup failed.")
+
+
+def _unexpected(initiating: BaseException | None, failures: list[BaseException]) -> bool:
+    errors = ([initiating] if initiating is not None else []) + failures
+    return any(_sanitized(error) is None for error in errors)
+
+
+def _cleanup_failure(
+    run: ControlledRun, initiating: BaseException | None, failures: list[BaseException]
+) -> None:
+    original = _sanitized(initiating) if initiating else None
+    if _unexpected(initiating, failures):
+        raise BaseExceptionGroup(
+            "Controlled transport and cleanup failed.",
+            ([initiating] if initiating is not None else []) + failures,
+        ) from None
+    reason = original.reason if isinstance(original, RequestPolicyError) else "transport"
+    cleanup = tuple(map(_cleanup_expected, failures))
+    try:
+        run.refuse(reason)
+    except RequestPolicyError as refusal:
+        raise TransportCleanupError(refusal.reason, original, cleanup) from None
+
+
+@contextmanager
+def _resources(run: ControlledRun) -> Iterator[list[Callable[[], object]]]:
+    resources: list[Callable[[], object]] = []
+    initiating: BaseException | None = None
+    try:
+        yield resources
+    except BaseException as error:
+        initiating = error
+        raise
+    finally:
+        failures = _close(resources)
+        if failures:
+            _cleanup_failure(run, initiating, failures)
 
 
 def _request_headers(request: Request) -> tuple[tuple[str, str], ...]:
@@ -91,24 +172,24 @@ class _Request:
     def exchange(
         self, *, timeout_seconds: float, response_limit: int, on_start: TransportStart
     ) -> Exchange:
-        with self.logical.attempt(response_limit=max(response_limit, ERROR_BYTES)) as lease:
+        with _resources(self.run) as cleanup:
+            admission = self.logical.attempt(response_limit=max(response_limit, ERROR_BYTES))
+            lease = admission.__enter__()
+            cleanup.append(lambda: admission.__exit__(None, None, None))
             scheme, host, port = destination(self.grant.url)
             connection_type = HTTPSConnection if scheme == "https" else HTTPConnection
             connection = connection_type(host, port, timeout=self.run.timeout(timeout_seconds))
+            cleanup.append(connection.close)
             try:
                 response = lease.transport(on_start, lambda: self._open(connection))
-                try:
-                    return self._read(response, lease, response_limit)
-                finally:
-                    response.close()
+                cleanup.append(response.close)
+                return self._read(response, lease, response_limit)
             except TimeoutError:
                 raise TimeoutError("Controlled upstream transport timed out.") from None
             except HTTPException:
                 raise HTTPException("Controlled upstream response framing failed.") from None
             except OSError:
                 raise OSError("Controlled upstream transport failed.") from None
-            finally:
-                connection.close()
 
     def _open(self, connection: HTTPConnection) -> HTTPResponse:
         parts = urlsplit(self.grant.url)
@@ -136,9 +217,7 @@ class _Request:
             self.run.refuse("response_limit")
         if response.status < HTTPStatus.MULTIPLE_CHOICES and len(body) > success_limit:
             self.run.refuse("response_limit")
-        if response.length and len(body) < limit:
-            raise HTTPException("Controlled upstream response framing failed.")
-        return Exchange(response.status, _response_headers(response), bytes(body))
+        return _exchange(response, bytes(body), limit)
 
     def _framing(self, response: HTTPResponse) -> None:
         lengths = response.headers.get_all("Content-Length", [])
@@ -156,6 +235,14 @@ def _one_field(run: ControlledRun, values: list[str], pattern: str) -> None:
         run.refuse("transport")
     if values and re.fullmatch(pattern, values[0].strip().lower()) is None:
         run.refuse("transport")
+
+
+def _exchange(response: HTTPResponse, body: bytes, limit: int) -> Exchange:
+    if response.length and len(body) < limit:
+        if response.status >= HTTPStatus.BAD_REQUEST:
+            return Exchange(response.status, _response_headers(response), body, "unreadable")
+        raise HTTPException("Controlled upstream response framing failed.")
+    return Exchange(response.status, _response_headers(response), body)
 
 
 def _body(response: HTTPResponse, lease: AttemptLease, limit: int) -> bytearray:
