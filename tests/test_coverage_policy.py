@@ -24,6 +24,7 @@ class CoveragePolicyTest(unittest.TestCase):
             project["coverage"],
             {
                 "run": {
+                    "data_file": "${PDM_PROJECT_ROOT?}/tmp/coverage/unit/.coverage",
                     "branch": True,
                     "source": ["nci_si_mcp", "ncit_index", "scripts"],
                     "omit": ["*/scripts/companion_entry.py"],
@@ -40,7 +41,12 @@ class CoveragePolicyTest(unittest.TestCase):
         self.assertEqual(
             harness["coverage"],
             {
-                "run": {"branch": True, "source": ["nci_si_acceptance"], "patch": ["subprocess"]},
+                "run": {
+                    "data_file": "${PDM_PROJECT_ROOT?}/tmp/coverage/harness/.coverage",
+                    "branch": True,
+                    "source": ["nci_si_acceptance"],
+                    "patch": ["subprocess"],
+                },
                 "report": {"fail_under": 95, "precision": 2, "show_missing": True},
             },
         )

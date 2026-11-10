@@ -1637,7 +1637,7 @@ def test_persisted_identity_boundary_refuses_corruption(tmp_path, fault):
         altered = {"empty-key": b"", "short-key": b"x" * 31, "long-key": b"x" * 33}
         value = {"infinite-origin": float("inf"), "overflow-deadline": 1e308}.get(fault, started)
         bad_key = altered.get(fault, original)
-        identity = json.dumps([run.descriptor.run_id, value], separators=(",", ":")).encode()
+        identity = json.dumps([run.descriptor.run_id, value, 0], separators=(",", ":")).encode()
         binding = hmac.digest(bad_key, run.authorization.binding(bad_key) + identity, "sha256")
         with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage:
             original_binding = storage.execute("SELECT binding FROM run").fetchone()[0]

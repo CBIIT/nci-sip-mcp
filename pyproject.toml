@@ -150,6 +150,8 @@ testpaths = ["tests"]
 pythonpath = ["tests", "scripts/validation"]
 
 [tool.coverage.run]
+# PDM supplies an absolute root, including for children started from another directory.
+data_file = "${PDM_PROJECT_ROOT?}/tmp/coverage/unit/.coverage"
 branch = true
 source = ["nci_si_mcp", "ncit_index", "scripts"]
 # Every script is measured except these, each named with its reason. The patterns start with
@@ -228,6 +230,9 @@ paths = ["src", "tests", "scripts", "acceptance"]
 min_confidence = 60
 ignore_decorators = ["@mcp.tool", "@tool", "@mcp.resource", "@resource", "@pytest.fixture"]
 ignore_names = [
+    # Diagnostic TypedDict wire keys are consumed through exact JSON validation/serialization.
+    "bodyBytes", "transportEntries", "peakActive", "schemaVersion", "runId", "policySha256",
+    "reservations", "denials", "observationComplete",
     # Uvicorn reads this externally assigned shutdown flag in its server loop.
     "should_exit",
     # Principal equality binds the tenant too; dataclasses reads this field implicitly.

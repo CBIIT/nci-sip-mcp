@@ -61,6 +61,7 @@ from nci_si_acceptance.environments import (
     validate_live_inputs,
 )
 from nci_si_acceptance.fixture_server import UPSTREAM_VARIABLES
+from nci_si_acceptance.owned_process import stop_child
 from nci_si_acceptance.spec import PROFILES
 
 if TYPE_CHECKING:
@@ -599,17 +600,9 @@ class OwnedServer:
             raise
 
     def stop(self) -> None:
-        # The same terminate, wait, kill sequence as scripts/processes.py: kept twice because
-        # nci_si_acceptance must not import scripts.
         process, self._process = self._process, None
-        if process is None or process.poll() is not None:
-            return
-        process.terminate()
-        try:
-            process.wait(timeout=STOP_SECONDS)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=STOP_SECONDS)
+        if process is not None:
+            stop_child(process, seconds=STOP_SECONDS)
 
     def restart(self, settings: Mapping[str, str]) -> None:
         self.stop()

@@ -199,7 +199,9 @@ The [authorization value API](../CONTRIBUTING.md#explicit-request-authorization)
 snapshots exact private request grants, finite limits and descriptor records. These values do
 not enforce dashboard request budgets or replace native reports. The separate explicit
 [shared accounting API](../CONTRIBUTING.md#explicit-shared-request-accounting) supplies private
-reservations and receipts for cooperating diagnostic callers, not automatic supervision or
-public summaries (#467), production transport (#465) or caller adoption (#448/#449).
+reservations and receipts for cooperating diagnostic callers. Optional
+[owned-run supervision](../CONTRIBUTING.md#explicit-owned-run-supervision) adds finite child
+cleanup and strict sanitized summaries; production transport (#465) and caller adoption
+(#448/#449) remain separate.
 Callers own/reap children and preserve required private ledger/binding/descriptor evidence
 outside managed scratch before pruning. No furnished-caller protection or live access is activated.
