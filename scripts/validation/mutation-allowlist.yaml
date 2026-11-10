@@ -706,3 +706,13 @@
   original: "01cc4da7ba50ccc135d66e32b329176ef9d3ec7f07e345d6ea0b3e27498f1d63"
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Under supported heartbeat/storage failure routes, the retained local/shared first failure makes the next pulse refuse before child inspection or timestamp renewal; its policy refusal stops observation without replacing the event. Shutdown independently sets stop and performs the same bounded join. Preserve immediate stop; no arbitrary replacement-heartbeat exception API is implied."
+
+# Reviewer-approved #474 layout equivalence: issuecomment-6781799196; canonical SURVIVED at aba1c34.
+- file: "src/nci_si_mcp/http_client.py"
+  qualname: "_TransportStart"
+  operator: "boolean:literal"
+  site: "/decorator_list/0/keywords/1/value/0"
+  context: "24991d1f44f74cecde6893123e8910da37249863b51c76fd55a703d01d50dd63"
+  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
+  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
+  reason: "Layout-only slots change: supported cooperating callers use the private callback's callable/invoke/refusal-witness interface and frozen declared fields; dynamic attributes, layout reflection and pickle are not contracts. Admission order, witness reset, receipts, exception behavior and legacy calls are unchanged."
