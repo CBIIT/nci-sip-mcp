@@ -106,7 +106,15 @@ def test_registered_children_share_transport_capacity(tmp_path, concurrent, tota
                     children.append(child)
                 children[0].stdin.write(b"x")
                 children[0].stdin.flush()
-                wait_for(lambda: owner.run.snapshot().consumed_body_bytes == FRAGMENT_BYTES)
+
+                def awaiting_remainder():
+                    snapshot = owner.run.snapshot()
+                    return (
+                        snapshot.consumed_body_bytes == FRAGMENT_BYTES
+                        and snapshot.pending_receipts == 1
+                    )
+
+                wait_for(awaiting_remainder)
                 children[1].stdin.write(b"x")
                 children[1].stdin.flush()
                 wait_for(destinations[1].exists)

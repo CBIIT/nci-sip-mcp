@@ -2,6 +2,7 @@
 
 import sqlite3
 import traceback
+from contextlib import closing
 from http import HTTPStatus
 from http.client import HTTPConnection, HTTPException, HTTPResponse
 from pathlib import Path
@@ -416,7 +417,10 @@ def test_malformed_client_limit_refuses_before_reservation_or_io(tmp_path, limit
 
 def entry_receipt_fault(owner, monkeypatch, after_commit):
     if not after_commit:
-        with sqlite3.connect(owner.run.directory / "ledger.sqlite") as connection:
+        with (
+            closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as connection,
+            connection,
+        ):
             connection.execute(
                 "CREATE TRIGGER reject_receipt BEFORE UPDATE OF entered ON leases "
                 "WHEN NEW.entered=1 BEGIN SELECT RAISE(FAIL,'synthetic receipt failure'); END"
