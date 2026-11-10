@@ -26,6 +26,7 @@ from nci_si_acceptance.request_authorization import (
 )
 from nci_si_acceptance.request_summary import read_summary
 from nci_si_mcp.http_client import RequestPolicyError
+from nci_si_mcp.request_policy import TransportStart
 from nci_si_mcp.validation import LedgerState, PolicyReason
 
 # Bound cooperative contention, not filesystem or operating-system scheduling latency.
@@ -137,7 +138,7 @@ class ControlledRun:
                 CREATE TABLE leases (
                     id TEXT PRIMARY KEY, request TEXT, participant TEXT,
                     allowance INTEGER, consumed INTEGER, pending INTEGER, entered INTEGER,
-                    retired INTEGER
+                    retired INTEGER, entry_pending INTEGER
                 ) STRICT;
             """)
             connection.execute(
@@ -164,6 +165,8 @@ class ControlledRun:
         return run
 
     def _identity(self, connection: sqlite3.Connection) -> None:
+        # Attachments never upgrade a private ledger created with an older entry contract.
+        connection.execute("SELECT entry_pending FROM leases LIMIT 0")
         rows = connection.execute("SELECT * FROM run LIMIT 2").fetchall()
         if len(rows) != 1:
             self._deny("accounting")
@@ -263,7 +266,7 @@ class ControlledRun:
             self._deny("accounting")
         return REASONS[text], self._marker_failure
 
-    def _guard(self, connection: sqlite3.Connection, delay: float = 0) -> None:
+    def _guard(self, connection: sqlite3.Connection, delay: float = 0) -> float:
         try:
             now = _clock()
         except RequestPolicyError:
@@ -275,6 +278,7 @@ class ControlledRun:
         if now + delay >= self.started + self.authorization.limits.seconds:
             self._deny("deadline")
         self._fresh(connection, now)
+        return now
 
     def _supervision(self, connection: sqlite3.Connection) -> tuple[int, float | None]:
         rows = connection.execute("SELECT enabled,heartbeat FROM supervision LIMIT 2").fetchall()
@@ -404,6 +408,26 @@ class ControlledRun:
         except OverflowError:
             self._deny("authorization")
 
+    def timeout(self, maximum: float) -> float:
+        """Return a positive timeout under the verified run origin and current admission."""
+        with self._connection() as connection:
+            if type(maximum) not in (int, float):
+                self._deny("authorization")
+            try:
+                seconds = float(maximum)
+            except OverflowError:
+                self._deny("authorization")
+            if not math.isfinite(seconds) or seconds <= 0:
+                self._deny("authorization")
+            now = self._guard(connection)
+            return min(seconds, self.started + self.authorization.limits.seconds - now)
+
+    def refuse(self, reason: PolicyReason) -> NoReturn:
+        """Close admission without replacing an earlier, more precise shared failure."""
+        selected = REASONS.get(reason) if type(reason) is str else None
+        with self._connection():
+            self._deny(self._failure() or selected or "authorization")
+
     @contextmanager
     def logical(self, grant: RequestGrant) -> Iterator[LogicalRequest]:
         if grant not in self.authorization.grants:
@@ -431,7 +455,9 @@ class ControlledRun:
             if state is None:
                 self._deny("accounting")
             pending = self._count(
-                connection.execute("SELECT count(*) FROM leases WHERE pending>0").fetchone()[0]
+                connection.execute(
+                    "SELECT count(*) FROM leases WHERE pending>0 OR entry_pending>0"
+                ).fetchone()[0]
             )
             failure = self._failure()
             result = LedgerSnapshot(
@@ -481,7 +507,7 @@ class LogicalRequest:
             self.run._guard(connection)
             self._reserve(connection, allowance)
             connection.execute(
-                "INSERT INTO leases VALUES (?,?,?,?,0,0,0,0)",
+                "INSERT INTO leases VALUES (?,?,?,?,0,0,0,0,0)",
                 (lease_id, self.request_id, self.run.participant, allowance),
             )
         lease = AttemptLease(self.run, lease_id)
@@ -533,7 +559,8 @@ class AttemptLease:
 
     def _row(self, connection: sqlite3.Connection, *, allow_retired: bool = False) -> sqlite3.Row:
         row = connection.execute(
-            "SELECT id,request,participant,allowance,consumed,pending,entered,retired "
+            "SELECT id,request,participant,allowance,consumed,pending,entered,retired,"
+            "entry_pending "
             "FROM leases WHERE id=? AND participant=?",
             (self.lease_id, self.run.participant),
         ).fetchone()
@@ -541,13 +568,79 @@ class AttemptLease:
             self.run._deny("accounting")
         if row["retired"] not in (0, 1) or (row["retired"] and not allow_retired):
             self.run._deny("accounting")
+        if row["entry_pending"] not in (0, 1):
+            self.run._deny("accounting")
         return row
+
+    def transport[T](self, start: TransportStart, operation: Callable[[], T]) -> T:
+        """Admit before core entry; retain uncertainty until the entry receipt commits."""
+        prepared, invoked = False, False
+
+        def admit() -> None:
+            nonlocal prepared
+            self._prepare_entry()
+            prepared = True
+
+        def perform() -> T:
+            nonlocal invoked
+            if not prepared or invoked:
+                self.run._deny("accounting")
+            invoked = True
+            return operation()
+
+        initiating: BaseException | None = None
+        try:
+            result = start.invoke(admit=admit, operation=perform)
+            if not invoked:
+                self.run._deny("accounting")
+            return result
+        except BaseException as error:
+            initiating = error
+            raise
+        finally:
+            try:
+                self._settle_entry(prepared=prepared, invoked=invoked)
+            except BaseException as cleanup:
+                if initiating is not None:
+                    raise BaseExceptionGroup(
+                        "Controlled entry and receipt failed.", [initiating, cleanup]
+                    ) from None
+                raise
+
+    def _prepare_entry(self) -> None:
+        with self.run._connection() as connection:
+            self.run._guard(connection)
+            row = self._row(connection)
+            if row["entered"] or row["entry_pending"] or row["pending"]:
+                self.run._deny("accounting")
+            connection.execute("UPDATE leases SET entry_pending=1 WHERE id=?", (self.lease_id,))
+
+    def _settle_entry(self, *, prepared: bool, invoked: bool) -> None:
+        if invoked:
+            self._receipt_entry()
+        elif prepared:
+            with self.run._connection() as connection:
+                row = self._row(connection)
+                if not row["entry_pending"] or row["entered"]:
+                    self.run._deny("accounting")
+                connection.execute("UPDATE leases SET entry_pending=0 WHERE id=?", (self.lease_id,))
+
+    def _receipt_entry(self) -> None:
+        # Receipt of a past entry must not reapply admission/heartbeat/deadline gates.
+        with self.run._connection() as connection:
+            row = self._row(connection)
+            if not row["entry_pending"] or row["entered"]:
+                self.run._deny("accounting")
+            connection.execute(
+                "UPDATE leases SET entered=1,entry_pending=0 WHERE id=?", (self.lease_id,)
+            )
+            connection.execute("UPDATE run SET entered=entered+1")
 
     def entered(self) -> None:
         with self.run._connection() as connection:
             self.run._guard(connection)
             row = self._row(connection)
-            if row["entered"]:
+            if row["entered"] or row["entry_pending"]:
                 self.run._deny("accounting")
             connection.execute("UPDATE leases SET entered=1 WHERE id=?", (self.lease_id,))
             connection.execute("UPDATE run SET entered=entered+1")
@@ -569,7 +662,7 @@ class AttemptLease:
     def _read_capacity(self, row: sqlite3.Row, maximum: int) -> None:
         if type(maximum) is not int or maximum <= 0:
             self.run._deny("authorization")
-        if not row["entered"] or row["pending"]:
+        if not row["entered"] or row["pending"] or row["entry_pending"]:
             self.run._deny("accounting")
         if maximum > row["allowance"] - row["consumed"]:
             self.run._deny("response_limit")
@@ -593,7 +686,7 @@ class AttemptLease:
             row = self._row(connection, allow_retired=True)
             if row["retired"]:
                 return  # The connection still validates authority on every repeat.
-            if row["pending"]:
+            if row["pending"] or row["entry_pending"]:
                 return  # Unknown read progress retains its whole lease and capacity.
             unused = row["allowance"] - row["consumed"]
             connection.execute(

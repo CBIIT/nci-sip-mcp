@@ -159,6 +159,20 @@ class _Attempt:
     entered: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class _TransportStart:
+    enter: Callable[[], None]
+
+    def __call__(self) -> None:
+        self.enter()
+
+    def invoke[T](self, *, admit: Callable[[], None], operation: Callable[[], T]) -> T:
+        check_deadline()
+        admit()
+        self.enter()
+        return operation()
+
+
 def _require_transport_entry(controlled: ControlledRequest | None, attempt: _Attempt) -> None:
     if controlled is not None and not attempt.entered:
         raise RequestPolicyError("transport") from None
@@ -554,7 +568,7 @@ class HttpClient:
             )
             if controlled is not None:
                 response_limit = self.max_response_bytes
-                on_start = partial(self._enter, attempt)
+                on_start = _TransportStart(partial(self._enter, attempt))
                 exchange = controlled.exchange(
                     timeout_seconds=timeout, response_limit=response_limit, on_start=on_start
                 )
