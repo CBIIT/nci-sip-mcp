@@ -98,6 +98,7 @@ def test_reader_enforces_attempt_and_entry_byte_capacity(tmp_path, counts, compl
     "section,key,value",
     [
         (None, "schemaVersion", True),
+        (None, "schemaVersion", 2),
         (None, "runId", "c" * 32),
         (None, "runId", None),
         (None, "runId", "Z" * 32),
@@ -105,6 +106,7 @@ def test_reader_enforces_attempt_and_entry_byte_capacity(tmp_path, counts, compl
         (None, "state", "closed"),
         (None, "state", []),
         (None, "observationComplete", 1),
+        (None, "observationComplete", 0),
         (None, "denials", {}),
         (None, "path", "/private/credential"),
         (None, "denials", {"accounting": 0}),
@@ -124,6 +126,7 @@ def test_reader_enforces_attempt_and_entry_byte_capacity(tmp_path, counts, compl
         ("observed", "transportEntries", 3),
         ("observed", "peakActive", 3),
         ("observed", "bodyBytes", True),
+        ("observed", "bodyBytes", -1),
     ],
 )
 def test_reader_rejects_invalid_summary(tmp_path, section, key, value):
@@ -411,3 +414,36 @@ def test_reader_refuses_matching_malformed_identity(tmp_path):
     path.write_text(json.dumps(record() | {"runId": "Z" * 32}))
     with pytest.raises(RequestPolicyError):
         reader()(path, run_id="Z" * 32, policy_sha256="a" * 64)
+
+
+@pytest.mark.parametrize("contents", [None, "{invalid"])
+def test_reader_sanitizes_missing_and_malformed_file(tmp_path, contents):
+    path = tmp_path / "summary.json"
+    if contents is not None:
+        path.write_text(contents)
+    with pytest.raises(RequestPolicyError) as failure:
+        read(path)
+    assert failure.value.reason == "accounting"
+    assert str(failure.value) == "Controlled upstream request refused."
+
+
+def test_missing_temporary_does_not_duplicate_publication_failure(tmp_path, monkeypatch):
+    module = importlib.import_module("nci_si_acceptance.request_summary")
+    path = tmp_path / "summary.json"
+    module.publish(path, record())
+    original = path.read_bytes()
+
+    def disappeared_source(source, _target):
+        module.Path(source).unlink()
+        raise FileNotFoundError("owned temporary disappeared")
+
+    monkeypatch.setattr(module.os, "replace", disappeared_source)
+    failure = None
+    try:
+        module.publish(path, record())
+    except (RequestPolicyError, BaseExceptionGroup) as error:
+        failure = error
+    assert type(failure) is RequestPolicyError
+    assert failure.reason == "accounting"
+    assert path.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [path]

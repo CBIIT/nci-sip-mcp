@@ -2,6 +2,8 @@
 
 import ast
 import dis
+import hashlib
+import hmac
 import importlib
 import importlib.util
 import inspect
@@ -25,6 +27,8 @@ from nci_si_acceptance.request_authorization import Authorization, Limits, Reque
 from nci_si_mcp.http_client import RequestPolicyError
 
 KNOWN_BODY_BYTES = 5
+OBSERVED_FAILURE_COUNT = 2
+FAILED_WORKER_EXIT = 7
 
 
 def failure_leaves(error):
@@ -536,8 +540,9 @@ def test_close_precedes_actual_owned_service_stop(tmp_path, monkeypatch):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     ) as child:
-        with pytest.raises(RequestPolicyError), owner:
+        with pytest.raises(RequestPolicyError) as failure, owner:
             owner.register_child(child, participant="service", role="service")
+        assert failure.value.reason == "closed"
         assert child.returncode is not None
     assert admitted == [False]
     assert owner.run.snapshot().logical == 0
@@ -639,6 +644,8 @@ def test_real_observer_inspection_failure_is_terminal_and_sanitized(
                 owner.register_child(child, participant="worker", role="worker")
                 assert inspected.wait(3), "The real observer did not inspect its child"
                 child.communicate(b"x", timeout=5)
+                owner._observer.join(timeout=2.5)
+                assert not owner._observer.is_alive()
         except (RequestPolicyError, BaseExceptionGroup) as error:
             failure = error
         assert type(failure) is (ExceptionGroup if record_fault else RequestPolicyError)
@@ -827,8 +834,9 @@ def test_attached_constructor_cannot_change_controller_summary(tmp_path):
         )
         path = owner.run.directory / "summary.json"
         original = path.read_bytes()
-        with pytest.raises((RequestPolicyError, BaseExceptionGroup)), entry.SupervisedRun(attached):
-            pytest.fail("An attached participant cannot enter controller supervision")
+        with pytest.raises(RequestPolicyError) as failure:
+            entry.SupervisedRun(attached)
+        assert failure.value.reason == "authorization"
         assert path.read_bytes() == original
     assert owner.snapshot()["state"] == "completed"
 
@@ -838,8 +846,7 @@ def test_unenrolled_constructor_rejection_preserves_unmanaged_caller(tmp_path):
     run = request_budget.ControlledRun.create(authorization(), tmp_path)
     failure = None
     try:
-        with entry.SupervisedRun(run):
-            pass
+        entry.SupervisedRun(run)
     except (RequestPolicyError, BaseExceptionGroup) as error:
         failure = error
     assert type(failure) is RequestPolicyError
@@ -856,8 +863,9 @@ def test_closed_constructor_cannot_overwrite_completed_summary(tmp_path):
         pass
     path = owner.run.directory / "summary.json"
     original = path.read_bytes()
-    with pytest.raises((RequestPolicyError, BaseExceptionGroup)), entry.SupervisedRun(owner.run):
-        pytest.fail("A completed run cannot restart")
+    with pytest.raises(RequestPolicyError) as failure:
+        entry.SupervisedRun(owner.run)
+    assert failure.value.reason == "authorization"
     assert path.read_bytes() == original
 
 
@@ -1381,3 +1389,257 @@ def test_initial_summary_must_be_incomplete_before_admission(tmp_path, state):
         assert owner.run.snapshot().logical == 0
     finally:
         owner.run.close()
+
+
+@pytest.mark.parametrize("enabled,heartbeat", [(2, 1.0), (0, 1.0)])
+def test_matching_identity_cannot_hide_invalid_supervision(tmp_path, enabled, heartbeat):
+    run = request_budget.ControlledRun.create(authorization(), tmp_path)
+    key = (run.directory / "key").read_bytes()
+    # Independent wire-format expectation: authorization binding plus compact identity JSON.
+    identity = json.dumps([run.descriptor.run_id, run.started, enabled], separators=(",", ":"))
+    binding = hmac.digest(key, authorization().binding(key) + identity.encode(), hashlib.sha256)
+    with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection, connection:
+        connection.execute("UPDATE supervision SET enabled=?,heartbeat=?", (enabled, heartbeat))
+        connection.execute("UPDATE run SET binding=?", (binding,))
+    with pytest.raises(RequestPolicyError) as failure:
+        run.snapshot()
+    assert failure.value.reason == "accounting"
+
+
+def test_future_heartbeat_refuses_admission(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    with pytest.raises(RequestPolicyError) as outer, owner:
+        now = request_budget._clock()
+        with monkeypatch.context() as clock:
+            clock.setattr(request_budget, "_clock", lambda: now + 1)
+            owner.run.heartbeat()
+            clock.setattr(request_budget, "_clock", lambda: now + 0.5)
+            with (
+                pytest.raises(RequestPolicyError) as failure,
+                owner.run.logical(authorization().grants[0]),
+            ):
+                pytest.fail("Future heartbeat authorized a logical request")
+            assert failure.value.reason == "accounting"
+    assert outer.value.reason == "accounting"
+    assert owner.run.snapshot().logical == 0
+
+
+@pytest.mark.parametrize("fault", ["nonowner", "enabled", "open", "closed", "failed"])
+def test_enable_supervision_requires_fresh_controller(tmp_path, fault):
+    run = request_budget.ControlledRun.create(authorization(), tmp_path)
+    selected = run
+    if fault == "nonowner":
+        selected = request_budget.ControlledRun(run.descriptor, authorization(), "controller")
+    if fault == "enabled":
+        run.enable_supervision()
+    if fault in ("open", "closed"):
+        run.open()
+    if fault == "closed":
+        run.close()
+    if fault == "failed":
+        with pytest.raises(RequestPolicyError):
+            run.check_wait(0)
+    try:
+        with pytest.raises(RequestPolicyError) as failure:
+            selected.enable_supervision()
+        assert failure.value.reason == "authorization"
+    finally:
+        run.close()
+
+
+@pytest.mark.parametrize("fault", ["failed", "stale", "closed"])
+def test_supervision_entry_rechecks_created_owner(tmp_path, monkeypatch, fault):
+    owner = supervisor(tmp_path)
+    if fault == "failed":
+        with pytest.raises(RequestPolicyError):
+            owner.run.check_wait(0)
+    if fault == "closed":
+        owner.run.close()
+    if fault == "stale":
+        now = request_budget._clock()
+        monkeypatch.setattr(request_budget, "_clock", lambda: now + 3)
+    try:
+        with pytest.raises(RequestPolicyError) as failure, owner:
+            pytest.fail("Invalid created owner entered supervision")
+        assert failure.value.reason == ("accounting" if fault == "stale" else "authorization")
+        assert not (owner.run.directory / "summary.json").exists()
+    finally:
+        owner.run.close()
+
+
+def test_nonowner_created_handle_cannot_own_supervision(tmp_path):
+    owner = supervisor(tmp_path)
+    other = request_budget.ControlledRun(owner.run.descriptor, authorization(), "controller")
+    try:
+        with pytest.raises(RequestPolicyError) as failure:
+            other.require_supervision_owner()
+        assert failure.value.reason == "authorization"
+        assert owner.snapshot()["state"] == "incomplete"
+    finally:
+        owner.run.close()
+
+
+@pytest.mark.parametrize("participant", [1, True])
+def test_pending_participant_requires_text_identity(tmp_path, participant):
+    owner = supervisor(tmp_path)
+    with owner:
+        owner.run.authorize_participant("1")
+        assert owner.run.participant_pending("1") is False
+        with pytest.raises(RequestPolicyError) as failure:
+            owner.run.participant_pending(participant)
+        assert failure.value.reason == "authorization"
+    assert owner.snapshot()["state"] == "completed"
+
+
+def test_closed_heartbeat_preserves_completed_record(tmp_path):
+    owner = supervisor(tmp_path)
+    with owner:
+        pass
+    before = owner.snapshot()
+    path = owner.run.directory / "summary.json"
+    contents = path.read_bytes()
+    with pytest.raises(RequestPolicyError) as failure:
+        owner.run.heartbeat()
+    assert failure.value.reason == "closed"
+    assert owner.snapshot() == before
+    assert path.read_bytes() == contents
+    assert not (owner.run.directory / "failed").exists()
+
+
+def test_two_distinct_owned_workers_complete_and_close_streams(tmp_path):
+    owner = supervisor(tmp_path)
+    command = [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"]
+    with (
+        subprocess.Popen(  # noqa: S603 - owned interpreter and fixed synthetic barrier program.
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ) as first,
+        subprocess.Popen(  # noqa: S603 - owned interpreter and fixed synthetic barrier program.
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ) as second,
+    ):
+        failure = None
+        try:
+            try:
+                with owner:
+                    try:
+                        owner.register_child(first, participant="first", role="worker")
+                        owner.register_child(second, participant="second", role="worker")
+                    finally:
+                        first.stdin.write(b"x")
+                        first.stdin.flush()
+                        second.stdin.write(b"x")
+                        second.stdin.flush()
+            except (RequestPolicyError, BaseExceptionGroup) as error:
+                failure = error
+            assert failure is None
+            assert owner.snapshot()["state"] == "completed"
+            assert first.returncode == second.returncode == 0
+            assert all(
+                stream.closed
+                for child in (first, second)
+                for stream in (child.stdin, child.stdout, child.stderr)
+            )
+        finally:
+            for child in (first, second):
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=5)
+
+
+def test_unreleased_attempt_refuses_clean_context_return(tmp_path):
+    owner = supervisor(tmp_path)
+    logical_context = attempt_context = None
+    try:
+        with pytest.raises(RequestPolicyError) as failure, owner:
+            logical_context = owner.run.logical(authorization().grants[0])
+            logical = logical_context.__enter__()
+            attempt_context = logical.attempt(response_limit=8)
+            attempt_context.__enter__()
+        assert failure.value.reason == "accounting"
+        assert owner.snapshot()["state"] == "failed"
+        assert owner.snapshot()["observationComplete"] is False
+    finally:
+        if attempt_context is not None:
+            attempt_context.__exit__(None, None, None)
+        if logical_context is not None:
+            logical_context.__exit__(None, None, None)
+
+
+def test_inflight_real_heartbeat_after_closure_preserves_completion(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    arrived, release = threading.Event(), threading.Event()
+    original_heartbeat, original_join = owner.run.heartbeat, owner._join
+
+    def paused_heartbeat():
+        arrived.set()
+        assert release.wait(3), "Caller did not release owned observer pulse"
+        original_heartbeat()
+
+    def release_at_join():
+        release.set()
+        original_join()
+
+    monkeypatch.setattr(owner.run, "heartbeat", paused_heartbeat)
+    monkeypatch.setattr(owner, "_join", release_at_join)
+    failure = None
+    try:
+        try:
+            with owner:
+                assert arrived.wait(3), "Real observer never reached heartbeat"
+        except (RequestPolicyError, BaseExceptionGroup) as error:
+            failure = error
+        assert failure is None
+        assert owner.snapshot()["state"] == "completed"
+        assert not (owner.run.directory / "failed").exists()
+    finally:
+        release.set()
+        owner._observer.join(timeout=3)
+        assert not owner._observer.is_alive()
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_terminal_validation_precedes_failure_selection(tmp_path, monkeypatch, corrupt):
+    owner = supervisor(tmp_path)
+    original_join = owner._join
+
+    def corrupt_after_closure():
+        original_join()
+        if corrupt:
+            with (
+                closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as connection,
+                connection,
+            ):
+                connection.execute("UPDATE run SET logical=-1")
+        (owner.run.directory / "failed").write_text("transport")
+
+    monkeypatch.setattr(owner, "_join", corrupt_after_closure)
+    with pytest.raises((RequestPolicyError, BaseExceptionGroup)) as failure, owner:
+        pass
+    assert [leaf.reason for leaf in failure_leaves(failure.value)] == (
+        ["accounting", "accounting"] if corrupt else ["transport"]
+    )
+    assert not owner._observer.is_alive()
+
+
+def test_unrelated_body_group_keeps_observed_child_failure(tmp_path):
+    owner = supervisor(tmp_path)
+    original = KeyError("synthetic initiating failure")
+    body = ExceptionGroup("caller group", [original])
+    with subprocess.Popen(
+        [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1); sys.exit(7)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+        with pytest.raises(ExceptionGroup) as failure, owner:
+            owner.register_child(child, participant="failed-worker", role="worker")
+            child.communicate(b"x", timeout=5)
+            assert owner._stop.wait(3), "Real observer did not observe failed owned child"
+            raise body
+        assert failure.value.exceptions[0] is body
+        leaves = failure_leaves(failure.value)
+        assert leaves[0] is original
+        assert len(leaves) == OBSERVED_FAILURE_COUNT
+        assert type(leaves[1]) is RequestPolicyError and leaves[1].reason == "transport"
+        assert child.returncode == FAILED_WORKER_EXIT
+    assert owner.snapshot()["state"] == "failed"
