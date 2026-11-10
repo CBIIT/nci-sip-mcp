@@ -22,14 +22,16 @@ from nci_si_mcp.http_client import (
 
 # The independently scripted JSON document below has twelve wire bytes.
 JSON_BYTES = 12
+# The core's reviewed error-prefix contract is independent of the client success limit.
+ERROR_PREFIX_BYTES = 4096
 
 
-def owned_client(receiver, owner, *, limit=64):
+def owned_client(receiver, owner, *, limit=64, attempts=1):
     return HttpClient(
         receiver.origin,
         label="owned",
         timeout_seconds=1,
-        max_attempts=1,
+        max_attempts=attempts,
         retry_backoff_seconds=0,
         max_response_bytes=limit,
         size_bound="owned",
@@ -106,10 +108,14 @@ def test_unknown_chunk_progress_closes_admission_without_retry(tmp_path):
     reply = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nNOT-A-CHUNK\r\n"
     with WireReceiver([reply]) as receiver:
         owner = owned_run(tmp_path, receiver)
-        with pytest.raises(UpstreamError), owner:
-            owned_client(receiver, owner).get_json("/owned")
+        with pytest.raises(RequestPolicyError) as caught, owner:
+            owned_client(receiver, owner, attempts=3).get_json("/owned")
+        assert caught.value.reason == "transport"
+        assert str(caught.value) == "Controlled upstream request refused."
+        assert caught.value.details == {}
         snapshot = owner.run.snapshot()
         assert (receiver.contacts, snapshot.transport_entries) == (1, 1)
+        assert snapshot.attempts == 1
         assert (snapshot.active, snapshot.pending_receipts) == (1, 1)
         assert snapshot.consumed_body_bytes == 0
         assert snapshot.observation_complete is False
@@ -234,3 +240,77 @@ def test_deadline_checks_after_known_fragment_before_waiting_for_more(tmp_path, 
         )
         assert receiver.contacts == 1
         assert snapshot.observation_complete is True
+
+
+@pytest.mark.parametrize(
+    "client_limit,policy_limit,refused", [(12, 64, False), (11, 64, True), (64, 11, True)]
+)
+def test_success_sentinel_records_exact_authorized_bytes(
+    tmp_path, client_limit, policy_limit, refused
+):
+    with WireReceiver() as receiver:
+        owner = owned_run(tmp_path, receiver, response_bytes=policy_limit)
+        outcome = None
+        try:
+            with owner:
+                outcome = owned_client(receiver, owner, limit=client_limit).get_json("/owned")
+        except RequestPolicyError as error:
+            outcome = error.reason
+        assert outcome == ("response_limit" if refused else {"ok": True})
+        snapshot = owner.run.snapshot()
+        assert snapshot.consumed_body_bytes == JSON_BYTES
+        assert snapshot.active == snapshot.pending_receipts == 0
+        assert receiver.contacts == 1
+
+
+def test_error_prefix_reserves_more_than_small_success_limit(tmp_path):
+    reply = b"HTTP/1.1 400 Bad request\r\nContent-Length: 4097\r\n\r\n" + b"x" * 4097
+    with WireReceiver([reply]) as receiver:
+        owner = owned_run(tmp_path, receiver, response_bytes=8192, total_bytes=16386)
+        with owner, pytest.raises(UpstreamRejectedError) as caught:
+            owned_client(receiver, owner, limit=12).get_json("/owned")
+        assert caught.value.empty_body is False
+        assert owner.run.snapshot().consumed_body_bytes == ERROR_PREFIX_BYTES
+        assert receiver.contacts == 1
+
+
+def test_aggregate_shortage_refuses_before_another_contact(tmp_path):
+    with WireReceiver() as receiver:
+        owner = owned_run(tmp_path, receiver, total_bytes=65)
+        with pytest.raises(RequestPolicyError) as caught, owner:
+            client = owned_client(receiver, owner)
+            assert client.get_json("/owned") == {"ok": True}
+            client.get_json("/owned")
+        assert caught.value.reason == "byte_limit"
+        snapshot = owner.run.snapshot()
+        assert (receiver.contacts, snapshot.attempts, snapshot.transport_entries) == (1, 1, 1)
+        assert snapshot.consumed_body_bytes == JSON_BYTES
+
+
+@pytest.mark.parametrize(
+    "first",
+    [
+        b'HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n{"ok": true}',
+        b"HTTP/1.1 429 Slow down\r\nRetry-After: 0\r\nRetry-After: 99\r\nContent-Length: 0\r\n\r\n",
+        b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n",
+    ],
+    ids=["known-truncation", "first-retry-after", "server-error"],
+)
+def test_known_retryable_response_spends_a_separate_lease(tmp_path, first):
+    with WireReceiver([first]) as receiver:
+        owner = owned_run(tmp_path, receiver)
+        waits = []
+        with owner:
+            client = owned_client(receiver, owner, attempts=3)
+            client.sleep = waits.append
+            assert client.get_json("/owned") == {"ok": True}
+        snapshot = owner.run.snapshot()
+        assert (
+            receiver.contacts,
+            snapshot.logical,
+            snapshot.attempts,
+            snapshot.transport_entries,
+        ) == (2, 1, 2, 2)
+        assert snapshot.active == snapshot.pending_receipts == 0
+        assert all(wait == 0 for wait in waits)
+        assert snapshot.consumed_body_bytes == (24 if first.startswith(b"HTTP/1.1 200") else 12)

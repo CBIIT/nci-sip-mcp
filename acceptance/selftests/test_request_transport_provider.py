@@ -9,7 +9,9 @@ from http_receiver import WireReceiver
 
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_si_mcp.errors import correlated
 from nci_si_mcp.http_client import HttpClient, RequestPolicyError
+from nci_si_mcp.invocation import call
 
 
 def provider(run):
@@ -173,3 +175,53 @@ def test_transport_headers_are_refused_even_when_granted(tmp_path, name):
         with pytest.raises(RequestPolicyError), owner, provider(owner.run).request(request):
             pytest.fail("Transport framing overrides must never be admitted")
         assert receiver.contacts == owner.run.snapshot().logical == 0
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+@pytest.mark.parametrize("same_origin", [False, True])
+def test_redirect_never_moves_credentials_or_exposes_private_fields(tmp_path, status, same_origin):
+    secret = "synthetic-private-credential"  # noqa: S105 - synthetic loopback fixture only
+    with WireReceiver() as receiver, WireReceiver() as other:
+        destination = (receiver.origin if same_origin else other.origin) + "/outside?PRIVATE-QUERY"
+        receiver.replies.append(
+            (
+                f"HTTP/1.1 {status} PRIVATE-STATUS\r\nLocation: {destination}\r\n"
+                "Content-Length: 0\r\n\r\n"
+            ).encode()
+        )
+        grant = RequestGrant(
+            "GET",
+            receiver.origin + "/allowed",
+            (
+                ("accept", "application/json"),
+                ("authorization", secret),
+                ("x-correlation-id", "policy-test"),
+            ),
+            credential_origin=receiver.origin + "/allowed",
+        )
+        owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
+        with correlated("policy-test"), owner:
+            client = HttpClient(
+                receiver.origin,
+                label="owned",
+                timeout_seconds=1,
+                max_attempts=3,
+                retry_backoff_seconds=0,
+                max_response_bytes=64,
+                size_bound="owned",
+                credentials={"Authorization": secret},
+                request_policy=provider(owner.run),
+            )
+            result = call("controlled-http", lambda: client.get_json("/allowed"))
+        assert result == {
+            "error": {
+                "code": "upstream_unavailable",
+                "message": "Controlled upstream request refused. Retry later.",
+                "correlationId": "policy-test",
+            }
+        }
+        assert (receiver.contacts, other.contacts, owner.run.snapshot().attempts) == (1, 0, 1)
+        fields = {name.lower(): value for name, value in receiver.requests[0][2]}
+        assert fields["authorization"] == secret
+        assert receiver.requests[0][1] == "/allowed"
+        assert secret not in repr(grant)
