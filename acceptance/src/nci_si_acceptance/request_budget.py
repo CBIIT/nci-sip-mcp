@@ -599,7 +599,7 @@ class AttemptLease:
             raise
         finally:
             try:
-                self._settle_entry(prepared=prepared, invoked=invoked)
+                self._settle_entry(invoked=invoked, start=start, event=initiating)
             except BaseException as cleanup:
                 if initiating is not None:
                     raise BaseExceptionGroup(
@@ -615,15 +615,30 @@ class AttemptLease:
                 self.run._deny("accounting")
             connection.execute("UPDATE leases SET entry_pending=1 WHERE id=?", (self.lease_id,))
 
-    def _settle_entry(self, *, prepared: bool, invoked: bool) -> None:
+    def _settle_entry(
+        self, *, invoked: bool, start: TransportStart, event: BaseException | None
+    ) -> None:
         if invoked:
             self._receipt_entry()
-        elif prepared:
-            with self.run._connection() as connection:
-                row = self._row(connection)
-                if not row["entry_pending"] or row["entered"]:
-                    self.run._deny("accounting")
-                connection.execute("UPDATE leases SET entry_pending=0 WHERE id=?", (self.lease_id,))
+        elif self._pending_entry():
+            if start.refused_before_entry:
+                self._abort_entry()
+            else:
+                reason: PolicyReason = (
+                    event.reason if isinstance(event, RequestPolicyError) else "transport"
+                )
+                self.run._mark_failed(reason, event=event)
+
+    def _pending_entry(self) -> bool:
+        with self.run._connection() as connection:
+            return bool(self._row(connection)["entry_pending"])
+
+    def _abort_entry(self) -> None:
+        with self.run._connection() as connection:
+            row = self._row(connection)
+            if not row["entry_pending"] or row["entered"]:
+                self.run._deny("accounting")
+            connection.execute("UPDATE leases SET entry_pending=0 WHERE id=?", (self.lease_id,))
 
     def _receipt_entry(self) -> None:
         # Receipt of a past entry must not reapply admission/heartbeat/deadline gates.

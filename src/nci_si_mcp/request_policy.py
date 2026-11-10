@@ -29,6 +29,11 @@ class Exchange:
 
 
 class TransportStart(Protocol):
+    @property
+    def refused_before_entry(self) -> bool:
+        """The latest invoke certified an ordinary core-limit refusal before entry."""
+        ...
+
     def __call__(self) -> None:
         """Legacy providers declare entry immediately before opening transport."""
         ...

@@ -130,6 +130,9 @@ final ledger admission runs before core entry accounting, then the operation is 
 The callback remains callable for existing explicit providers. `AttemptLease.transport`
 retains a pending-entry fact until the actual entry receipt commits. A known callback refusal
 settles without an entry; failed settlement or receipt retains capacity and prevents completion.
+Only the core's `refused_before_entry` witness permits known non-entry settlement.
+Interrupted or otherwise uncertain gate progress keeps its pending fact, closes admission,
+and preserves the initiating error plus any cleanup error. The witness resets for each `invoke`.
 No ledger transaction spans network I/O, and a later closure cannot erase a past entry receipt.
 
 A provider owns exact request validation and immutable snapshots, pre-send budget reservation,
