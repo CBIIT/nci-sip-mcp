@@ -447,3 +447,43 @@ def test_missing_temporary_does_not_duplicate_publication_failure(tmp_path, monk
     assert failure.reason == "accounting"
     assert path.read_bytes() == original
     assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize(
+    "interruption",
+    [
+        KeyboardInterrupt("synthetic cleanup interruption"),
+        SystemExit("synthetic cleanup exit"),
+        BaseExceptionGroup("synthetic cleanup group", [KeyboardInterrupt("nested interruption")]),
+    ],
+)
+def test_cleanup_interruption_keeps_prior_publication_failure(tmp_path, monkeypatch, interruption):
+    owner = managed(tmp_path)
+    module = importlib.import_module("nci_si_acceptance.request_summary")
+    value = owner.snapshot()
+    owner.run.close()
+    path = owner.run.directory / "summary.json"
+    module.publish(path, value)
+    original = path.read_bytes()
+
+    def replace_failure(_source, _target):
+        raise OSError("synthetic publication failure")
+
+    def cleanup_interruption(_path, **_options):
+        raise interruption
+
+    failure = None
+    with monkeypatch.context() as faults:
+        faults.setattr(module.os, "replace", replace_failure)
+        faults.setattr(module.Path, "unlink", cleanup_interruption)
+        try:
+            module.publish(path, value)
+        except (RequestPolicyError, KeyboardInterrupt, SystemExit, BaseExceptionGroup) as error:
+            failure = error
+    assert type(failure) is BaseExceptionGroup
+    assert len(failure.exceptions) == FAILURE_COUNT
+    assert type(failure.exceptions[0]) is RequestPolicyError
+    assert failure.exceptions[0].reason == "accounting"
+    assert str(failure.exceptions[0]) == "Controlled upstream request refused."
+    assert failure.exceptions[1] is interruption
+    assert path.read_bytes() == original
