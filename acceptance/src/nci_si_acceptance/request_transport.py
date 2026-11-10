@@ -191,6 +191,8 @@ class _Request:
     def exchange(
         self, *, timeout_seconds: float, response_limit: int, on_start: TransportStart
     ) -> Exchange:
+        if type(response_limit) is not int or response_limit <= 0:
+            self.run.refuse("authorization")
         with _resources(self.run) as cleanup:
             admission = self.logical.attempt(response_limit=max(response_limit, ERROR_BYTES))
             lease = admission.__enter__()

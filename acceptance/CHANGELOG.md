@@ -18,6 +18,10 @@ fixture set pinned to NCIt 26.09d.
   before core entry accounting and retains uncertain entry receipts conservatively. Existing
   callable providers and unconfigured transport remain unchanged; furnished caller adoption
   is separate. Contemporary red/green and review evidence is recorded on the issue.
+  `ControlledHttpPolicy` binds direct verified-TLS HTTP to immutable exact grants, shared
+  presend leases, framed progress receipts and sanitized failure-preserving cleanup
+  (A5.2, A6.4, A7.5). Owned-loopback TLS and registered-child tests also run through the
+  mutation runner's copied-source environment; no furnished caller or live access is activated.
 - #453 (§5 recorded-run provenance): selected-environment stdio benchmarking reuses the managed
   policy/isolated launcher, preserves strict recorded identity through benchmark evidence and
   comparison, and displays supplied-live provenance in combined reports and the local portal.
