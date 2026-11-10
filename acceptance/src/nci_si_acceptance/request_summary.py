@@ -226,6 +226,8 @@ def _publication_cleanup(temporary: Path | None, failures: list[BaseException]) 
             temporary.unlink(missing_ok=True)
         except OSError:
             failures.append(RequestPolicyError("accounting"))
+        except (KeyboardInterrupt, SystemExit, BaseExceptionGroup) as error:
+            failures.append(error)
     if len(failures) == 1:
         raise failures[0] from None
     if failures:
