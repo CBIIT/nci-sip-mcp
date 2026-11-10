@@ -202,8 +202,9 @@ credentials or the binding. Descriptor records are private IPC, including their 
 keep them and the binding out of public reports.
 
 These values alone enforce no budget; explicit shared accounting is described below.
-Supervision/summaries are explicit opt-ins below; production transport #465 and actual caller adoption
-#448/#449. No furnished caller or live access is activated.
+Supervision/summaries are explicit opt-ins below; the
+[controlled HTTP transport](#explicit-controlled-http-transport) uses these APIs.
+Furnished caller adoption remains #448/#449. No furnished caller or live access is activated.
 
 ### Explicit shared request accounting
 
