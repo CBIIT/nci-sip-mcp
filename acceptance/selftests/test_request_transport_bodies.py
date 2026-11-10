@@ -2,6 +2,7 @@
 
 from http import HTTPStatus
 from http.client import HTTPException, HTTPResponse
+from pathlib import Path
 
 import pytest
 from http_receiver import WireReceiver
@@ -153,3 +154,52 @@ def test_cleanup_retains_sanitized_initiating_and_close_failures(tmp_path, monke
         assert error.details == {}
         assert "PRIVATE" not in repr(error)
         assert owner.run.snapshot().consumed_body_bytes == JSON_BYTES
+
+
+@pytest.mark.parametrize("kind", [RuntimeError, KeyboardInterrupt])
+@pytest.mark.parametrize("publication_failure", [False, True])
+@pytest.mark.parametrize("prior_reason", [None, "response_limit"])
+def test_unexpected_cleanup_closes_admission_when_group_is_caught(
+    tmp_path, monkeypatch, kind, publication_failure, prior_reason
+):
+    fault = kind("PRIVATE-CLEANUP-BUG")
+    original_close, original_open = HTTPResponse.close, Path.open
+
+    def fail_close(response):
+        original_close(response)
+        if prior_reason:
+            with pytest.raises(RequestPolicyError):
+                owner.run.refuse(prior_reason)
+        raise fault
+
+    def fail_publication(path, mode="r", *args, **kwargs):
+        if publication_failure and path.name == "failed" and mode == "x":
+            raise OSError("PRIVATE-PUBLICATION-FAILURE")
+        return original_open(path, mode, *args, **kwargs)
+
+    with WireReceiver() as receiver:
+        owner = owned_run(tmp_path, receiver)
+        outer = None
+        try:
+            with owner:
+                with monkeypatch.context() as patch:
+                    patch.setattr(HTTPResponse, "close", fail_close)
+                    patch.setattr(Path, "open", fail_publication)
+                    with pytest.raises(BaseExceptionGroup) as caught:
+                        owned_client(receiver, owner).get_json("/owned")
+                errors = caught.value.exceptions
+                assert errors[0] is fault
+                reasons = [
+                    error.reason for error in errors if isinstance(error, RequestPolicyError)
+                ]
+                assert reasons == (["accounting"] if publication_failure else [])
+                with pytest.raises(RequestPolicyError) as denied:
+                    owner.run.check_wait(0)
+                assert denied.value.reason == "closed"
+        except RequestPolicyError as error:
+            outer = error
+        assert isinstance(outer, RequestPolicyError)
+        snapshot = owner.run.snapshot()
+        assert snapshot.failure == (prior_reason or "transport")
+        assert owner.snapshot()["state"] == "failed"
+        assert (snapshot.active, snapshot.pending_receipts, receiver.contacts) == (0, 0, 1)
