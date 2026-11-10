@@ -87,6 +87,19 @@ self-test and prepared-fixture baselines itself; unit remains serial. Any baseli
 names its domain and fails the gate. The shard summary's `baseline_domains` records freshly
 computed domain outcomes and seconds; imported runs leave that list empty.
 
+Ordinary `pdm run test` stores combined coverage in `tmp/coverage/unit/.coverage`;
+`pdm run acceptance-selftest` uses `tmp/coverage/harness/.coverage`. PDM supplies the required
+absolute root so children and xdist workers share their command's scratch destination even
+when changing directory; configuration loading without that root refuses. A successful run
+combines and removes its parallel files; the next serial run replaces the combined data.
+Use `pdm run coverage report` or `pdm run coverage report --rcfile=acceptance/pyproject.toml`
+to read those defaults; replace `report` with `erase` only after all evidence consumers finish.
+Before rerunning an interrupted or failed run, verify its owned writers have stopped and
+preserve its exact coverage directory in a separately named evidence archive. Never combine
+failed data into a corrected rerun. Concurrent runs need separate worktrees or explicit unique
+`COVERAGE_FILE` destinations. Generated CI configurations and canonical mutation scratch retain
+their explicit consumer-owned destinations and existing combination/export contracts.
+
 Beyond the server and the suite, the repository holds the documentation site, the validation
 companion and the benchmark tooling; these are their entry points.
 
@@ -119,8 +132,8 @@ the callback checks the call's existing budget/deadline. Returned exchanges hide
 and headers in their representation. Core classification alone proves none of the provider's
 I/O guarantees. The `on_request` observer is not an enforcement boundary.
 
-Explicit authorization and shared accounting are described below; owned-run supervision and
-sanitized summaries remain #467, and the production provider #465. Furnished harness,
+Explicit authorization, shared accounting and owned-run supervision are described below;
+the production provider remains #465. Furnished harness,
 prepare, selected stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
 activates no caller protection or live access and changes no native/benchmark report schema.
 
@@ -140,7 +153,7 @@ credentials or the binding. Descriptor records are private IPC, including their 
 keep them and the binding out of public reports.
 
 These values alone enforce no budget; explicit shared accounting is described below.
-Supervision/summaries remain #467, production transport #465 and actual caller adoption
+Supervision/summaries are explicit opt-ins below; production transport #465 and actual caller adoption
 #448/#449. No furnished caller or live access is activated.
 
 ### Explicit shared request accounting
@@ -164,6 +177,38 @@ Snapshots are private immutable typed accounting records, not public summaries o
 Callers own, join and reap their children and retain needed private ledger evidence outside
 managed scratch before pruning. This API supplies no automatic supervisor, owner-death
 observation, production transport or furnished-caller protection; those successors remain above.
+
+### Explicit owned-run supervision
+
+`request_supervision.SupervisedRun.create(authorization, owned_directory)` wraps the ledger
+for an explicitly cooperating diagnostic caller. Enter its context before using `.run`:
+initial strict `summary.json` publication succeeds before controller admission opens.
+Supervised participants refuse a heartbeat older than two seconds; the controller observes
+about once per second. This is cooperative observation, not instantaneous death detection.
+Existing explicitly unmanaged accounting callers retain their current behavior.
+
+`register_child(process, participant=..., role="worker" | "service")` transfers custody of
+an actual owned direct-child handle. Keep the child behind its start barrier until registration
+succeeds; rejection leaves custody with the caller. Never register an arbitrary PID.
+Zero-exit workers need resolved leases; failed workers and unexpected service exits fail the run.
+Shutdown closes admission first, joins the observer within two seconds, then owns child cleanup
+and stream closure. Each worker gets up to ten seconds to exit, followed if necessary by the
+existing ten-second TERM/wait/KILL/wait leaf; service cleanup uses that leaf directly.
+Resource waits are bounded by `2 + 30N` seconds for N registered children, plus ledger operations
+and filesystem/OS scheduling, not a hard real-time guarantee. Intentional termination is not
+reported as successful worker completion. Initiating and cleanup failures remain distinct.
+Even a terminal ledger refusal caught inside the context produces one outer `RequestPolicyError` with the
+ledger's original reason. Observer notification does not duplicate that failure. An initiating
+caller exception remains first when additional cleanup failures require a `BaseExceptionGroup`.
+
+The controller alone publishes initial/final summaries; the observer never writes them.
+Failed final publication preserves the last file and reports a failed public snapshot.
+`request_summary.read_summary(path, run_id=..., policy_sha256=...)` validates the separate
+exact diagnostic schema and identity; malformed serialized records refuse with `accounting`.
+`denials: null` means counts were not measured.
+Known bytes remain known after failure; unresolved receipts retain capacity and prevent
+completion. Private descriptors, ledger files and raw synthetic evidence are separate from
+these sanitized summaries. This API activates no production transport or furnished caller.
 
 ## Test levels
 

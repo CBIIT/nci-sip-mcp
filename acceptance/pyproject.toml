@@ -44,6 +44,8 @@ markers = [
 ]
 
 [tool.coverage.run]
+# Share this absolute destination across xdist workers and their Python children.
+data_file = "${PDM_PROJECT_ROOT?}/tmp/coverage/harness/.coverage"
 branch = true
 source = ["nci_si_acceptance"]
 # Renderer and report CLI tests execute in child interpreters.

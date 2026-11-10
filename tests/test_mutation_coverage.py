@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -154,6 +155,105 @@ def produce(root, config, *tests):
         timeout=120,
         check=False,
     )
+
+
+def ordinary_coverage_project(root):
+    project(root, CHILD_SOURCE)
+    (root / "pyproject.toml").write_bytes((ROOT / "pyproject.toml").read_bytes())
+    (root / "acceptance/pyproject.toml").write_bytes(
+        (ROOT / "acceptance/pyproject.toml").read_bytes()
+    )
+    (root / ".pdm-python").write_text(sys.executable)
+    elsewhere = root / "elsewhere"
+    elsewhere.mkdir()
+    for name in ("tests/test_example.py", "acceptance/selftests/test_harness.py"):
+        (root / name).write_text(
+            "import subprocess, sys\n"
+            "def test_child():\n"
+            "    done = subprocess.run([sys.executable, '-c', "
+            f"'import example; example.child()'], cwd={str(elsewhere)!r}, timeout=10)\n"
+            "    assert done.returncode == 0\n"
+        )
+
+
+def ordinary_coverage_run(root, command, destination=None):
+    env = environment(root, root / "tmp")
+    if destination is not None:
+        env["COVERAGE_FILE"] = str(destination)
+    return subprocess.run(  # noqa: S603 - ordinary PDM alias, owned synthetic project
+        [  # noqa: S607 - fixed PDM alias and synthetic coverage source
+            "pdm",
+            "run",
+            command,
+            "--cov-reset",
+            "--cov=example",
+            "--cov-fail-under=0",
+            "--cov-report=",
+        ],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+class OrdinaryCoverageTest(unittest.TestCase):
+    def test_ordinary_commands_keep_combined_child_data_in_owned_scratch(self):
+        for command, domain in (("test", "unit"), ("acceptance-selftest", "harness")):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                ordinary_coverage_project(root)
+                destination = root / "tmp/coverage" / domain / ".coverage"
+                for _repeat in range(2):
+                    result = ordinary_coverage_run(root, command)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertTrue(destination.is_file(), result.stdout + result.stderr)
+                    data = CoverageData(basename=str(destination))
+                    data.read()
+                    self.assertIn(6, data.lines(str(root / "src/example.py")) or [])
+                    self.assertEqual(list(root.rglob(".coverage*")), [destination])
+
+    def test_explicit_data_destination_remains_owned_by_the_consumer(self):
+        for command in ("test", "acceptance-selftest"):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                ordinary_coverage_project(root)
+                destination = root / "consumer/.coverage"
+                result = ordinary_coverage_run(root, command, destination)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                data = CoverageData(basename=str(destination))
+                data.read()
+                self.assertIn(6, data.lines(str(root / "src/example.py")) or [])
+                self.assertEqual(list(root.rglob(".coverage*")), [destination])
+
+    def test_missing_project_root_refuses_configuration_before_output(self):
+        for name in ("pyproject.toml", "acceptance/pyproject.toml"):
+            with self.subTest(config=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                result = subprocess.run(  # noqa: S603 - installed coverage, exact tracked config
+                    [
+                        sys.executable,
+                        "-c",
+                        "import coverage,sys; coverage.Coverage(config_file=sys.argv[1])",
+                        str(ROOT / name),
+                    ],
+                    cwd=root,
+                    env=environment(root, root / "tmp"),
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("PDM_PROJECT_ROOT", result.stderr)
+                self.assertEqual(list(root.rglob(".coverage*")), [])
+                settings = tomllib.loads((ROOT / name).read_text())["tool"]["coverage"]["run"]
+                domain = "unit" if name == "pyproject.toml" else "harness"
+                self.assertEqual(
+                    settings["data_file"], f"${{PDM_PROJECT_ROOT?}}/tmp/coverage/{domain}/.coverage"
+                )
 
 
 def verdict_rows(rows):
