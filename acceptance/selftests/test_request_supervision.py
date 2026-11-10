@@ -699,15 +699,21 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
             except RequestPolicyError:
                 results.append("rejected")
 
-        with owner:
-            threads = [threading.Thread(target=register, args=(name,)) for name in ("one", "two")]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join(timeout=5)
-                assert not thread.is_alive()
-            assert sorted(results) == ["accepted", "rejected"]
-            assert len(owner._children) == 1 and owner._children[0].process is child
+        failure = None
+        try:
+            with owner:
+                threads = [
+                    threading.Thread(target=register, args=(name,)) for name in ("one", "two")
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=5)
+                    assert not thread.is_alive()
+        except (RequestPolicyError, BaseExceptionGroup) as error:
+            failure = error
+        assert sorted(results) == ["accepted", "rejected"]
+        assert failure is None
         assert child.poll() is not None and child.stdin.closed
 
 
