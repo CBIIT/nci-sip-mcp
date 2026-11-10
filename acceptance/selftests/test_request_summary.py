@@ -200,16 +200,20 @@ def managed(directory):
     return entry.SupervisedRun.create(auth, directory)
 
 
+@pytest.mark.parametrize("phase", ["initial", "final"])
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
 @pytest.mark.parametrize("cleanup_fault", [False, True])
-def test_interrupted_initial_publication_retains_failure_and_cleanup(
-    tmp_path, monkeypatch, interruption, cleanup_fault
+def test_interrupted_publication_retains_failure_and_cleanup(
+    tmp_path, monkeypatch, interruption, cleanup_fault, phase
 ):
     owner = managed(tmp_path)
     module = importlib.import_module("nci_si_acceptance.request_summary")
     before = set(owner.run.directory.iterdir())
     original_unlink = module.Path.unlink
     initiating = interruption("synthetic publication interruption")
+    temporary_state = "incomplete"
+    summary = owner.run.directory / "summary.json"
+    initial = None
 
     def interrupt(_descriptor):
         raise initiating
@@ -219,12 +223,20 @@ def test_interrupted_initial_publication_retains_failure_and_cleanup(
             raise OSError("synthetic temporary cleanup failure")
         return original_unlink(path, **options)
 
-    monkeypatch.setattr("os.fsync", interrupt)
-    monkeypatch.setattr(module.Path, "unlink", unlink)
+    def install():
+        monkeypatch.setattr("os.fsync", interrupt)
+        monkeypatch.setattr(module.Path, "unlink", unlink)
+
+    if phase == "initial":
+        install()
     failure = None
     try:
         with owner:
-            pytest.fail("Interrupted publication must not open admission")
+            assert phase == "final", "Interrupted publication must not open admission"
+            before = set(owner.run.directory.iterdir())
+            initial = summary.read_bytes()
+            temporary_state = "completed"
+            install()
     except (BaseExceptionGroup, RequestPolicyError, KeyboardInterrupt, SystemExit) as error:
         failure = error
     assert type(failure) is (BaseExceptionGroup if cleanup_fault else interruption)
@@ -234,10 +246,12 @@ def test_interrupted_initial_publication_retains_failure_and_cleanup(
         RequestPolicyError
     ] * cleanup_fault
     assert owner.run.snapshot().state == "closed"
+    assert owner.snapshot()["state"] == "failed"
+    assert (summary.read_bytes() if summary.exists() else None) == initial
     remaining = set(owner.run.directory.iterdir()) - before
     assert len(remaining) == int(cleanup_fault)
     for path in remaining:
-        assert json.loads(path.read_text())["state"] == "incomplete"
+        assert json.loads(path.read_text())["state"] == temporary_state
         original_unlink(path)
     assert set(owner.run.directory.iterdir()) == before
 
@@ -271,6 +285,7 @@ def test_initial_and_final_publication_faults_are_terminal(tmp_path, monkeypatch
         install()
     assert str(caught.value) == "Controlled upstream request refused."
     assert owner.run.snapshot().state != "open"
+    assert owner.snapshot()["state"] == "failed"
     path = owner.run.directory / "summary.json"
     if initial is None:
         assert not path.exists()
