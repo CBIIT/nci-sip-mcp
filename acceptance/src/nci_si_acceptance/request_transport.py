@@ -10,30 +10,13 @@ from typing import NoReturn
 from urllib.parse import urlsplit
 from urllib.request import Request
 
-from nci_si_acceptance.request_authorization import RequestGrant, destination
+from nci_si_acceptance.request_authorization import TRANSPORT_HEADERS, RequestGrant, destination
 from nci_si_acceptance.request_budget import AttemptLease, ControlledRun, LogicalRequest
 from nci_si_mcp.bounds import CallDeadlineError, RequestBudgetError, check_deadline
 from nci_si_mcp.http_client import RequestPolicyError
 from nci_si_mcp.request_policy import ControlledRequest, Exchange, TransportStart
 from nci_si_mcp.validation import PolicyReason
 
-# These fields belong to direct transport framing, not caller-selected request content.
-TRANSPORT_HEADERS = frozenset(
-    (
-        "host",
-        "content-length",
-        "transfer-encoding",
-        "connection",
-        "proxy-authorization",
-        "proxy-connection",
-        "expect",
-        "upgrade",
-        "te",
-        "trailer",
-        "accept-encoding",
-        "cookie",
-    )
-)
 # Core error classification consumes a bounded prefix, independently of the success limit.
 ERROR_BYTES = 4096
 

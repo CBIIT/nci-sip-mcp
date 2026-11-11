@@ -212,10 +212,19 @@ exact. Opting in requires the declaration to omit a fixed correlation header; th
 identifier is snapshotted with the request and cannot change between retries.
 `Authorization(..., families=...)` snapshots the closed declarations and includes every field
 in its private binding. Omitting families retains the existing exact-grant contract.
-`request_catalogue.compile_policy(environment)` compiles the reviewed metadata-version GET
-from the selected environment and tracked `request-policy.yaml`. Missing, duplicate, unknown
-or malformed policy fields refuse authorization. Its public identity binds the nonsecret
-selection and policy bytes; credentials remain in the private authorization binding.
+`ConceptRequestFamily` admits only declared concept codes, full include combinations and
+relation names, with canonical query encoding, no duplicate/extra parameters and the existing
+1,000-code batch bound. Release-bearing families require a committed run-local selection.
+`request_catalogue.compile_policy(environment)` compiles version metadata, channel discovery
+and finite concept forms from the selected environment, `request-policy.yaml` and the fixture
+manifest. Missing, duplicate, unknown or malformed policy fields refuse authorization. Its
+public identity binds nonsecret selection/policy/manifest bytes; credentials remain private.
+`compiled.select_release(run, channel=...)` checks controller and compiled-authorization
+identity before constructing the real EVS client inside that run's policy. Existing resolver
+validation precedes the authenticated atomic ledger commit; no transaction spans discovery.
+Display version and pinned path remain distinct. Repeat selection still spends discovery;
+conflicts close admission and retain the first selection. Missing/corrupt state fails closed
+without migration or reset. Furnished callers and other exact catalogue forms remain deferred.
 
 ### Explicit shared request accounting
 

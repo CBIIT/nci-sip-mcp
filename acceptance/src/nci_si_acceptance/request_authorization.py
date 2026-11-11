@@ -7,20 +7,41 @@ import json
 import math
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Self, TypedDict, final, get_args
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
+from nci_si_acceptance.concepts import MAX_BATCH
 from nci_si_mcp.errors import safe_correlation
 from nci_si_mcp.http_client import RequestPolicyError
-from nci_si_mcp.validation import RequestMethod
+from nci_si_mcp.validation import RELEASE_CHANNELS, RELEASE_FORM, ReleaseChannel, RequestMethod
+
+# These fields belong to direct transport framing, not caller-selected request content.
+TRANSPORT_HEADERS = frozenset(
+    (
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "proxy-authorization",
+        "proxy-connection",
+        "expect",
+        "upgrade",
+        "te",
+        "trailer",
+        "accept-encoding",
+        "cookie",
+    )
+)
 
 # ASCII control characters cannot identify an HTTP destination.
 CONTROL_START = 32
 CONTROL_END = 127
 # Each header is exactly a field name and value, not an iterable to reinterpret.
 HEADER_PAIR_SIZE = 2
+# A relation endpoint suffix consists of exactly a concept code and relation name.
+RELATION_PATH_PARTS = 2
 
 type HeaderRow = tuple[str, str] | list[str]
 # SQLite INTEGER counters are signed 64-bit; remeasure if the storage representation changes.
@@ -205,17 +226,139 @@ def _private_bytes(value: bytes) -> str:
 
 @final
 @dataclass(frozen=True, slots=True)
+class ReleaseTarget:
+    terminology: str
+    channels: tuple[ReleaseChannel, ...]
+
+    def __post_init__(self) -> None:
+        _require(
+            type(self.terminology) is str
+            and re.fullmatch(r"[a-z][a-z0-9]*", self.terminology) is not None
+        )
+        _require(type(self.channels) is tuple and bool(self.channels))
+        _require(
+            all(type(channel) is str and channel in RELEASE_CHANNELS for channel in self.channels)
+        )
+        _require(len(set(self.channels)) == len(self.channels))
+
+    def accepts(self, segment: str) -> bool:
+        return (
+            re.fullmatch(re.escape(self.terminology) + "_" + RELEASE_FORM.strip("^$"), segment)
+            is not None
+        )
+
+
+@final
+@dataclass(frozen=True, slots=True)
 class ExactRequestFamily:
     request: RequestGrant = field(repr=False)
     correlation: bool = False
+    release: ReleaseTarget | None = None
 
     def __post_init__(self) -> None:
         _require(type(self.request) is RequestGrant and type(self.correlation) is bool)
+        _require(not (set(dict(self.request.headers)) & TRANSPORT_HEADERS))
         _require(not self.correlation or "x-correlation-id" not in dict(self.request.headers))
+        _release_template(self.request.url, self.release)
+
+
+def _release_template(url: str, release: ReleaseTarget | None) -> None:
+    if release is None:
+        _require("{" not in url and "}" not in url)
+        return
+    _require(type(release) is ReleaseTarget)
+    _require(urlsplit(url).path.split("/").count("{release}") == 1)
+    _require(url.count("{") == 1 and url.count("}") == 1)
+
+
+def _strings(values: tuple[str, ...], pattern: str) -> None:
+    _require(type(values) is tuple and bool(values))
+    _require(all(type(value) is str and re.fullmatch(pattern, value) for value in values))
+    _require(len(set(values)) == len(values))
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class ConceptRequestFamily:
+    request: RequestGrant = field(repr=False)
+    codes: tuple[str, ...]
+    includes: tuple[str, ...]
+    relations: tuple[str, ...]
+    release: ReleaseTarget
+    correlation: bool = False
+
+    def __post_init__(self) -> None:
+        ExactRequestFamily(self.request, self.correlation, self.release)
+        _require(self.request.method == "GET" and self.request.body is None)
+        _require(self.request.url.endswith("/api/v1/concept/{release}"))
+        _strings(self.codes, r"C[0-9]+")
+        _strings(self.includes, r"[A-Za-z]+(?:,[A-Za-z]+)*")
+        _strings(self.relations, r"[A-Za-z]+")
+
+
+type RequestFamily = ExactRequestFamily | ConceptRequestFamily
+
+
+def _release_segment(family: RequestFamily, url: str) -> str | None:
+    if family.release is None:
+        return None
+    before, _marker, _after = family.request.url.partition("{release}")
+    if not url.startswith(before):
+        return None
+    segment = url[len(before) :].split("/", 1)[0].split("?", 1)[0]
+    return segment if family.release.accepts(segment) else None
+
+
+def _query(query: str) -> dict[str, str]:
+    pairs = parse_qsl(query, keep_blank_values=True)
+    _require(urlencode(pairs) == query and len(dict(pairs)) == len(pairs))
+    return dict(pairs)
+
+
+def _batch_matches(family: ConceptRequestFamily, query: dict[str, str]) -> bool:
+    codes = query.get("list", "").split(",")
+    return (
+        set(query) == {"list", "include"}
+        and len(codes) <= MAX_BATCH
+        and all(code in family.codes for code in codes)
+        and query["include"] in family.includes
+    )
+
+
+def _concept_tail(family: ConceptRequestFamily, suffix: list[str], query: dict[str, str]) -> bool:
+    if suffix[0] not in family.codes:
+        return False
+    if len(suffix) == 1:
+        return set(query) == {"include"} and query["include"] in family.includes
+    return len(suffix) == RELATION_PATH_PARTS and suffix[1] in family.relations and not query
+
+
+def _concept_matches(family: ConceptRequestFamily, base: str, url: str) -> bool:
+    query = _query(urlsplit(url).query)
+    path = url.partition("?")[0]
+    if path == base:
+        return _batch_matches(family, query)
+    if not path.startswith(base + "/"):
+        return False
+    return _concept_tail(family, path[len(base) + 1 :].split("/"), query)
+
+
+def _family_matches(family: RequestFamily, url: str) -> bool:
+    destination(url)
+    _require(not url.endswith("?"))
+    base = family.request.url
+    if family.release is not None:
+        segment = _release_segment(family, url)
+        if segment is None:
+            return False
+        base = base.replace("{release}", segment)
+    if type(family) is ConceptRequestFamily:
+        return _concept_matches(family, base, url)
+    return url == base
 
 
 def _family_headers(
-    family: ExactRequestFamily, headers: tuple[tuple[str, str], ...]
+    family: RequestFamily, headers: tuple[tuple[str, str], ...]
 ) -> tuple[tuple[str, str], ...]:
     if not family.correlation:
         return headers
@@ -234,11 +377,24 @@ def _grant_record(grant: RequestGrant) -> dict[str, object]:
     }
 
 
+def _concrete(
+    family: RequestFamily, url: str, headers: tuple[tuple[str, str], ...]
+) -> tuple[RequestGrant, tuple[ReleaseTarget, str] | None]:
+    grant = family.request
+    concrete = RequestGrant(grant.method, url, headers, grant.body, grant.credential_origin)
+    if family.release is None:
+        return concrete, None
+    segment = _release_segment(family, url)
+    if segment is None:
+        raise RequestPolicyError("authorization")
+    return concrete, (family.release, segment)
+
+
 @final
 @dataclass(frozen=True, slots=True, init=False)
 class Authorization:
     grants: tuple[RequestGrant, ...] = field(repr=False)
-    families: tuple[ExactRequestFamily, ...] = field(default=(), kw_only=True, repr=False)
+    families: tuple[RequestFamily, ...] = field(default=(), kw_only=True, repr=False)
     limits: Limits
     policy_sha256: str
 
@@ -248,14 +404,16 @@ class Authorization:
         limits: Limits,
         policy_sha256: str,
         *,
-        families: Sequence[ExactRequestFamily] = (),
+        families: Sequence[RequestFamily] = (),
     ) -> None:
         """Snapshot a nonempty tuple/list; never consume an arbitrary iterator."""
         _require(isinstance(grants, (tuple, list)))
         _require(bool(grants) and all(type(grant) is RequestGrant for grant in grants))
         _require(type(limits) is Limits)
         _require(isinstance(families, (tuple, list)))
-        _require(all(type(family) is ExactRequestFamily for family in families))
+        _require(
+            all(type(family) in (ExactRequestFamily, ConceptRequestFamily) for family in families)
+        )
         _digest(policy_sha256)
         object.__setattr__(self, "grants", tuple(grants))
         object.__setattr__(self, "limits", limits)
@@ -266,6 +424,16 @@ class Authorization:
         self, method: str, url: str, headers: Sequence[HeaderRow], body: object
     ) -> RequestGrant:
         """Resolve declared forms into exact immutable bytes; no other metadata may vary."""
+        return self._match(method, url, headers, body)[0]
+
+    def release_targets(self) -> tuple[ReleaseTarget, ...]:
+        return tuple(
+            dict.fromkeys(family.release for family in self.families if family.release is not None)
+        )
+
+    def _match(
+        self, method: str, url: str, headers: Sequence[HeaderRow], body: object
+    ) -> tuple[RequestGrant, tuple[ReleaseTarget, str] | None]:
         canonical = _headers(headers)
         for grant in self.grants:
             if (method, url, canonical, body) == (
@@ -274,18 +442,15 @@ class Authorization:
                 grant.headers,
                 grant.body,
             ):
-                return grant
+                return grant, None
         for family in self.families:
             grant = family.request
-            if (method, url, _family_headers(family, canonical), body) == (
+            if (method, _family_headers(family, canonical), body) == (
                 grant.method,
-                grant.url,
                 grant.headers,
                 grant.body,
-            ):
-                return RequestGrant(
-                    grant.method, url, canonical, grant.body, grant.credential_origin
-                )
+            ) and _family_matches(family, url):
+                return _concrete(family, url, canonical)
         raise RequestPolicyError("authorization")
 
     def binding(self, key: bytes) -> bytes:
@@ -306,8 +471,7 @@ class Authorization:
         }
         if self.families:
             payload["families"] = [
-                {"request": _grant_record(family.request), "correlation": family.correlation}
-                for family in self.families
+                {"kind": type(family).__name__, **asdict(family)} for family in self.families
             ]
         canonical = json.dumps(
             payload,

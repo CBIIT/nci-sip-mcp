@@ -1,3 +1,22 @@
-# Explicit metadata permission only; furnished caller adoption remains #448.
+# Explicit finite forms only; furnished caller adoption remains #448.
 version: 1
 correlation: true
+channels: [monthly, weekly]
+includes:
+  - minimal
+  - summary
+  - synonyms
+  - definitions
+  - properties
+  - parents
+  - children
+  - roles
+  - inverseRoles
+  - associations
+  - inverseAssociations
+  - maps
+  - history
+  - full
+  - summary,definitions,synonyms,properties
+  - summary,definitions,synonyms,properties,parents,children,roles,inverseRoles,associations,inverseAssociations
+relations: [parents, children, roles, inverseRoles, associations, inverseAssociations, maps]
