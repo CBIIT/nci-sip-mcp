@@ -3,7 +3,7 @@
 import json
 import subprocess
 import sys
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 
 import pytest
@@ -11,6 +11,7 @@ from test_request_release_boundaries import ROOT, ROW, scenario
 
 import nci_si_acceptance
 import nci_si_mcp
+from nci_si_acceptance.owned_process import stop_child
 from nci_si_acceptance.request_budget import ControlledRun
 from nci_si_mcp.http_client import RequestPolicyError
 
@@ -47,7 +48,7 @@ print(json.dumps(dict(result=result,imports=[nci_si_acceptance.__file__,nci_si_m
 @pytest.mark.parametrize("mode", ["select", "read"])
 def test_attached_child_cannot_select_but_can_read_committed_release(tmp_path, mode):
     replies = [] if mode == "select" else [[ROW], {"ok": True}]
-    with scenario(tmp_path, replies) as (receiver, policy, owner):
+    with scenario(tmp_path, replies) as (receiver, policy, owner), ExitStack() as resources:
         descriptor = tmp_path / "descriptor.json"
         descriptor.write_text(json.dumps(owner.run.descriptor.to_record()))
         roots = [
@@ -57,7 +58,7 @@ def test_attached_child_cannot_select_but_can_read_committed_release(tmp_path, m
         with expected, owner:
             if mode == "read":
                 policy.select_release(owner.run, channel="monthly")
-            with subprocess.Popen(  # noqa: S603 - isolated owned child and explicit source roots
+            child = subprocess.Popen(  # noqa: S603 - isolated owned child and explicit source roots
                 [
                     sys.executable,
                     "-I",
@@ -73,19 +74,23 @@ def test_attached_child_cannot_select_but_can_read_committed_release(tmp_path, m
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-            ) as child:
-                owner.register_child(child, participant="owned-worker", role="worker")
-                output, errors = child.communicate(b"x", timeout=5)
-                report = json.loads(output)
-                assert child.returncode == 0 and errors == b""
-                assert report["imports"] == [
-                    nci_si_acceptance.__file__,
-                    nci_si_mcp.__file__,
-                    ControlledRun.logical.__wrapped__.__code__.co_filename,
-                ]
-                assert report["result"] == (
-                    {"reason": "authorization"} if mode == "select" else {"ok": True}
-                )
+            )
+            resources.callback(child.stdin.close)
+            resources.callback(child.stdout.close)
+            resources.callback(child.stderr.close)
+            resources.callback(stop_child, child, seconds=1)
+            owner.register_child(child, participant="owned-worker", role="worker")
+            output, errors = child.communicate(b"x", timeout=5)
+            report = json.loads(output)
+            assert child.returncode == 0 and errors == b""
+            assert report["imports"] == [
+                nci_si_acceptance.__file__,
+                nci_si_mcp.__file__,
+                ControlledRun.logical.__wrapped__.__code__.co_filename,
+            ]
+            assert report["result"] == (
+                {"reason": "authorization"} if mode == "select" else {"ok": True}
+            )
         assert (
             child.returncode == 0
             and child.stdin.closed

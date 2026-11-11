@@ -216,15 +216,19 @@ in its private binding. Omitting families retains the existing exact-grant contr
 relation names, with canonical query encoding, no duplicate/extra parameters and the existing
 1,000-code batch bound. Release-bearing families require a committed run-local selection.
 `request_catalogue.compile_policy(environment)` compiles version metadata, channel discovery
-and finite concept forms from the selected environment, `request-policy.yaml` and the fixture
-manifest. Missing, duplicate, unknown or malformed policy fields refuse authorization. Its
-public identity binds nonsecret selection/policy/manifest bytes; credentials remain private.
+and finite concept/exact recorded forms from the selected environment and tracked policy,
+manifest and SSIS register. Only explicit literal fixture references are executable; fixture
+ignored fields grant nothing. Missing, duplicate, unknown or malformed declarations refuse
+authorization. Public identity binds nonsecret input bytes; credentials remain private.
+FHIR uses only its selected origin and receives no EVS key. Recorded GO (no reviewed selection
+contract), invalid-release and restricted-MDR forms remain explicitly ungranted, distinct
+from unknown forms. Shared SI register/Capture checks stay offline with no transport grant.
 `compiled.select_release(run, channel=...)` checks controller and compiled-authorization
 identity before constructing the real EVS client inside that run's policy. Existing resolver
 validation precedes the authenticated atomic ledger commit; no transaction spans discovery.
 Display version and pinned path remain distinct. Repeat selection still spends discovery;
 conflicts close admission and retain the first selection. Missing/corrupt state fails closed
-without migration or reset. Furnished callers and other exact catalogue forms remain deferred.
+without migration or reset. Furnished caller adoption remains #448.
 
 ### Explicit shared request accounting
 

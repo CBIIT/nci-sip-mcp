@@ -1,6 +1,7 @@
 """Finite metadata permission cannot broaden request fields or private run identity."""
 
 import pytest
+import yaml
 from http_receiver import WireReceiver
 
 from nci_si_acceptance import request_catalogue
@@ -15,7 +16,9 @@ from nci_si_mcp.invocation import call
 # Independent complete declaration: each invalid scalar case changes only its named field.
 VALID_POLICY = (
     "version: 1\ncorrelation: true\nchannels: [monthly]\n"
-    "includes: [summary]\nrelations: [parents]\n"
+    "includes: [summary]\nrelations: [parents]\nexact: [recorded/evs/mapsets.json]\n"
+    "paused_queries: [graph-identities, elements-exact, elements-descendants, "
+    "values-exact, values-descendants]\n"
 )
 
 
@@ -106,6 +109,15 @@ def test_metadata_family_refuses_another_origin(tmp_path):
             VALID_POLICY.replace("correlation: true", "correlation: [true]"), id="sequence-bool"
         ),
         pytest.param("[version, correlation]\n", id="root-sequence"),
+        pytest.param(
+            VALID_POLICY.replace("mapsets.json", "unknown.json"), id="unknown-exact-reference"
+        ),
+        pytest.param(
+            VALID_POLICY.replace("graph-identities", "unknown-family"), id="unknown-paused-family"
+        ),
+        pytest.param(VALID_POLICY.replace("[monthly]", "[annual]"), id="unknown-channel"),
+        pytest.param(VALID_POLICY.replace("[summary]", "[unreviewed]"), id="unknown-include"),
+        pytest.param(VALID_POLICY.replace("[parents]", "[unreviewed]"), id="unknown-relation"),
     ],
 )
 def test_invalid_reviewed_policy_refuses_before_any_contact(tmp_path, monkeypatch, text):
@@ -135,6 +147,27 @@ def test_independent_complete_policy_admits_actual_metadata(tmp_path, monkeypatc
         snapshot = owner.run.snapshot()
         assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (1, 1, 1)
         assert owner.snapshot()["state"] == "completed"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("method", "POST"), ("headers", {"Accept": "*/*"}), ("form", {"query": "undeclared"})],
+)
+def test_selected_record_rejects_unreviewed_executable_fields(tmp_path, monkeypatch, field, value):
+    manifest = yaml.safe_load(request_catalogue.MANIFEST.read_text())
+    row = next(
+        row
+        for row in manifest["record"]["requests"]
+        if row["fixture"] == "recorded/evs/mapsets.json"
+    )
+    row[field] = value
+    document = tmp_path / "manifest.yaml"
+    document.write_text(yaml.safe_dump(manifest))
+    monkeypatch.setattr(request_catalogue, "MANIFEST", document)
+    with WireReceiver() as receiver:
+        with pytest.raises(RequestPolicyError) as refused:
+            request_catalogue.compile_policy(selected(receiver.origin))
+        assert refused.value.reason == "authorization" and receiver.contacts == 0
 
 
 def test_family_default_and_binding_keep_strict_authority(tmp_path):

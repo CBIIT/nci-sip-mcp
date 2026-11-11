@@ -109,6 +109,67 @@ def test_globally_valid_undeclared_channel_refuses_before_discovery(tmp_path, mo
 
 
 @pytest.mark.parametrize(
+    "path,needs_selection",
+    [
+        pytest.param(
+            "/api/v1/concept/go_2026-07-26/search?term=obsolete&type=contains&include=minimal%2Chighlights&fromRecord=0&pageSize=10",
+            False,
+            id="recorded-go-ungranted",
+        ),
+        pytest.param(
+            "/api/v1/concept/ncit_99.99z/C4817?include=full", False, id="invalid-release-ungranted"
+        ),
+        pytest.param(
+            "/api/v1/concept/mdr_29_0/10000000?include=summary",
+            False,
+            id="restricted-mdr-ungranted",
+        ),
+        pytest.param("/unknown", False, id="unknown-form"),
+        pytest.param("/sparql", False, id="paused-sparql"),
+        pytest.param("/si-api/v1/graphs", False, id="paused-ssis"),
+        pytest.param("/NCIAPI/1.0/api/DataElement/2200604", False, id="held-cadsr"),
+        pytest.param("/caDSR_Downloads/", False, id="held-ftp"),
+        pytest.param("/invoke", False, id="held-contracts"),
+        pytest.param("/api/v1/metadata/ncit_26.09e/roles/child", True, id="exact-child-path"),
+        pytest.param(
+            "/api/v1/concept/ncit_26.09e/search?term=other&type=contains&include=minimal%2Chighlights&fromRecord=0&pageSize=10",
+            True,
+            id="undeclared-search-text",
+        ),
+        pytest.param(
+            "/fhir/r4/ValueSet/$expand?url=http%3A%2F%2Fncicb.nci.nih.gov%2Fxml%2Fowl%2FEVS%2FThesaurus.owl%3Ffhir_vs%3DC85492&count=1",
+            False,
+            id="fixture-ignored-field-not-permission",
+        ),
+    ],
+)
+def test_named_catalogue_exclusions_never_open_target(tmp_path, path, needs_selection):
+    with WireReceiver([response([ROW])]) as receiver:
+        environment = selected(receiver.origin)
+        origins = dict.fromkeys(environment.origins, receiver.origin)
+        origins["evs-fhir"] = receiver.origin + "/fhir/r4"
+        policy = compile_policy(replace(environment, origins=origins))
+        owner = SupervisedRun.create(policy.authorization, tmp_path)
+
+        def read():
+            if needs_selection:
+                policy.select_release(owner.run, channel="monthly")
+            return client(receiver, owner).get_json(path)
+
+        result = invoke(owner, read)
+        expected = int(needs_selection)
+        assert receiver.contacts == len(receiver.requests) == expected
+        assert result["error"]["code"] == "upstream_unavailable"
+        snapshot = owner.run.snapshot()
+        assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (
+            expected,
+            expected,
+            expected,
+        )
+        assert owner.snapshot()["state"] == "failed"
+
+
+@pytest.mark.parametrize(
     "path,params",
     [
         (ROOT, {"list": "C4817", "include": "summary", "extra": "1"}),
