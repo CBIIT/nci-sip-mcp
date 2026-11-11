@@ -12,6 +12,12 @@ from nci_si_acceptance.request_transport import ControlledHttpPolicy
 from nci_si_mcp.http_client import HttpClient, RequestPolicyError
 from nci_si_mcp.invocation import call
 
+# Independent complete declaration: each invalid scalar case changes only its named field.
+VALID_POLICY = (
+    "version: 1\ncorrelation: true\nchannels: [monthly]\n"
+    "includes: [summary]\nrelations: [parents]\n"
+)
+
 
 def selected(origin):
     return Environment(
@@ -83,14 +89,23 @@ def test_metadata_family_refuses_another_origin(tmp_path):
 @pytest.mark.parametrize(
     "text",
     [
-        "",
-        "version: 1\ncorrelation: false\ncorrelation: true\n",
-        "version: 1\ncorrelation: true\nextra: 1\n",
-        "version: true\ncorrelation: true\n",
-        "version: 2\ncorrelation: true\n",
-        "version: 1\ncorrelation: yes\n",
-        "version: 1\ncorrelation: [true]\n",
-        "[version, correlation]\n",
+        pytest.param("", id="empty"),
+        pytest.param(VALID_POLICY.replace("channels: [monthly]\n", ""), id="missing-channels"),
+        pytest.param(VALID_POLICY + "correlation: false\n", id="duplicate"),
+        pytest.param(VALID_POLICY + "extra: 1\n", id="unknown"),
+        pytest.param(VALID_POLICY.replace("version: 1", "version: true"), id="boolean-version"),
+        pytest.param(VALID_POLICY.replace("version: 1", 'version: "1"'), id="string-version"),
+        pytest.param(VALID_POLICY.replace("version: 1", "version: 2"), id="version-two"),
+        pytest.param(
+            VALID_POLICY.replace("correlation: true", "correlation: yes"), id="noncanonical-bool"
+        ),
+        pytest.param(
+            VALID_POLICY.replace("correlation: true", 'correlation: "true"'), id="string-bool"
+        ),
+        pytest.param(
+            VALID_POLICY.replace("correlation: true", "correlation: [true]"), id="sequence-bool"
+        ),
+        pytest.param("[version, correlation]\n", id="root-sequence"),
     ],
 )
 def test_invalid_reviewed_policy_refuses_before_any_contact(tmp_path, monkeypatch, text):
@@ -102,6 +117,24 @@ def test_invalid_reviewed_policy_refuses_before_any_contact(tmp_path, monkeypatc
             request_catalogue.compile_policy(selected(receiver.origin))
         assert refused.value.reason == "authorization"
         assert receiver.contacts == 0
+
+
+def test_independent_complete_policy_admits_actual_metadata(tmp_path, monkeypatch):
+    document = tmp_path / "policy.yaml"
+    document.write_text(VALID_POLICY)
+    monkeypatch.setattr(request_catalogue, "POLICY", document)
+    with WireReceiver() as receiver:
+        policy = request_catalogue.compile_policy(selected(receiver.origin))
+        owner = SupervisedRun.create(policy.authorization, tmp_path)
+        result = call(
+            "owned",
+            lambda: metadata_request(owner, receiver.origin, "/api/v1/version", None, {}, None),
+        )
+        assert result == {"ok": True}
+        assert receiver.contacts == 1 and len(receiver.requests) == 1
+        snapshot = owner.run.snapshot()
+        assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (1, 1, 1)
+        assert owner.snapshot()["state"] == "completed"
 
 
 def test_family_default_and_binding_keep_strict_authority(tmp_path):
