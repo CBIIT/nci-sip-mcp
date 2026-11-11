@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Self, TypedDict, final, get_args
 from urllib.parse import unquote, urlsplit
 
+from nci_si_mcp.errors import safe_correlation
 from nci_si_mcp.http_client import RequestPolicyError
 from nci_si_mcp.validation import RequestMethod
 
@@ -203,9 +204,41 @@ def _private_bytes(value: bytes) -> str:
 
 
 @final
+@dataclass(frozen=True, slots=True)
+class ExactRequestFamily:
+    request: RequestGrant = field(repr=False)
+    correlation: bool = False
+
+    def __post_init__(self) -> None:
+        _require(type(self.request) is RequestGrant and type(self.correlation) is bool)
+        _require(not self.correlation or "x-correlation-id" not in dict(self.request.headers))
+
+
+def _family_headers(
+    family: ExactRequestFamily, headers: tuple[tuple[str, str], ...]
+) -> tuple[tuple[str, str], ...]:
+    if not family.correlation:
+        return headers
+    correlation = dict(headers).get("x-correlation-id")
+    _require(correlation is None or safe_correlation(correlation) is not None)
+    return tuple(pair for pair in headers if pair[0] != "x-correlation-id")
+
+
+def _grant_record(grant: RequestGrant) -> dict[str, object]:
+    return {
+        "method": grant.method,
+        "url": grant.url,
+        "headers": grant.headers,
+        "body": grant.body,
+        "credential_origin": grant.credential_origin,
+    }
+
+
+@final
 @dataclass(frozen=True, slots=True, init=False)
 class Authorization:
     grants: tuple[RequestGrant, ...] = field(repr=False)
+    families: tuple[ExactRequestFamily, ...] = field(default=(), kw_only=True, repr=False)
     limits: Limits
     policy_sha256: str
 
@@ -214,30 +247,52 @@ class Authorization:
         grants: Sequence[RequestGrant],
         limits: Limits,
         policy_sha256: str,
+        *,
+        families: Sequence[ExactRequestFamily] = (),
     ) -> None:
         """Snapshot a nonempty tuple/list; never consume an arbitrary iterator."""
         _require(isinstance(grants, (tuple, list)))
         _require(bool(grants) and all(type(grant) is RequestGrant for grant in grants))
         _require(type(limits) is Limits)
+        _require(isinstance(families, (tuple, list)))
+        _require(all(type(family) is ExactRequestFamily for family in families))
         _digest(policy_sha256)
         object.__setattr__(self, "grants", tuple(grants))
         object.__setattr__(self, "limits", limits)
         object.__setattr__(self, "policy_sha256", policy_sha256)
+        object.__setattr__(self, "families", tuple(families))
+
+    def admit(
+        self, method: str, url: str, headers: Sequence[HeaderRow], body: object
+    ) -> RequestGrant:
+        """Resolve declared forms into exact immutable bytes; no other metadata may vary."""
+        canonical = _headers(headers)
+        for grant in self.grants:
+            if (method, url, canonical, body) == (
+                grant.method,
+                grant.url,
+                grant.headers,
+                grant.body,
+            ):
+                return grant
+        for family in self.families:
+            grant = family.request
+            if (method, url, _family_headers(family, canonical), body) == (
+                grant.method,
+                grant.url,
+                grant.headers,
+                grant.body,
+            ):
+                return RequestGrant(
+                    grant.method, url, canonical, grant.body, grant.credential_origin
+                )
+        raise RequestPolicyError("authorization")
 
     def binding(self, key: bytes) -> bytes:
         _require(type(self) is Authorization)
         _require(isinstance(key, bytes))
-        payload = {
-            "grants": [
-                {
-                    "method": grant.method,
-                    "url": grant.url,
-                    "headers": grant.headers,
-                    "body": grant.body,
-                    "credential_origin": grant.credential_origin,
-                }
-                for grant in self.grants
-            ],
+        payload: dict[str, object] = {
+            "grants": [_grant_record(grant) for grant in self.grants],
             "limits": {
                 "logical": self.limits.logical,
                 "attempts": self.limits.attempts,
@@ -249,6 +304,11 @@ class Authorization:
             },
             "policy_sha256": self.policy_sha256,
         }
+        if self.families:
+            payload["families"] = [
+                {"request": _grant_record(family.request), "correlation": family.correlation}
+                for family in self.families
+            ]
         canonical = json.dumps(
             payload,
             sort_keys=True,

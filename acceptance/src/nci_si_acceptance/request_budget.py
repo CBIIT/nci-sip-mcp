@@ -430,7 +430,13 @@ class ControlledRun:
 
     @contextmanager
     def logical(self, grant: RequestGrant) -> Iterator[LogicalRequest]:
-        if grant not in self.authorization.grants:
+        if type(grant) is not RequestGrant:
+            self._deny("authorization")
+        try:
+            admitted = self.authorization.admit(grant.method, grant.url, grant.headers, grant.body)
+        except RequestPolicyError:
+            self._deny("authorization")
+        if admitted != grant:
             self._deny("authorization")
         request_id = uuid.uuid4().hex
         with self._connection() as connection:

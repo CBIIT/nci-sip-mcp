@@ -1,0 +1,3 @@
+# Explicit metadata permission only; furnished caller adoption remains #448.
+version: 1
+correlation: true

@@ -206,6 +206,17 @@ Supervision/summaries are explicit opt-ins below; the
 [controlled HTTP transport](#explicit-controlled-http-transport) uses these APIs.
 Furnished caller adoption remains #448/#449. No furnished caller or live access is activated.
 
+`ExactRequestFamily(grant, correlation=False)` optionally permits validated correlation
+metadata while keeping the declared method, URL, other headers, body and credential destination
+exact. Opting in requires the declaration to omit a fixed correlation header; the actual safe
+identifier is snapshotted with the request and cannot change between retries.
+`Authorization(..., families=...)` snapshots the closed declarations and includes every field
+in its private binding. Omitting families retains the existing exact-grant contract.
+`request_catalogue.compile_policy(environment)` compiles the reviewed metadata-version GET
+from the selected environment and tracked `request-policy.yaml`. Missing, duplicate, unknown
+or malformed policy fields refuse authorization. Its public identity binds the nonsecret
+selection and policy bytes; credentials remain in the private authorization binding.
+
 ### Explicit shared request accounting
 
 `nci_si_acceptance.request_budget.ControlledRun` owns a private SQLite ledger for explicitly

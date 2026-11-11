@@ -178,16 +178,12 @@ class ControlledHttpPolicy:
         names = [name for name, _ in pairs]
         if len(set(names)) != len(names) or TRANSPORT_HEADERS.intersection(names):
             self.run.refuse("authorization")
-        headers = tuple(sorted(pairs))
-        for grant in self.run.authorization.grants:
-            if (request.get_method(), request.full_url, headers, request.data) == (
-                grant.method,
-                grant.url,
-                grant.headers,
-                grant.body,
-            ):
-                return grant
-        self.run.refuse("authorization")
+        try:
+            return self.run.authorization.admit(
+                request.get_method(), request.full_url, pairs, request.data
+            )
+        except RequestPolicyError:
+            self.run.refuse("authorization")
 
     @contextmanager
     def request(self, request: Request) -> Iterator[ControlledRequest]:
