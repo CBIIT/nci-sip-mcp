@@ -328,3 +328,34 @@ def test_corrupt_or_missing_selection_state_never_resets(tmp_path, statement):
                 assert rows == (
                     [] if statement.startswith("DELETE") else [("26.09d", "ncit_26.09f")]
                 )
+
+
+def test_duplicate_authentic_selection_rows_refuse_before_content(tmp_path):
+    with scenario(tmp_path, [[ROW], {"ok": True}]) as (receiver, policy, owner):
+
+        def duplicate_and_read():
+            policy.select_release(owner.run, channel="monthly")
+            with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as connection:
+                connection.executescript("""
+                    ALTER TABLE release_bindings RENAME TO original_bindings;
+                    CREATE TABLE release_bindings AS SELECT * FROM original_bindings;
+                    INSERT INTO release_bindings
+                        SELECT * FROM original_bindings WHERE channel='monthly';
+                """)
+            return client(receiver, owner).get_json(ROOT, {"list": "C4817", "include": "summary"})
+
+        with pytest.raises(ExceptionGroup) as failed:
+            invoke(owner, duplicate_and_read)
+        assert [type(error) for error in failed.value.exceptions] == [RequestPolicyError] * 3
+        assert [error.reason for error in failed.value.exceptions] == ["authorization"] * 3
+        assert receiver.contacts == 1 and len(receiver.requests) == 1
+        assert (
+            json.loads((owner.run.directory / "summary.json").read_text())["state"] == "incomplete"
+        )
+        with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as connection:
+            assert connection.execute("SELECT logical,attempts,entered FROM run").fetchone() == (
+                1,
+                1,
+                1,
+            )
+            assert connection.execute("SELECT COUNT(*) FROM release_bindings").fetchone() == (3,)
