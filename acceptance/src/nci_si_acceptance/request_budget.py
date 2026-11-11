@@ -231,7 +231,10 @@ class ControlledRun:
         if not expected:
             return
         rows = connection.execute("SELECT * FROM release_bindings").fetchall()
-        if {(row["terminology"], row["channel"]) for row in rows} != expected:
+        if (
+            len(rows) != len(expected)
+            or {(row["terminology"], row["channel"]) for row in rows} != expected
+        ):
             self._deny("authorization")
         key = self._key()
         for row in rows:
