@@ -771,3 +771,23 @@
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Private request consumers use declared run/logical/grant fields and ControlledRequest operations. No production layout reflection, dynamic-field or serialization consumer exists; dropping slots changes allocation layout only."
+
+# Approved: #465 comment 6788596797; canonical c983 SURVIVED and focused prior-reason controls.
+- file: "acceptance/src/nci_si_acceptance/request_transport.py"
+  qualname: "_latch_cleanup"
+  operator: "boolean:drop:1"
+  site: "/body/2/body/0/value/0"
+  context: "94cbfa885e81e3014dc09419e893dc0961806a636175542ccefb937b95e022d9"
+  original: "695076b563698a2982ace2836b865371de6d06145a60fbbad492cc5361b04796"
+  mutated: "25b0d91c04ad453d4a049421f534a88ebe3cf77a03e4b93a5fe065a8330b1d0e"
+  reason: "The first-reason latch is set before publication; _failure returns that nonempty local/shared reason or raises. The removed fallback cannot select a reachable different caller result after _mark_failed; observation/publication failures remain separately preserved. No empty private state is fabricated. Keep the production fallback."
+
+# Approved: #465 comment 6788596797; canonical c983 SURVIVED and focused prior-reason controls.
+- file: "acceptance/src/nci_si_acceptance/request_transport.py"
+  qualname: "ControlledHttpPolicy._grant"
+  operator: "boolean:drop:0"
+  site: "/body/2/test/0"
+  context: "29e5160cf958953301956d4a8e83995f0e782b9f2b50117bcaf637793c413255"
+  original: "df9cf24eee7689e3659b9c6f1a21e1b1ba655a61b1d802047822612ecaa42f03"
+  mutated: "2d690834b8f150ab1310b1a4af7a1aa5dbe3371f7ba2737e5dfa7d70afde6772"
+  reason: "Validated RequestGrant header names are unique. Duplicate real Request fields cannot equal the complete sorted grant header tuple and reach the same final refuse, preserving even a previously caught terminal reason before any admission or contact. The new prior-reason duplicate cases survive this exact variant. Keep the production early guard."
