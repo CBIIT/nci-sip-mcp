@@ -61,18 +61,16 @@ def _read_mapping(path: Path) -> tuple[dict[str, Node], str]:
 def _values(node: Node) -> tuple[str, ...]:
     if not isinstance(node, SequenceNode) or not node.value:
         raise RequestPolicyError("authorization")
-    values = tuple(
-        _scalar(item, "str", (item.value,)) for item in node.value if isinstance(item, ScalarNode)
-    )
-    if len(values) != len(node.value) or len(set(values)) != len(values):
+    values = tuple(_text(item) for item in node.value)
+    if len(set(values)) != len(values):
         raise RequestPolicyError("authorization")
     return values
 
 
 def _text(node: Node) -> str:
-    if not isinstance(node, ScalarNode):
+    if not isinstance(node, ScalarNode) or node.tag != "tag:yaml.org,2002:str":
         raise RequestPolicyError("authorization")
-    return _scalar(node, "str", (node.value,))
+    return node.value
 
 
 def _reference(node: Node) -> str | None:

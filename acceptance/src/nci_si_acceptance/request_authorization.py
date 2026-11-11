@@ -299,14 +299,12 @@ class ConceptRequestFamily:
 type RequestFamily = ExactRequestFamily | ConceptRequestFamily
 
 
-def _release_segment(family: RequestFamily, url: str) -> str | None:
-    if family.release is None:
-        return None
-    before, _marker, _after = family.request.url.partition("{release}")
+def _release_segment(template: str, release: ReleaseTarget, url: str) -> str | None:
+    before, _marker, _after = template.partition("{release}")
     if not url.startswith(before):
         return None
     segment = url[len(before) :].split("/", 1)[0].split("?", 1)[0]
-    return segment if family.release.accepts(segment) else None
+    return segment if release.accepts(segment) else None
 
 
 def _query(query: str) -> dict[str, str]:
@@ -338,23 +336,32 @@ def _concept_matches(family: ConceptRequestFamily, base: str, url: str) -> bool:
     path = url.partition("?")[0]
     if path == base:
         return _batch_matches(family, query)
-    if not path.startswith(base + "/"):
-        return False
+    # The packet owner already matched the exact origin/prefix and one release segment.
     return _concept_tail(family, path[len(base) + 1 :].split("/"), query)
 
 
-def _family_matches(family: RequestFamily, url: str) -> bool:
+def _family_packet(
+    family: RequestFamily, url: str, headers: tuple[tuple[str, str], ...]
+) -> tuple[RequestGrant, tuple[ReleaseTarget, str] | None] | None:
     destination(url)
     _require(not url.endswith("?"))
     base = family.request.url
+    requirement: tuple[ReleaseTarget, str] | None = None
     if family.release is not None:
-        segment = _release_segment(family, url)
+        segment = _release_segment(base, family.release, url)
         if segment is None:
-            return False
+            return None
         base = base.replace("{release}", segment)
-    if type(family) is ConceptRequestFamily:
-        return _concept_matches(family, base, url)
-    return url == base
+        requirement = (family.release, segment)
+    matches = (
+        _concept_matches(family, base, url) if type(family) is ConceptRequestFamily else url == base
+    )
+    if not matches:
+        return None
+    grant = family.request
+    return RequestGrant(
+        grant.method, url, headers, grant.body, grant.credential_origin
+    ), requirement
 
 
 def _family_headers(
@@ -375,19 +382,6 @@ def _grant_record(grant: RequestGrant) -> dict[str, object]:
         "body": grant.body,
         "credential_origin": grant.credential_origin,
     }
-
-
-def _concrete(
-    family: RequestFamily, url: str, headers: tuple[tuple[str, str], ...]
-) -> tuple[RequestGrant, tuple[ReleaseTarget, str] | None]:
-    grant = family.request
-    concrete = RequestGrant(grant.method, url, headers, grant.body, grant.credential_origin)
-    if family.release is None:
-        return concrete, None
-    segment = _release_segment(family, url)
-    if segment is None:
-        raise RequestPolicyError("authorization")
-    return concrete, (family.release, segment)
 
 
 @final
@@ -449,8 +443,10 @@ class Authorization:
                 grant.method,
                 grant.headers,
                 grant.body,
-            ) and _family_matches(family, url):
-                return _concrete(family, url, canonical)
+            ):
+                matched = _family_packet(family, url, canonical)
+                if matched is not None:
+                    return matched
         raise RequestPolicyError("authorization")
 
     def binding(self, key: bytes) -> bytes:

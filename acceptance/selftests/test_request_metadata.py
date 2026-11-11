@@ -118,6 +118,17 @@ def test_metadata_family_refuses_another_origin(tmp_path):
         pytest.param(VALID_POLICY.replace("[monthly]", "[annual]"), id="unknown-channel"),
         pytest.param(VALID_POLICY.replace("[summary]", "[unreviewed]"), id="unknown-include"),
         pytest.param(VALID_POLICY.replace("[parents]", "[unreviewed]"), id="unknown-relation"),
+        pytest.param(VALID_POLICY.replace("[monthly]", "[]"), id="empty-channels"),
+        pytest.param(VALID_POLICY.replace("[monthly]", "monthly"), id="scalar-channels"),
+        pytest.param(
+            VALID_POLICY.replace("[monthly]", "[monthly, monthly]"), id="duplicate-channels"
+        ),
+        pytest.param(
+            VALID_POLICY.replace(
+                "recorded/evs/mapsets.json", "recorded/evs/search-go-obsolete.json"
+            ),
+            id="ungranted-go-reference",
+        ),
     ],
 )
 def test_invalid_reviewed_policy_refuses_before_any_contact(tmp_path, monkeypatch, text):
@@ -164,6 +175,45 @@ def test_selected_record_rejects_unreviewed_executable_fields(tmp_path, monkeypa
     document = tmp_path / "manifest.yaml"
     document.write_text(yaml.safe_dump(manifest))
     monkeypatch.setattr(request_catalogue, "MANIFEST", document)
+    with WireReceiver() as receiver:
+        with pytest.raises(RequestPolicyError) as refused:
+            request_catalogue.compile_policy(selected(receiver.origin))
+        assert refused.value.reason == "authorization" and receiver.contacts == 0
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        (("manifest", "record", "requests"), 7),
+        (("manifest", "record", "requests"), [7]),
+        (("manifest", "record", "requests"), None),
+        (("manifest", "evs", "release"), "not-a-release"),
+        (("row", "path"), {}),
+        (("row", "path"), "http://other.invalid/api/v1/mapset"),
+        (("row", "path"), "/api/v1/mapset?include=minimal&include=full"),
+    ],
+)
+def test_malformed_manifest_refuses_before_any_contact(tmp_path, monkeypatch, path, value):
+    manifest = yaml.safe_load(request_catalogue.MANIFEST.read_text())
+    row = next(
+        row
+        for row in manifest["record"]["requests"]
+        if row["fixture"] == "recorded/evs/mapsets.json"
+    )
+    parent = {"manifest": manifest, "row": row}
+    for key in path[:-1]:
+        parent = parent[key]
+    # None requests omission of that field; all unrelated declaration inputs stay valid.
+    if value is None:
+        del parent[path[-1]]
+    else:
+        parent[path[-1]] = value
+    document = tmp_path / "manifest.yaml"
+    document.write_text(yaml.safe_dump(manifest))
+    declaration = tmp_path / "policy.yaml"
+    declaration.write_text(VALID_POLICY)
+    monkeypatch.setattr(request_catalogue, "MANIFEST", document)
+    monkeypatch.setattr(request_catalogue, "POLICY", declaration)
     with WireReceiver() as receiver:
         with pytest.raises(RequestPolicyError) as refused:
             request_catalogue.compile_policy(selected(receiver.origin))
