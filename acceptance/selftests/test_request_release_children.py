@@ -40,7 +40,7 @@ try:
         result=client.get_json('/api/v1/concept/ncit_26.09e',{'list':'C4817','include':'summary'})
 except RequestPolicyError as error: result={'reason':error.reason}
 print(json.dumps(dict(result=result,imports=[nci_si_acceptance.__file__,nci_si_mcp.__file__,
-    ControlledRun.logical.__code__.co_filename])))
+    ControlledRun.logical.__wrapped__.__code__.co_filename])))
 """
 
 
@@ -81,7 +81,7 @@ def test_attached_child_cannot_select_but_can_read_committed_release(tmp_path, m
                 assert report["imports"] == [
                     nci_si_acceptance.__file__,
                     nci_si_mcp.__file__,
-                    ControlledRun.logical.__code__.co_filename,
+                    ControlledRun.logical.__wrapped__.__code__.co_filename,
                 ]
                 assert report["result"] == (
                     {"reason": "authorization"} if mode == "select" else {"ok": True}
