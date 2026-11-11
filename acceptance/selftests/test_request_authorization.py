@@ -11,7 +11,10 @@ import pytest
 
 from nci_si_acceptance.request_authorization import (
     Authorization,
+    ConceptRequestFamily,
+    ExactRequestFamily,
     Limits,
+    ReleaseTarget,
     RequestGrant,
     RunDescriptor,
 )
@@ -178,9 +181,14 @@ def test_valid_authority_is_an_immutable_snapshot():
         ("credential_origin", "http://127.0.0.1:9"),
     ],
 )
-def test_each_request_field_changes_private_binding(field, value):
+@pytest.mark.parametrize("family", [False, True])
+def test_each_request_field_changes_private_binding(field, value, family):
     original = binding_authorization()
     changed = replace(original, grants=(replace(original.grants[0], **{field: value}),))
+    if family:
+        declared = ExactRequestFamily(original.grants[0])
+        changed = replace(original, families=(replace(declared, request=changed.grants[0]),))
+        original = replace(original, families=(declared,))
     assert changed.binding(b"k" * 32) != original.binding(b"k" * 32)
     assert changed.policy_sha256 == original.policy_sha256 == "a" * 64
 
@@ -556,12 +564,14 @@ class AttachedInteger(int):
         pytest.param("method", AttachedText, id="method"),
         pytest.param("url", AttachedText, id="url"),
         pytest.param("headers", AttachedText, id="header-value"),
+        pytest.param("headers", NonfiniteText, id="header-nan"),
         pytest.param("body", AttachedBytes, id="body"),
         pytest.param("credential_origin", AttachedText, id="credential-origin"),
         pytest.param("logical", AttachedInteger, id="limit-integer"),
     ],
 )
-def test_binding_uses_scalar_values_without_dataclass_attachments(field, wrap):
+@pytest.mark.parametrize("family", [False, True])
+def test_binding_uses_scalar_values_without_dataclass_attachments(field, wrap, family):
     original = binding_authorization()
     if field == "policy_sha256":
         changed = replace(original, policy_sha256=wrap(original.policy_sha256))
@@ -575,8 +585,70 @@ def test_binding_uses_scalar_values_without_dataclass_attachments(field, wrap):
         else:
             value = wrap(value)
         changed = replace(original, grants=(replace(grant, **{field: value}),))
+    if family:
+        original = replace(original, families=(ExactRequestFamily(original.grants[0]),))
+        changed = replace(changed, families=(ExactRequestFamily(changed.grants[0]),))
     try:
         result = changed.binding(b"k" * 32)
     except (RequestPolicyError, TypeError, ValueError) as error:
         result = type(error), str(error)
     assert result == original.binding(b"k" * 32)
+
+
+def finite_family_authorization(concept):
+    grant = RequestGrant(
+        "GET",
+        "http://127.0.0.1:9/api/v1/concept/{release}",
+        (("accept", "application/json"),),
+        credential_origin="http://127.0.0.1:9",
+    )
+    target = ReleaseTarget("ncit", ("monthly",))
+    family = (
+        ConceptRequestFamily(grant, ("C4817",), ("summary",), ("parents",), target, True)
+        if concept
+        else ExactRequestFamily(grant, True, target)
+    )
+    return replace(binding_authorization(), families=(family,))
+
+
+@pytest.mark.parametrize(
+    "concept,expected",
+    [
+        (False, "79a7058f12fd4e3f2d21effee77af53628a664c92c4281bf32776738defa204d"),
+        (True, "b5e801da90dbc8905782eb14d26f003e902a93785c4a77daaeb272ec3453a0c4"),
+    ],
+)
+@pytest.mark.parametrize("field", [None, "method", "url", "headers", "credential_origin"])
+def test_family_scalar_binding_matches_independent_vector(concept, expected, field):
+    original = finite_family_authorization(concept)
+    family = original.families[0]
+    if field is not None:
+        value = (
+            (("accept", NonfiniteText("application/json")),)
+            if field == "headers"
+            else NonfiniteText(getattr(family.request, field))
+        )
+        family = replace(family, request=replace(family.request, **{field: value}))
+    changed = replace(original, families=(family,))
+    try:
+        result = changed.binding(b"k" * 32).hex()
+    except (RequestPolicyError, TypeError, ValueError) as error:
+        result = type(error), str(error)
+    # Literal canonical records independently checked with OpenSSL; no serializer oracle.
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("codes", ("C2991",)),
+        ("includes", ("full",)),
+        ("relations", ("children",)),
+        ("release", ReleaseTarget("ncit", ("weekly",))),
+        ("correlation", False),
+    ],
+)
+def test_each_concept_family_authority_field_changes_binding(field, value):
+    original = finite_family_authorization(True)
+    changed = replace(original, families=(replace(original.families[0], **{field: value}),))
+    assert changed.binding(b"k" * 32) != original.binding(b"k" * 32)
