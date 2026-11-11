@@ -728,6 +728,7 @@ def test_each_concept_family_authority_field_changes_binding(field, value):
     ],
 )
 def test_finite_authority_records_refuse_malformed_fields(kind, field, value):
+    declared = finite_family_authorization(True).families[0]
     records = {
         "target": ReleaseTarget("ncit", ("monthly",)),
         "plain": ExactRequestFamily(
@@ -737,9 +738,16 @@ def test_finite_authority_records_refuse_malformed_fields(kind, field, value):
             )
         ),
         "exact": finite_family_authorization(False).families[0],
-        "concept": finite_family_authorization(True).families[0],
+        "concept": ConceptRequestFamily(
+            declared.request,
+            declared.codes,
+            declared.includes,
+            declared.relations,
+            declared.release,
+        ),
     }
     record = records[kind]
+    assert records["plain"].correlation is False and records["concept"].correlation is False
     assert records["target"].channels == ("monthly",)
     assert records["exact"].request.method == records["concept"].request.method == "GET"
     if field in ("headers", "url", "method", "body"):
