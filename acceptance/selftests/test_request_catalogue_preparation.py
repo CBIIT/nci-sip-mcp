@@ -1,15 +1,18 @@
 """The compiler's explicit legacy grant view keeps strict delivered admission."""
 
+from dataclasses import replace
+
 import pytest
 from http_receiver import WireReceiver
 
 from nci_si_acceptance.environments import SURFACES, Environment
-from nci_si_acceptance.request_authorization import Authorization
+from nci_si_acceptance.request_authorization import Authorization, RequestGrant
 from nci_si_acceptance.request_catalogue import compile_policy
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_acceptance.request_transport import ControlledHttpPolicy
 from nci_si_mcp.errors import correlated
 from nci_si_mcp.http_client import HttpClient, RequestPolicyError
+from nci_si_mcp.invocation import call
 
 
 def test_catalogue_preparation_preserves_exact_grant_admission(tmp_path):
@@ -70,3 +73,36 @@ def test_catalogue_preparation_preserves_exact_grant_admission(tmp_path):
         denied = strict.run.snapshot()
         assert (denied.logical, denied.attempts, denied.transport_entries) == (0, 0, 0)
         assert plain.snapshot()["state"] == "completed" and strict.snapshot()["state"] == "failed"
+
+
+def test_selection_entry_cannot_bypass_exact_metadata_authority(tmp_path):
+    with WireReceiver() as receiver:
+        environment = Environment(
+            "evs-only",
+            {surface: receiver.origin if surface == "evs" else None for surface in SURFACES},
+            {},
+            "e" * 64,
+        )
+        compiled = compile_policy(environment)
+        exact = Authorization(
+            (
+                RequestGrant(
+                    "GET", receiver.origin + "/api/v1/version", [("accept", "application/json")]
+                ),
+            ),
+            compiled.authorization.limits,
+            compiled.authorization.policy_sha256,
+        )
+        policy = replace(compiled, authorization=exact)
+        owner = SupervisedRun.create(exact, tmp_path)
+
+        def select():
+            with owner:
+                return policy.select_release(owner.run, channel="monthly")
+
+        result = call("owned-selection", select)
+        snapshot = owner.run.snapshot()
+        assert result["error"]["code"] == "upstream_unavailable"
+        assert receiver.contacts == 0 and receiver.requests == []
+        assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (0, 0, 0)
+        assert owner.snapshot()["state"] == "failed"

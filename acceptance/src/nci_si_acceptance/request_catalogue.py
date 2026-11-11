@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -15,8 +15,12 @@ from nci_si_acceptance.request_authorization import (
     Limits,
     RequestGrant,
 )
-from nci_si_mcp.evs import LICENSE_KEY_HEADER
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_si_acceptance.request_budget import ControlledRun
+from nci_si_acceptance.request_transport import ControlledHttpPolicy
+from nci_si_mcp.evs import LICENSE_KEY_HEADER, EVSClient
+from nci_si_mcp.http_client import RequestPolicyError, using_request_policy
+from nci_si_mcp.release import ReleaseContext, resolve_evs_release
+from nci_si_mcp.validation import RELEASE_CHANNELS, ReleaseChannel
 
 POLICY = Path(__file__).parents[2] / "fixtures/request-policy.yaml"
 
@@ -44,6 +48,24 @@ def _declaration() -> tuple[bool, str]:
 @dataclass(frozen=True, slots=True)
 class CompiledPolicy:
     authorization: Authorization
+    _origin: str = field(repr=False)
+    _license_key: str | None = field(repr=False)
+
+    def select_release(self, run: ControlledRun, *, channel: ReleaseChannel) -> ReleaseContext:
+        """Resolve through this controller's policy; the entry grants no request authority."""
+        if type(run) is not ControlledRun:
+            raise RequestPolicyError("authorization")
+        if (
+            not run._owner
+            or run.authorization is not self.authorization
+            or channel not in RELEASE_CHANNELS
+        ):
+            run.refuse("authorization")
+        run.check_wait(0)
+        # HttpClient captures the policy at construction, before the resolver makes any call.
+        with using_request_policy(ControlledHttpPolicy(run)):
+            client = EVSClient(self._origin, license_key=self._license_key)
+            return resolve_evs_release(client, "ncit", channel)
 
 
 def compile_policy(environment: Environment) -> CompiledPolicy:
@@ -70,5 +92,7 @@ def compile_policy(environment: Environment) -> CompiledPolicy:
     return CompiledPolicy(
         Authorization(
             (grant,), Limits(), identity, families=(ExactRequestFamily(grant, correlation),)
-        )
+        ),
+        origin,
+        credential,
     )
