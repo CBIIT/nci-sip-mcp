@@ -5,7 +5,7 @@ This component consumer tests the entry handshake, not the production provider's
 
 import socket
 import struct
-from contextlib import contextmanager, nullcontext
+from contextlib import closing, contextmanager, nullcontext
 from http.client import HTTPConnection
 from pathlib import Path
 from threading import Event, Thread
@@ -21,15 +21,34 @@ from nci_si_acceptance.fixture_server import (
     request_key,
 )
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_acceptance.request_budget import AttemptLease
+from nci_si_acceptance.request_budget import AttemptLease, ControlledRun
 from nci_si_acceptance.request_summary import read_summary
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.audit import audited
-from nci_si_mcp.bounds import Budget, RequestBudgetError, budgeted, deadline_scope
+from nci_si_mcp.bounds import (
+    Budget,
+    CallDeadlineError,
+    RequestBudgetError,
+    budgeted,
+    deadline_scope,
+)
 from nci_si_mcp.errors import correlated
 from nci_si_mcp.http_client import HttpClient, RequestPolicyError
 from nci_si_mcp.invocation import call
 from nci_si_mcp.request_policy import Exchange
+
+
+def entry_client(base, consumer):
+    return HttpClient(
+        base,
+        label="EVS",
+        timeout_seconds=1,
+        max_attempts=1,
+        retry_backoff_seconds=0,
+        max_response_bytes=32,
+        size_bound="entry-test",
+        request_policy=consumer,
+    )
 
 
 @contextmanager
@@ -191,16 +210,7 @@ def test_handshake_entry_receipts(tmp_path, monkeypatch, expected):
             try:
                 with owner:
                     consumer = EntryConsumer(owner.run, grant, case, monkeypatch)
-                    client = HttpClient(
-                        base,
-                        label="EVS",
-                        timeout_seconds=1,
-                        max_attempts=1,
-                        retry_backoff_seconds=0,
-                        max_response_bytes=32,
-                        size_bound="entry-test",
-                        request_policy=consumer,
-                    )
+                    client = entry_client(base, consumer)
                     client.on_request = hooks.append
                     result = call("entry", lambda: client.get_json("/owned"))
                     audit.result = result
@@ -357,16 +367,7 @@ def test_entry_failure_stage_preserves_truthful_receipts(tmp_path, monkeypatch, 
         ):
             consumer = EntryConsumer(owner.run, grant, "success", monkeypatch)
             monkeypatch.setattr(consumer, "open", operation)
-            client = HttpClient(
-                base,
-                label="EVS",
-                timeout_seconds=1,
-                max_attempts=1,
-                retry_backoff_seconds=0,
-                max_response_bytes=32,
-                size_bound="entry-test",
-                request_policy=consumer,
-            )
+            client = entry_client(base, consumer)
             try:
                 client.get_json("/owned")
             except BaseException:
@@ -425,16 +426,7 @@ def test_refusal_proof_cannot_survive_start_reuse(tmp_path, monkeypatch):
         with audited("entry", {}, {}, ()) as audit, pytest.raises(RuntimeError) as raised, owner:
             consumer = EntryConsumer(owner.run, grant, "reused-start", monkeypatch)
             monkeypatch.setattr(consumer, "open", operation)
-            client = HttpClient(
-                base,
-                label="EVS",
-                timeout_seconds=1,
-                max_attempts=1,
-                retry_backoff_seconds=0,
-                max_response_bytes=32,
-                size_bound="entry-test",
-                request_policy=consumer,
-            )
+            client = entry_client(base, consumer)
             client.get_json("/owned")
         assert raised.value is failure
         first = consumer.first_snapshot
@@ -463,3 +455,90 @@ def test_refusal_proof_cannot_survive_start_reuse(tmp_path, monkeypatch):
             policy_sha256="a" * 64,
         )
         assert (summary["state"], summary["observationComplete"]) == ("failed", False)
+
+
+def test_expired_core_call_preserves_closed_admission_without_failure(tmp_path, monkeypatch):
+    fixtures = FixtureSet(
+        {request_key("evs", "GET", "/owned", {}): Fixture("owned", (Response(body={"ok": True}),))},
+        {},
+    )
+    with FixtureServer(fixtures) as receiver:
+        base = receiver.base_url("evs")
+        grant = RequestGrant("GET", base + "/owned", (("accept", "application/json"),))
+        authorization = Authorization((grant,), Limits(response_bytes=32, total_bytes=66), "a" * 64)
+        with closing(ControlledRun.create(authorization, tmp_path)) as run:
+            run.open()
+            original = AttemptLease.transport
+
+            def expired_transport(lease, start, operation):
+                lease.run.close()
+                with deadline_scope(0):
+                    return original(lease, start, operation)
+
+            monkeypatch.setattr(AttemptLease, "transport", expired_transport)
+            consumer = EntryConsumer(run, grant, "success", monkeypatch)
+            client = entry_client(base, consumer)
+            caught = None
+            with audited("entry", {}, {}, ()) as audit:
+                try:
+                    client.get_json("/owned")
+                except (CallDeadlineError, RequestPolicyError) as error:
+                    caught = error
+            assert type(caught) is CallDeadlineError
+            assert (audit.outbound_requests, receiver.log(), consumer.response) == (0, [], None)
+            observed = run.snapshot()
+            assert (
+                observed.logical,
+                observed.attempts,
+                observed.transport_entries,
+                observed.consumed_body_bytes,
+                observed.active,
+                observed.reserved_body_bytes,
+                observed.pending_receipts,
+                observed.observation_complete,
+                observed.state,
+                observed.failure,
+            ) == (1, 1, 0, 0, 0, 0, 0, True, "closed", None)
+
+
+def test_receipt_only_failure_reaches_caller_before_a_result(tmp_path, monkeypatch):
+    failure = RuntimeError("owned receipt-only failure")
+    completed = []
+
+    class ReceiptConsumer(EntryConsumer):
+        def exchange(self, *, timeout_seconds, response_limit, on_start):
+            def operation():
+                completed.append("operation")
+                return Exchange(200, {"content-type": "application/json"}, b'{"ok":true}')
+
+            with self.logical.attempt(response_limit=response_limit) as lease:
+                return lease.transport(on_start, operation)
+
+    def fail_receipt(_lease):
+        raise failure
+
+    fixtures = FixtureSet(
+        {request_key("evs", "GET", "/owned", {}): Fixture("owned", (Response(body={"ok": True}),))},
+        {},
+    )
+    with FixtureServer(fixtures) as receiver:
+        base = receiver.base_url("evs")
+        grant = RequestGrant("GET", base + "/owned", (("accept", "application/json"),))
+        authorization = Authorization((grant,), Limits(response_bytes=32, total_bytes=66), "a" * 64)
+        with closing(ControlledRun.create(authorization, tmp_path)) as run:
+            run.open()
+            monkeypatch.setattr(AttemptLease, "_receipt_entry", fail_receipt)
+            client = entry_client(base, ReceiptConsumer(run, grant, "success", monkeypatch))
+            with audited("entry", {}, {}, ()) as audit, pytest.raises(RuntimeError) as raised:
+                client.get_json("/owned")
+            assert raised.value is failure
+            assert (completed, audit.outbound_requests, receiver.log()) == (["operation"], 1, [])
+            observed = run.snapshot()
+            assert (
+                observed.transport_entries,
+                observed.active,
+                observed.reserved_body_bytes,
+                observed.consumed_body_bytes,
+                observed.pending_receipts,
+                observed.observation_complete,
+            ) == (0, 1, 33, 0, 1, False)

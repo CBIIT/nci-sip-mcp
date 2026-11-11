@@ -716,3 +716,13 @@
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Layout-only slots change: supported cooperating callers use the private callback's callable/invoke/refusal-witness interface and frozen declared fields; dynamic attributes, layout reflection and pickle are not contracts. Admission order, witness reset, receipts, exception behavior and legacy calls are unchanged."
+
+# Reviewer-approved #474 private-field equivalence: issuecomment-6783035710; canonical SURVIVED at 24495de.
+- file: "src/nci_si_mcp/http_client.py"
+  qualname: "_TransportStart"
+  operator: "boolean:literal"
+  site: "/decorator_list/0/keywords/0/value/0"
+  context: "24991d1f44f74cecde6893123e8910da37249863b51c76fd55a703d01d50dd63"
+  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
+  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
+  reason: "Supported consumers receive the private callback's callable/invoke/read-only refusal-witness Protocol, not assignment, hashing or serialization of its declared fields. Removing frozen does not change those contracts; the witness property remains read-only. Preserve production frozen=True. This equivalence does not cover public immutable snapshots or any admission, deadline, witness-default or receipt guard."

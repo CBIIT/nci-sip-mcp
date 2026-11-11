@@ -2126,6 +2126,7 @@ def test_transport_callback_order_fails_closed(
         ("_prepare_entry", 1, 0, 0),
         ("_prepare_entry", 0, 1, 0),
         ("_prepare_entry", 0, 0, 1),
+        ("entered", 0, 1, 0),
         ("_abort_entry", 0, 0, 0),
         ("_abort_entry", 1, 1, 0),
         ("_receipt_entry", 0, 0, 0),
@@ -2207,3 +2208,51 @@ def test_old_entry_schema_refuses_attachment_without_migration(tmp_path):
         with pytest.raises(RequestPolicyError) as closed:
             run.check_wait(0)
         assert closed.value.reason == "closed"
+
+
+def test_pending_entry_receipt_refuses_body_read(tmp_path):
+    with (
+        retirement_run(tmp_path) as (run, grant),
+        run.logical(grant) as logical,
+        logical.attempt(response_limit=5) as lease,
+        closing(sqlite3.connect(run.directory / "ledger.sqlite")) as storage,
+    ):
+        lease.entered()
+        with storage:
+            storage.execute("UPDATE leases SET entry_pending=1 WHERE id=?", (lease.lease_id,))
+        reads = []
+
+        def reader(maximum):
+            reads.append(maximum)
+            return b"x"[:maximum]
+
+        try:
+            with pytest.raises(RequestPolicyError) as refused:
+                lease.read(reader, 1)
+            assert (refused.value.reason, str(refused.value), refused.value.__cause__) == (
+                "accounting",
+                "Controlled upstream request refused.",
+                None,
+            )
+            assert reads == []
+            assert storage.execute(
+                "SELECT entered,entry_pending,pending,consumed FROM leases WHERE id=?",
+                (lease.lease_id,),
+            ).fetchone() == (1, 1, 0, 0)
+            observed = run.snapshot()
+            assert (
+                observed.transport_entries,
+                observed.consumed_body_bytes,
+                observed.active,
+                observed.reserved_body_bytes,
+                observed.pending_receipts,
+                observed.observation_complete,
+                observed.failure,
+            ) == (1, 0, 1, 6, 1, False, "accounting")
+            with pytest.raises(RequestPolicyError) as closed:
+                run.check_wait(0)
+            assert closed.value.reason == "closed"
+        finally:
+            # Only the deliberately injected inconsistency is repaired for ordinary release.
+            with storage:
+                storage.execute("UPDATE leases SET entry_pending=0 WHERE id=?", (lease.lease_id,))
