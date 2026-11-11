@@ -22,9 +22,17 @@ def provider(run):
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
-@pytest.mark.parametrize("authorized_target", ["/owned?raw=a%20b&x=1", "/owned?"])
+@pytest.mark.parametrize(
+    "authorized_target,wire_target",
+    [
+        ("/owned?raw=a%20b&x=1", "/owned?raw=a%20b&x=1"),
+        ("/owned?", "/owned?"),
+        ("?raw=a%20b&x=1", "/?raw=a%20b&x=1"),
+        ("?", "/?"),
+    ],
+)
 def test_exact_authorized_request_reaches_owned_receiver(
-    tmp_path, monkeypatch, method, authorized_target
+    tmp_path, monkeypatch, method, authorized_target, wire_target
 ):
     with WireReceiver() as receiver, WireReceiver() as proxy:
         for name in (
@@ -76,7 +84,7 @@ def test_exact_authorized_request_reaches_owned_receiver(
         ]
         if body is not None:
             expected_headers.append(("content-length", "18"))
-        assert (actual_method, target, actual_body) == (method, authorized_target, body or b"")
+        assert (actual_method, target, actual_body) == (method, wire_target, body or b"")
         assert sorted((key.lower(), value) for key, value in physical) == sorted(expected_headers)
         snapshot = owner.run.snapshot()
         assert (
@@ -133,8 +141,9 @@ def test_admitted_snapshot_keeps_wire_and_audit_truthful(tmp_path):
         ]
 
 
+@pytest.mark.parametrize("prior_reason", [None, "response_limit"])
 @pytest.mark.parametrize("field", ["method", "url", "headers", "data", "duplicate"])
-def test_unmatched_request_refuses_before_logical_admission(tmp_path, field):
+def test_unmatched_request_refuses_before_logical_admission(tmp_path, field, prior_reason):
     with WireReceiver() as receiver:
         grant = RequestGrant(
             "GET", receiver.origin + "/owned?x=1", (("accept", "application/json"),)
@@ -148,10 +157,22 @@ def test_unmatched_request_refuses_before_logical_admission(tmp_path, field):
             request.add_header("X-Extra", "ungranted")
         else:
             request.add_unredirected_header("Accept", "application/json")
-        with pytest.raises(RequestPolicyError), owner, provider(owner.run).request(request):
-            pytest.fail("Unmatched requests must never be admitted")
+        with pytest.raises(RequestPolicyError), owner:
+            if prior_reason:
+                with pytest.raises(RequestPolicyError):
+                    owner.run.refuse(prior_reason)
+            with pytest.raises(RequestPolicyError) as caught, provider(owner.run).request(request):
+                pytest.fail("Unmatched requests must never be admitted")
+            assert caught.value.reason == (prior_reason or "authorization")
+            assert caught.value.details == {}
         snapshot = owner.run.snapshot()
-        assert (receiver.contacts, snapshot.logical, snapshot.transport_entries) == (0, 0, 0)
+        assert snapshot.failure == (prior_reason or "authorization")
+        assert (
+            receiver.contacts,
+            snapshot.logical,
+            snapshot.attempts,
+            snapshot.transport_entries,
+        ) == (0, 0, 0, 0)
 
 
 @pytest.mark.parametrize(

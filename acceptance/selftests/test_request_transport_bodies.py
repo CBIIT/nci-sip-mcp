@@ -26,6 +26,7 @@ from nci_si_mcp.http_client import (
     UpstreamError,
     UpstreamRejectedError,
     UpstreamTimeoutError,
+    UpstreamUnavailableError,
 )
 from nci_si_mcp.invocation import call
 from nci_si_mcp.request_policy import using_request_policy
@@ -49,11 +50,13 @@ def owned_client(receiver, owner, *, limit=64, attempts=1):
     )
 
 
-def owned_run(tmp_path, receiver, *, response_bytes=64, total_bytes=8194):
+def owned_run(tmp_path, receiver, *, response_bytes=64, total_bytes=8194, seconds=300):
     grant = RequestGrant("GET", receiver.origin + "/owned", (("accept", "application/json"),))
     return SupervisedRun.create(
         Authorization(
-            (grant,), Limits(response_bytes=response_bytes, total_bytes=total_bytes), "a" * 64
+            (grant,),
+            Limits(response_bytes=response_bytes, total_bytes=total_bytes, seconds=seconds),
+            "a" * 64,
         ),
         tmp_path,
     )
@@ -70,6 +73,12 @@ def owned_run(tmp_path, receiver, *, response_bytes=64, total_bytes=8194):
             0,
         ),
         (b"Content-Encoding: gzip\r\nContent-Length: 12\r\n", b'{"ok": true}', 0),
+        (b"Transfer-Encoding: gzip\r\n", b'{"ok": true}', 0),
+        (
+            b"Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n",
+            b'c\r\n{"ok": true}\r\n0\r\n\r\n',
+            0,
+        ),
         (b"Content-Length: " + b"9" * 5000 + b"\r\n", b'{"ok": true}', 0),
     ],
     ids=[
@@ -77,14 +86,20 @@ def owned_run(tmp_path, receiver, *, response_bytes=64, total_bytes=8194):
         "conflicting-length",
         "conflicting-framing",
         "unsupported-encoding",
+        "unsupported-transfer",
+        "duplicate-transfer",
         "unrepresentable-declared-length",
     ],
 )
 def test_invalid_framing_cannot_return_success(tmp_path, fields, body, known):
     with WireReceiver([b"HTTP/1.1 200 OK\r\n" + fields + b"\r\n" + body]) as receiver:
         owner = owned_run(tmp_path, receiver)
-        with pytest.raises(UpstreamError), owner:
+        with pytest.raises(UpstreamError) as caught, owner:
             owned_client(receiver, owner).get_json("/owned")
+        if fields.startswith(b"Transfer-Encoding:"):
+            assert type(caught.value) is RequestPolicyError
+            assert caught.value.reason == "transport"
+            assert caught.value.details == {}
         snapshot = owner.run.snapshot()
         assert receiver.contacts == 1
         assert snapshot.transport_entries == 1
@@ -253,10 +268,11 @@ def test_deadline_checks_after_known_fragment_before_waiting_for_more(tmp_path, 
 
 
 @pytest.mark.parametrize(
-    "client_limit,policy_limit,refused", [(12, 64, False), (11, 64, True), (64, 11, True)]
+    "client_limit,policy_limit,refused,known",
+    [(12, 64, False, 12), (11, 64, True, 12), (64, 11, True, 12), (1, 64, True, 2)],
 )
 def test_success_sentinel_records_exact_authorized_bytes(
-    tmp_path, client_limit, policy_limit, refused
+    tmp_path, client_limit, policy_limit, refused, known
 ):
     with WireReceiver() as receiver:
         owner = owned_run(tmp_path, receiver, response_bytes=policy_limit)
@@ -268,20 +284,35 @@ def test_success_sentinel_records_exact_authorized_bytes(
             outcome = error.reason
         assert outcome == ("response_limit" if refused else {"ok": True})
         snapshot = owner.run.snapshot()
-        assert snapshot.consumed_body_bytes == JSON_BYTES
+        assert snapshot.consumed_body_bytes == known
         assert snapshot.active == snapshot.pending_receipts == 0
         assert receiver.contacts == 1
 
 
-def test_error_prefix_reserves_more_than_small_success_limit(tmp_path):
-    reply = b"HTTP/1.1 400 Bad request\r\nContent-Length: 4097\r\n\r\n" + b"x" * 4097
+@pytest.mark.parametrize(
+    "status,body,message",
+    [
+        (400, b"x" * 4097, ""),
+        (404, b'{"message":"bounded message"}' + b" " * (4097 - 29), "bounded message"),
+    ],
+    ids=["invalid-json", "bounded-json-prefix"],
+)
+def test_error_prefix_reserves_more_than_small_success_limit(
+    tmp_path, caplog, status, body, message
+):
+    reply = f"HTTP/1.1 {status} Private status\r\nContent-Length: 4097\r\n\r\n".encode() + body
     with WireReceiver([reply]) as receiver:
         owner = owned_run(tmp_path, receiver, response_bytes=8192, total_bytes=16386)
         with owner, pytest.raises(UpstreamRejectedError) as caught:
             owned_client(receiver, owner, limit=12).get_json("/owned")
         assert caught.value.empty_body is False
-        assert owner.run.snapshot().consumed_body_bytes == ERROR_PREFIX_BYTES
-        assert receiver.contacts == 1
+        assert caught.value.body_message == message
+        assert caught.value.details == {"surface": "owned", "status": status, "attempts": 1}
+        assert "Private status" not in str(caught.value) + caplog.text
+        snapshot = owner.run.snapshot()
+        assert snapshot.consumed_body_bytes == ERROR_PREFIX_BYTES
+        assert snapshot.active == snapshot.pending_receipts == 0
+        assert receiver.contacts == snapshot.transport_entries == 1
 
 
 def test_aggregate_shortage_refuses_before_another_contact(tmp_path):
@@ -298,15 +329,24 @@ def test_aggregate_shortage_refuses_before_another_contact(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "first",
+    "first,expected_waits",
     [
-        b'HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n{"ok": true}',
-        b"HTTP/1.1 429 Slow down\r\nRetry-After: 0\r\nRetry-After: 99\r\nContent-Length: 0\r\n\r\n",
-        b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n",
+        (b'HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n{"ok": true}', []),
+        (
+            b"HTTP/1.1 429 Slow down\r\nRetry-After: 0\r\n"
+            b"Retry-After: 99\r\nContent-Length: 0\r\n\r\n",
+            [],
+        ),
+        (
+            b"HTTP/1.1 429 Slow down\r\nRetry-After: 2\r\n"
+            b"Retry-After: 99\r\nContent-Length: 0\r\n\r\n",
+            [2],
+        ),
+        (b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n", []),
     ],
-    ids=["known-truncation", "first-retry-after", "server-error"],
+    ids=["known-truncation", "first-retry-after", "positive-first-retry-after", "server-error"],
 )
-def test_known_retryable_response_spends_a_separate_lease(tmp_path, first):
+def test_known_retryable_response_spends_a_separate_lease(tmp_path, first, expected_waits):
     with WireReceiver([first]) as receiver:
         owner = owned_run(tmp_path, receiver)
         waits = []
@@ -322,7 +362,7 @@ def test_known_retryable_response_spends_a_separate_lease(tmp_path, first):
             snapshot.transport_entries,
         ) == (2, 1, 2, 2)
         assert snapshot.active == snapshot.pending_receipts == 0
-        assert all(wait == 0 for wait in waits)
+        assert waits == expected_waits
         assert snapshot.consumed_body_bytes == (24 if first.startswith(b"HTTP/1.1 200") else 12)
 
 
@@ -360,20 +400,24 @@ def test_form_absence_is_interpreted_by_existing_consumer(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "stage,limit,reason,initiating,active",
+    "stage,limit,reason,initiating,active,prior_reason",
     [
-        ("close", 64, "transport", None, 0),
-        ("close", 11, "response_limit", "RequestPolicyError", 0),
-        ("release", 64, "accounting", None, 1),
+        ("close", 64, "transport", None, 0, None),
+        ("close", 11, "response_limit", "RequestPolicyError", 0, None),
+        ("release", 64, "accounting", None, 1, None),
+        ("close", 64, "byte_limit", None, 0, "byte_limit"),
     ],
 )
 def test_expected_cleanup_preserves_policy_reason_and_retirement(
-    tmp_path, monkeypatch, stage, limit, reason, initiating, active
+    tmp_path, monkeypatch, stage, limit, reason, initiating, active, prior_reason
 ):
     original = HTTPConnection.close
 
     def fail_close(connection):
         original(connection)
+        if prior_reason:
+            with pytest.raises(RequestPolicyError):
+                owner.run.refuse(prior_reason)
         raise OSError("PRIVATE-CONNECTION-CLOSE")
 
     def fail_release(_lease):
@@ -401,6 +445,7 @@ def test_expected_cleanup_preserves_policy_reason_and_retirement(
         ]
         snapshot = owner.run.snapshot()
         assert (snapshot.consumed_body_bytes, snapshot.active, receiver.contacts) == (12, active, 1)
+        assert snapshot.failure == reason
         assert snapshot.observation_complete is (not active)
         assert owner.snapshot()["state"] == "failed"
 
@@ -521,15 +566,33 @@ def test_unexpected_entry_failure_is_not_normalized_with_receipt_failure(
         assert (snapshot.active, snapshot.pending_receipts, receiver.contacts) == (1, 1, 1)
 
 
+@pytest.mark.parametrize(
+    "kind,public_kind,fixed_text,details",
+    [
+        (
+            TimeoutError,
+            UpstreamTimeoutError,
+            "Controlled upstream transport timed out.",
+            {"surface": "owned", "seconds": 1, "attempts": 1},
+        ),
+        (
+            OSError,
+            UpstreamUnavailableError,
+            "Controlled upstream transport failed.",
+            {"surface": "owned", "attempts": 1},
+        ),
+    ],
+    ids=["timeout", "oserror"],
+)
 @pytest.mark.parametrize("cleanup", [False, True])
-def test_owned_timeout_preserves_caller_and_cleanup_contracts(
-    tmp_path, monkeypatch, caplog, cleanup
+def test_owned_transport_error_preserves_caller_and_cleanup_contracts(
+    tmp_path, monkeypatch, caplog, cleanup, kind, public_kind, fixed_text, details
 ):
     original_response, original_close = HTTPConnection.getresponse, HTTPConnection.close
 
-    def response_then_timeout(connection):
+    def response_then_fail(connection):
         original_response(connection).close()
-        raise TimeoutError("PRIVATE-TIMEOUT-DETAIL")
+        raise kind("PRIVATE-TRANSPORT-DETAIL")
 
     def close_then_fail(connection):
         original_close(connection)
@@ -537,7 +600,7 @@ def test_owned_timeout_preserves_caller_and_cleanup_contracts(
 
     with WireReceiver() as receiver:
         owner, records = owned_run(tmp_path, receiver), []
-        monkeypatch.setattr(HTTPConnection, "getresponse", response_then_timeout)
+        monkeypatch.setattr(HTTPConnection, "getresponse", response_then_fail)
         if cleanup:
             monkeypatch.setattr(HTTPConnection, "close", close_then_fail)
         client = owned_client(receiver, owner)
@@ -548,17 +611,17 @@ def test_owned_timeout_preserves_caller_and_cleanup_contracts(
         if cleanup:
             assert type(error) is TransportCleanupError
             assert error.reason == "transport"
-            assert type(error.initiating) is TimeoutError
-            assert str(error.initiating) == "Controlled upstream transport timed out."
+            assert type(error.initiating) is kind
+            assert str(error.initiating) == fixed_text
             assert tuple(type(item) for item in error.cleanup_errors) == (OSError,)
             assert tuple(map(str, error.cleanup_errors)) == (
                 "Controlled upstream transport cleanup failed.",
             )
             assert error.details == {}
         else:
-            assert type(error) is UpstreamTimeoutError
+            assert type(error) is public_kind
             assert str(error) == "owned request failed for /owned: transport failure"
-            assert error.details == {"surface": "owned", "seconds": 1, "attempts": 1}
+            assert error.details == details
         assert "PRIVATE" not in repr(error) + str(error.details) + caplog.text
         assert "PRIVATE" not in "".join(traceback.format_exception(error))
         snapshot = owner.run.snapshot()
@@ -662,3 +725,79 @@ def test_bodyless_status_rejects_mixed_physical_framing(tmp_path, status):
         assert snapshot.failure == "transport"
         assert snapshot.observation_complete is True
         assert owner.snapshot()["state"] == "failed"
+
+
+def test_retry_delay_refused_before_sleep_or_second_contact(tmp_path):
+    reply = b"HTTP/1.1 503 Unavailable\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n"
+    with WireReceiver([reply]) as receiver:
+        owner = owned_run(tmp_path, receiver, seconds=30)
+        waits, outcome = [], None
+        try:
+            with owner:
+                client = owned_client(receiver, owner, attempts=3)
+                client.sleep = waits.append
+                outcome = client.get_json("/owned")
+        except RequestPolicyError as error:
+            outcome = error.reason
+        assert outcome == "deadline"
+        assert waits == []
+        snapshot = owner.run.snapshot()
+        assert (
+            receiver.contacts,
+            snapshot.logical,
+            snapshot.attempts,
+            snapshot.transport_entries,
+            snapshot.consumed_body_bytes,
+        ) == (1, 1, 1, 1, 0)
+        assert snapshot.active == snapshot.pending_receipts == 0
+        assert snapshot.failure == "deadline"
+
+
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_partial_response_is_retired_before_return(tmp_path, monkeypatch, cleanup_failure):
+    retired = Event()
+    original_close = HTTPResponse.close
+
+    def partial(handler):
+        handler.connection.settimeout(2)
+        handler.wfile.write(b"HTTP/1.0 200 OK\r\nContent-Length: 64\r\n\r\n" + b"x" * 64)
+        handler.wfile.flush()
+        try:
+            if handler.connection.recv(1) == b"":
+                retired.set()
+        except ConnectionResetError:
+            retired.set()
+        except TimeoutError:
+            return
+
+    def close_then_fail(response):
+        original_close(response)
+        raise OSError("PRIVATE-PARTIAL-CLOSE")
+
+    with WireReceiver([partial]) as receiver:
+        owner = owned_run(tmp_path, receiver)
+        if cleanup_failure:
+            monkeypatch.setattr(HTTPResponse, "close", close_then_fail)
+        with pytest.raises(RequestPolicyError), owner:
+            with pytest.raises(RequestPolicyError) as caught:
+                owned_client(receiver, owner, limit=1).get_json("/owned")
+            # Retain traceback so finalization cannot disguise missing cleanup.
+            error = caught.value
+            assert type(error) is (TransportCleanupError if cleanup_failure else RequestPolicyError)
+            assert error.reason == "response_limit"
+            assert error.details == {}
+            if cleanup_failure:
+                assert type(error.initiating) is RequestPolicyError
+                assert error.initiating.reason == "response_limit"
+                assert tuple(map(str, error.cleanup_errors)) == (
+                    "Controlled upstream transport cleanup failed.",
+                )
+            assert retired.wait(2), "Partial response resource remained open after caller return"
+        snapshot = owner.run.snapshot()
+        assert (receiver.contacts, snapshot.transport_entries, snapshot.consumed_body_bytes) == (
+            1,
+            1,
+            2,
+        )
+        assert snapshot.active == snapshot.pending_receipts == 0
+        assert snapshot.failure == "response_limit"
