@@ -6,7 +6,7 @@ from contextlib import closing
 from http import HTTPStatus
 from http.client import HTTPConnection, HTTPException, HTTPResponse
 from pathlib import Path
-from threading import Event
+from threading import Event, current_thread
 
 import pytest
 from http_receiver import WireReceiver
@@ -14,7 +14,7 @@ from http_receiver import WireReceiver
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_budget import AttemptLease
 from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
+from nci_si_acceptance.request_transport import ControlledHttpPolicy, TransportCleanupError
 from nci_si_mcp import bounds
 from nci_si_mcp.bounds import CallDeadlineError, deadline_scope
 from nci_si_mcp.cadsr import CaDSRClient
@@ -25,6 +25,7 @@ from nci_si_mcp.http_client import (
     RequestPolicyError,
     UpstreamError,
     UpstreamRejectedError,
+    UpstreamTimeoutError,
 )
 from nci_si_mcp.invocation import call
 from nci_si_mcp.request_policy import using_request_policy
@@ -518,3 +519,146 @@ def test_unexpected_entry_failure_is_not_normalized_with_receipt_failure(
         assert isinstance(caught.value.exceptions[1], RequestPolicyError)
         snapshot = owner.run.snapshot()
         assert (snapshot.active, snapshot.pending_receipts, receiver.contacts) == (1, 1, 1)
+
+
+@pytest.mark.parametrize("cleanup", [False, True])
+def test_owned_timeout_preserves_caller_and_cleanup_contracts(
+    tmp_path, monkeypatch, caplog, cleanup
+):
+    original_response, original_close = HTTPConnection.getresponse, HTTPConnection.close
+
+    def response_then_timeout(connection):
+        original_response(connection).close()
+        raise TimeoutError("PRIVATE-TIMEOUT-DETAIL")
+
+    def close_then_fail(connection):
+        original_close(connection)
+        raise OSError("PRIVATE-CLOSE-DETAIL")
+
+    with WireReceiver() as receiver:
+        owner, records = owned_run(tmp_path, receiver), []
+        monkeypatch.setattr(HTTPConnection, "getresponse", response_then_timeout)
+        if cleanup:
+            monkeypatch.setattr(HTTPConnection, "close", close_then_fail)
+        client = owned_client(receiver, owner)
+        client.on_request = records.append
+        with pytest.raises(Exception) as caught, owner:
+            client.get_json("/owned")
+        error = caught.value
+        if cleanup:
+            assert type(error) is TransportCleanupError
+            assert error.reason == "transport"
+            assert type(error.initiating) is TimeoutError
+            assert str(error.initiating) == "Controlled upstream transport timed out."
+            assert tuple(type(item) for item in error.cleanup_errors) == (OSError,)
+            assert tuple(map(str, error.cleanup_errors)) == (
+                "Controlled upstream transport cleanup failed.",
+            )
+            assert error.details == {}
+        else:
+            assert type(error) is UpstreamTimeoutError
+            assert str(error) == "owned request failed for /owned: transport failure"
+            assert error.details == {"surface": "owned", "seconds": 1, "attempts": 1}
+        assert "PRIVATE" not in repr(error) + str(error.details) + caplog.text
+        assert "PRIVATE" not in "".join(traceback.format_exception(error))
+        snapshot = owner.run.snapshot()
+        assert (len(records), receiver.contacts, snapshot.transport_entries) == (1, 1, 1)
+        assert (snapshot.active, snapshot.pending_receipts, snapshot.consumed_body_bytes) == (
+            0,
+            0,
+            0,
+        )
+        assert snapshot.observation_complete is True
+        assert owner.snapshot()["state"] == "failed"
+
+
+@pytest.mark.parametrize("kind", [OSError, RuntimeError])
+def test_cleanup_observation_failure_remains_visible_and_closes_admission(
+    tmp_path, monkeypatch, kind
+):
+    original_close, original_read = HTTPConnection.close, Path.read_text
+    request_thread = current_thread()
+    observation = kind("PRIVATE-OBSERVATION-DETAIL")
+    close_error = RequestPolicyError("response_limit")
+
+    def close_then_fail(connection):
+        original_close(connection)
+        raise close_error
+
+    def fail_owned_observation(path, *args, **kwargs):
+        if path == marker and current_thread() is request_thread and path.exists():
+            raise observation
+        return original_read(path, *args, **kwargs)
+
+    with WireReceiver() as receiver:
+        owner = owned_run(tmp_path, receiver)
+        marker = owner.run.directory / "failed"
+        with pytest.raises(RequestPolicyError) as terminal, owner:
+            with monkeypatch.context() as patch:
+                patch.setattr(HTTPConnection, "close", close_then_fail)
+                patch.setattr(Path, "read_text", fail_owned_observation)
+                with pytest.raises((RequestPolicyError, BaseExceptionGroup)) as caught:
+                    owned_client(receiver, owner).get_json("/owned")
+            error = caught.value
+            if kind is OSError:
+                assert type(error) is TransportCleanupError
+                assert error.reason == "response_limit"
+                assert error.initiating is None
+                assert tuple(type(item) for item in error.cleanup_errors) == (
+                    RequestPolicyError,
+                    OSError,
+                )
+                assert error.cleanup_errors[0].reason == "response_limit"
+                assert tuple(map(str, error.cleanup_errors)) == (
+                    "Controlled upstream request refused.",
+                    "Controlled upstream transport cleanup failed.",
+                )
+                assert error.details == {}
+                assert "PRIVATE" not in "".join(traceback.format_exception(error))
+            else:
+                assert type(error) is ExceptionGroup
+                assert error.exceptions == (close_error, observation)
+                assert error.exceptions[1] is observation
+            with pytest.raises(RequestPolicyError) as denied:
+                owner.run.check_wait(0)
+            assert denied.value.reason == "closed"
+        assert terminal.value.reason == "response_limit"
+        snapshot = owner.run.snapshot()
+        assert snapshot.failure == "response_limit"
+        assert (receiver.contacts, snapshot.transport_entries, snapshot.consumed_body_bytes) == (
+            1,
+            1,
+            12,
+        )
+        assert (snapshot.active, snapshot.pending_receipts, snapshot.observation_complete) == (
+            0,
+            0,
+            True,
+        )
+        assert owner.snapshot()["state"] == "failed"
+
+
+@pytest.mark.parametrize("status", [204, 304])
+def test_bodyless_status_rejects_mixed_physical_framing(tmp_path, status):
+    reply = (
+        f"HTTP/1.1 {status} Owned status\r\n".encode()
+        + b"Content-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"
+    )
+    with WireReceiver([reply]) as receiver:
+        owner = owned_run(tmp_path, receiver)
+        with pytest.raises((UpstreamError, PlatformError)) as caught, owner:
+            owned_client(receiver, owner, attempts=3).get_json("/owned")
+        assert type(caught.value) is RequestPolicyError
+        assert caught.value.reason == "transport"
+        assert str(caught.value) == "Controlled upstream request refused."
+        assert caught.value.details == {}
+        snapshot = owner.run.snapshot()
+        assert (receiver.contacts, snapshot.transport_entries, snapshot.attempts) == (1, 1, 1)
+        assert (snapshot.consumed_body_bytes, snapshot.active, snapshot.pending_receipts) == (
+            0,
+            0,
+            0,
+        )
+        assert snapshot.failure == "transport"
+        assert snapshot.observation_complete is True
+        assert owner.snapshot()["state"] == "failed"
