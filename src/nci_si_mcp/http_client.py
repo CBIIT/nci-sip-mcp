@@ -32,7 +32,13 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .audit import emit, hashed, requested
-from .bounds import CallDeadlineError, check_deadline, current_budget, current_deadline
+from .bounds import (
+    CallDeadlineError,
+    RequestBudgetError,
+    check_deadline,
+    current_budget,
+    current_deadline,
+)
 from .errors import PlatformError, current_correlation_id
 from .request_policy import (
     ControlledRequest,
@@ -72,7 +78,7 @@ class RequestPolicyError(UpstreamError):
 
     def __init__(self, reason: PolicyReason) -> None:
         super().__init__("Controlled upstream request refused.")
-        self.reason = reason
+        self.reason: PolicyReason = reason
 
 
 class UpstreamUnavailableError(UpstreamError):
@@ -157,6 +163,32 @@ class _Attempt:
     status: int | None = None
     failure: str | None = None
     entered: bool = False
+    refused_before_entry: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _TransportStart:
+    enter: Callable[[], None]
+    attempt: _Attempt
+
+    @property
+    def refused_before_entry(self) -> bool:
+        return self.attempt.refused_before_entry
+
+    def __call__(self) -> None:
+        self.enter()
+
+    def invoke[T](self, *, admit: Callable[[], None], operation: Callable[[], T]) -> T:
+        self.attempt.refused_before_entry = False
+        check_deadline()
+        admit()
+        try:
+            self.enter()
+        except CallDeadlineError, RequestBudgetError:
+            if not self.attempt.entered:
+                self.attempt.refused_before_entry = True
+            raise
+        return operation()
 
 
 def _require_transport_entry(controlled: ControlledRequest | None, attempt: _Attempt) -> None:
@@ -554,7 +586,7 @@ class HttpClient:
             )
             if controlled is not None:
                 response_limit = self.max_response_bytes
-                on_start = partial(self._enter, attempt)
+                on_start = _TransportStart(partial(self._enter, attempt), attempt)
                 exchange = controlled.exchange(
                     timeout_seconds=timeout, response_limit=response_limit, on_start=on_start
                 )

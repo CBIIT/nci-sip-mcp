@@ -28,13 +28,28 @@ class Exchange:
         object.__setattr__(self, "headers", MappingProxyType(headers))
 
 
+class TransportStart(Protocol):
+    @property
+    def refused_before_entry(self) -> bool:
+        """The latest invoke certified an ordinary core-limit refusal before entry."""
+        ...
+
+    def __call__(self) -> None:
+        """Legacy providers declare entry immediately before opening transport."""
+        ...
+
+    def invoke[T](self, *, admit: Callable[[], None], operation: Callable[[], T]) -> T:
+        """Finish admission before core entry accounting, then invoke transport."""
+        ...
+
+
 class ControlledRequest(Protocol):
     def check_wait(self, delay_seconds: float) -> None:
         """Refuse a retry wait that cannot fit within the shared run allowance."""
         ...
 
     def exchange(
-        self, *, timeout_seconds: float, response_limit: int, on_start: Callable[[], None]
+        self, *, timeout_seconds: float, response_limit: int, on_start: TransportStart
     ) -> Exchange:
         """Reserve, enter transport, read bounded bytes and release the attempt lease.
 

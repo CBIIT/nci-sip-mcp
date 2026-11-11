@@ -125,6 +125,16 @@ is unchanged. The core classifies the provider's raw `Exchange` through the exis
 error path; terminal refusal is `upstream_unavailable`, without cache fallback or public policy
 counters. I/O errors before transport entry are terminal refusals, not fictitious attempts.
 
+Accounting transports use the callback's `TransportStart.invoke(admit=..., operation=...)`:
+final ledger admission runs before core entry accounting, then the operation is invoked.
+The callback remains callable for existing explicit providers. `AttemptLease.transport`
+retains a pending-entry fact until the actual entry receipt commits. A known callback refusal
+settles without an entry; failed settlement or receipt retains capacity and prevents completion.
+Only the core's `refused_before_entry` witness permits known non-entry settlement.
+Interrupted or otherwise uncertain gate progress keeps its pending fact, closes admission,
+and preserves the initiating error plus any cleanup error. The witness resets for each `invoke`.
+No ledger transaction spans network I/O, and a later closure cannot erase a past entry receipt.
+
 A provider owns exact request validation and immutable snapshots, pre-send budget reservation,
 proxy/redirect controls, bounded success/error reads and sanitization of admission/cleanup errors.
 It calls `on_start` once immediately at transport entry, after other admission gates, before I/O;
@@ -174,6 +184,9 @@ without waiting on an invalid clock; counters are never clamped to manufacture a
 Retired lease identities remain bounded by admitted attempts. Repeat release validates authority
 before returning without a second refund/decrement; unknown or foreign leases still refuse.
 Snapshots are private immutable typed accounting records, not public summaries or proof of upstream work.
+`timeout(maximum)` uses the verified run origin and current admission; `refuse(reason)`
+closes admission while retaining the first shared failure. Incompatible private ledgers refuse
+rather than being migrated or reset.
 Callers own, join and reap their children and retain needed private ledger evidence outside
 managed scratch before pruning. This API supplies no automatic supervisor, owner-death
 observation, production transport or furnished-caller protection; those successors remain above.
