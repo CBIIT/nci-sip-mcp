@@ -14,14 +14,16 @@ Changes until then are development under the plan and need no approval reference
 under construction: the per-tool tests, the protocol gates, the prompts and resources, and the
 fixture set pinned to NCIt 26.09d.
 
-- #465 (explicit controlled transport): the opt-in entry handshake finishes ledger admission
+- #465 (explicit controlled transport): `ControlledHttpPolicy` binds direct verified-TLS HTTP
+  to immutable exact grants, shared presend leases, framed progress receipts and sanitized
+  failure-preserving cleanup (A5.2, A6.4, A7.5). Owned-loopback TLS and registered-child tests
+  also run through the mutation runner's copied-source environment; no furnished caller or
+  live access is activated. Contemporary red/green and review evidence remains on #465.
+- #474 (guarded entry accounting): the opt-in entry handshake finishes ledger admission
   before core entry accounting and retains uncertain entry receipts conservatively. Existing
   callable providers and unconfigured transport remain unchanged; furnished caller adoption
-  is separate. Contemporary red/green and review evidence is recorded on the issue.
-  `ControlledHttpPolicy` binds direct verified-TLS HTTP to immutable exact grants, shared
-  presend leases, framed progress receipts and sanitized failure-preserving cleanup
-  (A5.2, A6.4, A7.5). Owned-loopback TLS and registered-child tests also run through the
-  mutation runner's copied-source environment; no furnished caller or live access is activated.
+  is separate. Historical red/green evidence remains on #465; the complete HTTP provider
+  remains pending #465. Prerequisite completion and review evidence is recorded on #474.
 - #453 (§5 recorded-run provenance): selected-environment stdio benchmarking reuses the managed
   policy/isolated launcher, preserves strict recorded identity through benchmark evidence and
   comparison, and displays supplied-live provenance in combined reports and the local portal.
