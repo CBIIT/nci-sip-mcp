@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+from nci_si_acceptance import fixture_server
 from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures, request_key
 
 VERSION = request_key("evs", "GET", "/api/v1/version", {})
@@ -918,3 +919,27 @@ def test_a_recording_made_with_the_licence_key_is_refused(tmp_path):
 
     with pytest.raises(ValueError, match="a recording is made without the licence key"):
         load_fixtures(tmp_path)
+
+
+def test_invalid_initial_fixtures_do_not_retain_a_listener(tmp_path, monkeypatch):
+    request = {"surface": "evs", "method": "GET", "path": "/x"}
+    fixture_file(tmp_path, "a.json", request=request | {"ignored": {"*": "evidence"}})
+    fixture_file(tmp_path, "b.json", request=request | {"params": {"a": ["1"]}})
+    allocated = []
+    original = fixture_server.ThreadingHTTPServer
+
+    def observed(*args, **kwargs):
+        server = original(*args, **kwargs)
+        allocated.append(server)
+        return server
+
+    monkeypatch.setattr(fixture_server, "ThreadingHTTPServer", observed)
+    try:
+        with pytest.raises(ValueError, match=r"b\.json matches on a, which its path ignores"):
+            FixtureServer(load_fixtures(tmp_path))
+        assert all(server.socket.fileno() == -1 for server in allocated), (
+            "Initial fixture rejection retained an actual listener"
+        )
+    finally:
+        for server in allocated:
+            server.server_close()
