@@ -117,6 +117,9 @@ def test_metadata_family_refuses_another_origin(tmp_path):
         ),
         pytest.param(VALID_POLICY.replace("[monthly]", "[annual]"), id="unknown-channel"),
         pytest.param(VALID_POLICY.replace("[summary]", "[unreviewed]"), id="unknown-include"),
+        pytest.param(
+            VALID_POLICY.replace("[summary]", "[!!int summary]"), id="non-string-include-tag"
+        ),
         pytest.param(VALID_POLICY.replace("[parents]", "[unreviewed]"), id="unknown-relation"),
         pytest.param(VALID_POLICY.replace("[monthly]", "[]"), id="empty-channels"),
         pytest.param(VALID_POLICY.replace("[monthly]", "monthly"), id="scalar-channels"),
@@ -245,3 +248,31 @@ def test_family_default_and_binding_keep_strict_authority(tmp_path):
             ControlledRun.attach(bound.run.descriptor, strict, participant="different-policy")
         assert refused.value.reason == "authorization"
         assert receiver.contacts == 0 and bound.snapshot()["state"] == "failed"
+
+
+def test_duplicate_registered_query_id_refuses_before_any_contact(tmp_path, monkeypatch):
+    register = yaml.safe_load(request_catalogue.REGISTER.read_text())
+    document = tmp_path / "register.yaml"
+    document.write_text(yaml.safe_dump(register))
+    declaration = tmp_path / "policy.yaml"
+    declaration.write_text(VALID_POLICY)
+    monkeypatch.setattr(request_catalogue, "REGISTER", document)
+    monkeypatch.setattr(request_catalogue, "POLICY", declaration)
+    with WireReceiver() as receiver:
+        # Prove the independently valid declaration and copied register before the one defect.
+        request_catalogue.compile_policy(selected(receiver.origin))
+        register["queries"].append(dict(register["queries"][0]))
+        expected_ids = {
+            "graph-identities",
+            "elements-exact",
+            "elements-descendants",
+            "values-exact",
+            "values-descendants",
+        }
+        assert {row["id"] for row in register["queries"]} == expected_ids
+        assert len(register["queries"]) == len(expected_ids) + 1
+        document.write_text(yaml.safe_dump(register))
+        with pytest.raises(RequestPolicyError) as refused:
+            request_catalogue.compile_policy(selected(receiver.origin))
+        assert refused.value.reason == "authorization"
+        assert receiver.contacts == 0 and receiver.requests == []
