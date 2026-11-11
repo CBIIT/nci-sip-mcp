@@ -7,7 +7,7 @@ import json
 import math
 import re
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Self, TypedDict, final, get_args
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
@@ -384,6 +384,24 @@ def _grant_record(grant: RequestGrant) -> dict[str, object]:
     }
 
 
+def _family_record(family: RequestFamily) -> dict[str, object]:
+    # Bind declared scalar values, never arbitrary dataclass attachments on those values.
+    target = family.release
+    record: dict[str, object] = {
+        "kind": type(family).__name__,
+        "request": _grant_record(family.request),
+        "correlation": family.correlation,
+        "release": (
+            {"terminology": target.terminology, "channels": target.channels}
+            if target is not None
+            else None
+        ),
+    }
+    if type(family) is ConceptRequestFamily:
+        record.update(codes=family.codes, includes=family.includes, relations=family.relations)
+    return record
+
+
 @final
 @dataclass(frozen=True, slots=True, init=False)
 class Authorization:
@@ -466,9 +484,7 @@ class Authorization:
             "policy_sha256": self.policy_sha256,
         }
         if self.families:
-            payload["families"] = [
-                {"kind": type(family).__name__, **asdict(family)} for family in self.families
-            ]
+            payload["families"] = [_family_record(family) for family in self.families]
         canonical = json.dumps(
             payload,
             sort_keys=True,
