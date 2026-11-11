@@ -43,7 +43,10 @@ try:
     reason=None
 except RequestPolicyError as error:
     reason=error.reason
-Path(destination).write_text(json.dumps(dict(reason=reason,core=nci_si_mcp.__file__,harness=nci_si_acceptance.__file__)))
+report=Path(destination)
+pending=report.with_suffix(".pending")
+pending.write_text(json.dumps(dict(reason=reason,core=nci_si_mcp.__file__,harness=nci_si_acceptance.__file__)))
+pending.replace(report)
 """
 
 
