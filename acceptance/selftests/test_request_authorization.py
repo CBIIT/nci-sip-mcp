@@ -386,6 +386,18 @@ def test_private_descriptor_refuses_extra_or_malformed_fields(changes):
     "make,field,value",
     [
         pytest.param(Limits, "logical", 1, id="limits"),
+        pytest.param(
+            lambda: ReleaseTarget("ncit", ("monthly",)), "channels", ("weekly",), id="target"
+        ),
+        pytest.param(
+            lambda: finite_family_authorization(False).families[0], "correlation", False, id="exact"
+        ),
+        pytest.param(
+            lambda: finite_family_authorization(True).families[0],
+            "correlation",
+            False,
+            id="concept",
+        ),
         pytest.param(binding_authorization, "policy_sha256", "b" * 64, id="authorization"),
         pytest.param(
             lambda: RunDescriptor("b" * 32, "a" * 64, Path("/owned")),
@@ -652,3 +664,98 @@ def test_each_concept_family_authority_field_changes_binding(field, value):
     original = finite_family_authorization(True)
     changed = replace(original, families=(replace(original.families[0], **{field: value}),))
     assert changed.binding(b"k" * 32) != original.binding(b"k" * 32)
+
+
+@pytest.mark.parametrize(
+    "kind,field,value",
+    [
+        pytest.param("target", "terminology", 7, id="terminology-type"),
+        pytest.param("target", "terminology", "NCIt", id="terminology-grammar"),
+        pytest.param("target", "channels", ["monthly"], id="channels-list"),
+        pytest.param("target", "channels", (), id="channels-empty"),
+        pytest.param("target", "channels", (7,), id="channel-type"),
+        pytest.param("target", "channels", ("annual",), id="channel-unknown"),
+        pytest.param("target", "channels", ("monthly", "monthly"), id="channel-duplicate"),
+        pytest.param("exact", "request", object(), id="request-type"),
+        pytest.param("exact", "correlation", 1, id="correlation-type"),
+        pytest.param("exact", "release", object(), id="release-type"),
+        pytest.param("exact", "release", None, id="unresolved-template"),
+        pytest.param("exact", "headers", (("x-correlation-id", "owned"),), id="fixed-and-dynamic"),
+        *[
+            pytest.param("exact", "headers", ((name, "owned"),), id=f"reserved-{name}")
+            for name in (
+                "host",
+                "content-length",
+                "transfer-encoding",
+                "connection",
+                "proxy-authorization",
+                "proxy-connection",
+                "expect",
+                "upgrade",
+                "te",
+                "trailer",
+                "accept-encoding",
+                "cookie",
+            )
+        ],
+        pytest.param("plain", "url", "/owned{", id="unbound-open"),
+        pytest.param("plain", "url", "/owned}", id="unbound-close"),
+        pytest.param("exact", "url", "/api/v1/version", id="missing-template"),
+        pytest.param("exact", "url", "/{release}/{release}", id="repeated-template"),
+        pytest.param("exact", "url", "/owned?release={release}", id="query-template"),
+        pytest.param("exact", "url", "/prefix{release}", id="embedded-template"),
+        pytest.param("exact", "url", "/{release}/{", id="extra-open"),
+        pytest.param("exact", "url", "/{release}/}", id="extra-close"),
+        pytest.param("concept", "correlation", 1, id="concept-exact-delegation"),
+        pytest.param("concept", "method", "POST", id="concept-method"),
+        pytest.param("concept", "body", b"{}", id="concept-body"),
+        pytest.param("concept", "url", "/other/{release}", id="concept-base"),
+        *[
+            pytest.param("concept", field, value, id=f"{field}-{defect}")
+            for field, valid, bad in (
+                ("codes", ("C4817",), ("Cbad",)),
+                ("includes", ("summary",), ("summary,",)),
+                ("relations", ("parents",), ("parents/child",)),
+            )
+            for defect, value in (
+                ("empty", ()),
+                ("list", list(valid)),
+                ("duplicate", valid * 2),
+                ("type", (7,)),
+                ("grammar", bad),
+            )
+        ],
+    ],
+)
+def test_finite_authority_records_refuse_malformed_fields(kind, field, value):
+    records = {
+        "target": ReleaseTarget("ncit", ("monthly",)),
+        "plain": ExactRequestFamily(
+            replace(
+                finite_family_authorization(False).families[0].request,
+                url="http://127.0.0.1:9/owned",
+            )
+        ),
+        "exact": finite_family_authorization(False).families[0],
+        "concept": finite_family_authorization(True).families[0],
+    }
+    record = records[kind]
+    assert records["target"].channels == ("monthly",)
+    assert records["exact"].request.method == records["concept"].request.method == "GET"
+    if field in ("headers", "url", "method", "body"):
+        changed = "http://127.0.0.1:9" + value if field == "url" else value
+        request = replace(record.request, **{field: changed})
+        changes = {"request": request}
+        if field == "headers" and value == (("x-correlation-id", "owned"),):
+            fixed = replace(record, request=request, correlation=False)
+            assert fixed.request.headers == value and fixed.correlation is False
+    else:
+        changes = {field: value}
+    with pytest.raises(Exception) as refused:
+        replace(record, **changes)
+    assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert refused.value.reason == "authorization"
