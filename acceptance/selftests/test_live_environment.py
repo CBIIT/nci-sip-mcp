@@ -167,12 +167,16 @@ def test_selected_destinations_and_credentials_are_one_private_snapshot(
         for row in received:
             headers = {key.lower(): value for key, value in row["headers"].items()}
             assert headers["x-evsrestapi-license-key"] == "selected-private-marker"
-        with pytest.raises(HTTPError) as error:
+        with (
+            pytest.raises(HTTPError) as error,
             build_opener(ProxyHandler({})).open(
                 env["NCI_SI_CADSR_BASE_URL"] + "/blocked", timeout=2
-            )
-        assert error.value.code == HTTPStatus.FORBIDDEN
-        assert upstream.log() == received
+            ),
+        ):
+            pass
+        with error.value:
+            assert error.value.code == HTTPStatus.FORBIDDEN
+            assert upstream.log() == received
 
 
 @pytest.mark.parametrize(

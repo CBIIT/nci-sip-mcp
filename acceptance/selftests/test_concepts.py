@@ -222,7 +222,8 @@ def fetch_json(url):
         with urlopen(url, timeout=10) as response:  # noqa: S310 - a local test server
             return response.status, json.loads(response.read())
     except HTTPError as error:
-        return error.code, json.loads(error.read())
+        with error:
+            return error.code, json.loads(error.read())
 
 
 def test_the_fixture_server_composes_answers_and_logs_the_recordings_used(tmp_path):
@@ -292,7 +293,8 @@ def post_status(url):
         with urlopen(Request(url, data=b"{}", method="POST"), timeout=10) as response:  # noqa: S310
             return response.status
     except HTTPError as error:
-        return error.code
+        with error:
+            return error.code
 
 
 def test_two_active_scenarios_recording_one_concept_are_refused(tmp_path):

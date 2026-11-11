@@ -619,12 +619,12 @@ class FixtureServer:
         self._served: dict[str, int] = {}
         self._log: list[dict[str, Any]] = []
         self._lock = threading.Lock()
+        self.activate()
         self._http = ThreadingHTTPServer(address, _handler(self))
         # A wildcard address is not one to connect to.
         host = address[0] if address[0] != "0.0.0.0" else "127.0.0.1"  # noqa: S104
         self.url = f"http://{host}:{self._http.server_port}"
         self._thread = threading.Thread(target=self._http.serve_forever, daemon=True)
-        self.activate()
 
     def __enter__(self) -> Self:
         self._thread.start()

@@ -2,10 +2,12 @@
 
 import json
 from unittest import mock
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 
 import pytest
 import yaml
+from http_receiver import WireReceiver
 
 from nci_si_acceptance import record
 from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
@@ -578,3 +580,51 @@ def test_the_live_fetch_keeps_a_colon_in_a_path_as_it_is():
         live_fetch({"cadsr": "https://cadsr.example/rad"})("cadsr", path, {})
 
     assert opened.call_args.args[0].full_url == f"https://cadsr.example/rad{path}"
+
+
+@pytest.mark.parametrize("mode", ["normal", "read-error", "decode-error"])
+def test_live_fetch_releases_error_response_before_return_or_failure(monkeypatch, mode):
+    captured = []
+    original = record.urlopen
+    read_error = OSError("owned response read failure")
+
+    def failed_read():
+        raise read_error
+
+    def observed(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except HTTPError as error:
+            captured.append(error)
+            if mode == "read-error":
+                error.read = failed_read
+            raise
+
+    monkeypatch.setattr(record, "urlopen", observed)
+    body = b"\xff" if mode == "decode-error" else b'{"denied":true}'
+    reply = f"HTTP/1.1 403 Forbidden\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
+    with WireReceiver([reply]) as receiver:
+        fetch = live_fetch({"evs": receiver.origin})
+        try:
+            if mode == "normal":
+                assert fetch("evs", "/owned", {}) == (403, {"denied": True})
+            else:
+                expected = OSError if mode == "read-error" else UnicodeDecodeError
+                with pytest.raises(expected) as caught:
+                    fetch("evs", "/owned", {})
+                if mode == "read-error":
+                    assert caught.value is read_error
+                else:
+                    assert (
+                        caught.value.encoding,
+                        caught.value.object,
+                        caught.value.start,
+                        caught.value.end,
+                        caught.value.reason,
+                    ) == ("utf-8", b"\xff", 0, 1, "invalid start byte")
+            assert receiver.contacts == len(receiver.requests) == 1
+            assert len(captured) == 1
+            assert captured[0].closed is True, "Recorder retained the actual HTTPError response"
+        finally:
+            for response in captured:
+                response.close()

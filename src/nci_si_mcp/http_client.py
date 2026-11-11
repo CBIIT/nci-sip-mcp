@@ -20,6 +20,7 @@ import re
 import time
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
+from copy import copy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -769,13 +770,16 @@ class HttpClient:
         json_response: bool = True,
         interpret: Callable[[bytes, int | None], None] | None = None,
     ) -> Any:
+        # A controlled policy may retain admission while the caller mutates its Request.
+        # Attempt diagnostics describe the original request, as the transport snapshot does.
+        observed_request = copy(request) if self.request_policy is not None else request
         admission = (
             self.request_policy.request(request)
             if self.request_policy is not None
             else nullcontext()
         )
         with admission as controlled:
-            return self._retry(request, path, reject, json_response, interpret, controlled)
+            return self._retry(observed_request, path, reject, json_response, interpret, controlled)
 
     def _retry(
         self,

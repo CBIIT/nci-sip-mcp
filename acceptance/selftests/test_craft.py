@@ -54,7 +54,8 @@ def get(running, surface, path, headers=None):
         with urlopen(Request(url, headers=headers or {}), timeout=10) as response:  # noqa: S310
             return response.status, json.loads(response.read() or "null")
     except HTTPError as error:
-        return error.code, None
+        with error:
+            return error.code, None
 
 
 def serve(running, *scenarios):
@@ -415,7 +416,8 @@ def _licensed_answer(running, path, headers=None):
         with urlopen(request, timeout=10) as response:  # noqa: S310 - the local fixture server
             return response.status, json.loads(response.read())
     except HTTPError as error:
-        return error.code, None
+        with error:
+            return error.code, None
 
 
 def _codes(body):
@@ -514,7 +516,8 @@ def ask(running, path, headers, body=None):
         with urlopen(request, timeout=10) as response:  # noqa: S310 - the local fixture server
             raw, status = response.read().decode(), response.status
     except HTTPError as error:
-        raw, status = error.read().decode(), error.code
+        with error:
+            raw, status = error.read().decode(), error.code
     try:
         return status, json.loads(raw)
     except ValueError:

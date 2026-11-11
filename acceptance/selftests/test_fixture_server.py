@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+from nci_si_acceptance import fixture_server
 from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures, request_key
 
 VERSION = request_key("evs", "GET", "/api/v1/version", {})
@@ -44,7 +45,8 @@ def fetch(url, method="GET", headers=None):
         with urlopen(request, timeout=10) as response:  # noqa: S310
             return response.status, response.headers["Content-Type"], response.read()
     except HTTPError as error:
-        return error.code, error.headers["Content-Type"], error.read()
+        with error:
+            return error.code, error.headers["Content-Type"], error.read()
 
 
 @pytest.fixture
@@ -144,9 +146,11 @@ def test_a_request_of_any_method_is_recorded_with_its_body(server):
         server.base_url("ssis-sparql") + "/sparql", data=b"query=ASK{}", method="POST"
     )
     try:
-        urlopen(request, timeout=10)  # noqa: S310
+        with urlopen(request, timeout=10) as response:  # noqa: S310
+            status = response.status
     except HTTPError as error:
-        status = error.code
+        with error:
+            status = error.code
 
     assert status == HTTPStatus.NOT_IMPLEMENTED
     (entry,) = server.log()
@@ -190,9 +194,11 @@ def test_the_headers_of_a_fixture_are_sent_and_override_the_content_type(tmp_pat
     with FixtureServer(load_fixtures(tmp_path)) as running:
         url = running.base_url("evs") + "/api/v1/version"
         try:
-            urlopen(Request(url), timeout=10)  # noqa: S310 - a local test server
+            with urlopen(Request(url), timeout=10) as response:  # noqa: S310 - a local test server
+                status, headers, body = response.status, response.headers, response.read()
         except HTTPError as error:
-            status, headers, body = error.code, error.headers, error.read()
+            with error:
+                status, headers, body = error.code, error.headers, error.read()
 
     assert (status, headers["Retry-After"], headers.get_all("Content-Type")) == (
         429,
@@ -388,8 +394,11 @@ def test_a_fixture_for_every_path_may_not_hide_another_active_scenario(tmp_path)
     )
     fixtures = load_fixtures(tmp_path)
 
-    with pytest.raises(ValueError, match="cannot be active together: one answers every path"):
-        FixtureServer(fixtures).activate("upstream/down", "release/unknown")
+    with (
+        FixtureServer(fixtures) as running,
+        pytest.raises(ValueError, match="cannot be active together: one answers every path"),
+    ):
+        running.activate("upstream/down", "release/unknown")
 
 
 def test_a_fixture_for_every_path_answers_before_the_concept_rules(tmp_path):
@@ -585,8 +594,9 @@ def test_a_close_fault_closes_the_connection_without_an_answer(tmp_path):
     with (
         FixtureServer(load_fixtures(tmp_path)) as running,
         pytest.raises(RemoteDisconnected),
+        urlopen(running.base_url("evs") + "/api/v1/version", timeout=10),  # noqa: S310
     ):
-        urlopen(running.base_url("evs") + "/api/v1/version", timeout=10)  # noqa: S310
+        pass
 
 
 def test_a_delayed_response_waits_before_it_is_sent(tmp_path):
@@ -635,7 +645,8 @@ def fetch_post(url, body, headers=None):
         with urlopen(request, timeout=10) as response:  # noqa: S310
             return response.status
     except HTTPError as error:
-        return error.code
+        with error:
+            return error.code
 
 
 def test_a_selected_scenario_wins_even_where_an_ordinary_fixture_names_the_exact_body(tmp_path):
@@ -911,3 +922,27 @@ def test_a_recording_made_with_the_licence_key_is_refused(tmp_path):
 
     with pytest.raises(ValueError, match="a recording is made without the licence key"):
         load_fixtures(tmp_path)
+
+
+def test_invalid_initial_fixtures_do_not_retain_a_listener(tmp_path, monkeypatch):
+    request = {"surface": "evs", "method": "GET", "path": "/x"}
+    fixture_file(tmp_path, "a.json", request=request | {"ignored": {"*": "evidence"}})
+    fixture_file(tmp_path, "b.json", request=request | {"params": {"a": ["1"]}})
+    allocated = []
+    original = fixture_server.ThreadingHTTPServer
+
+    def observed(*args, **kwargs):
+        server = original(*args, **kwargs)
+        allocated.append(server)
+        return server
+
+    monkeypatch.setattr(fixture_server, "ThreadingHTTPServer", observed)
+    try:
+        with pytest.raises(ValueError, match=r"b\.json matches on a, which its path ignores"):
+            FixtureServer(load_fixtures(tmp_path))
+        assert all(server.socket.fileno() == -1 for server in allocated), (
+            "Initial fixture rejection retained an actual listener"
+        )
+    finally:
+        for server in allocated:
+            server.server_close()

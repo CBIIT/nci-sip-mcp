@@ -244,9 +244,9 @@ def test_real_children_share_the_logical_request_ceiling(tmp_path):
                     children.append(launch_actor(actor, tmp_path, number, settings, run))
                 markers = [tmp_path / f"child-{number}.round1" for number in range(2)]
                 results = release_and_collect(children, markers)
-        except RequestPolicyError:
-            # Exhaustion remains a failed diagnostic run even if a child handled its refusal.
-            pass
+        except RequestPolicyError as error:
+            error.add_note(f"Unexpected parent policy refusal: {error.reason}")
+            raise
         finally:
             for child in children:
                 stop_actor(child)
