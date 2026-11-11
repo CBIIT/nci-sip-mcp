@@ -974,6 +974,7 @@ class BufferedPolicy:
         self.url, self.unreadable, self.deny_wait = url, unreadable, deny_wait
         self.waits = []
         self.reads = []
+        self.witnesses = []
 
     @contextmanager
     def request(self, request):
@@ -989,7 +990,9 @@ class BufferedPolicy:
 
     def exchange(self, *, timeout_seconds, response_limit, on_start):
         opener = build_opener(ProxyHandler({}), NoRedirect())
+        self.witnesses.append(on_start.refused_before_entry)
         on_start()
+        self.witnesses.append(on_start.refused_before_entry)
         try:
             response = opener.open(self.selected, timeout=timeout_seconds)
         except HTTPError as error:
@@ -1151,7 +1154,10 @@ class BufferedPolicyTest(ServerTestCase):
     def test_retry_after_and_wait_admission_are_separate_from_send_accounting(self):
         server = self.serve(Reply(429, headers={"Retry-After": "1"}), Reply())
         client, policy = self.guarded(server)
-        self.assertEqual(client.get_json("/x"), {"ok": True})
+        with audited("read", {}, {}, ()) as accepted:
+            self.assertEqual(client.get_json("/x"), {"ok": True})
+        self.assertEqual(accepted.outbound_requests, 2)
+        self.assertEqual(policy.witnesses, [False, False, False, False])
         self.assertEqual(policy.waits, [1.0, 0])
         self.assertEqual(self.waits, [1.0])
         self.assertEqual(len(server.seen), 2)
