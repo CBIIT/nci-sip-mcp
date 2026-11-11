@@ -70,10 +70,14 @@ def test_owned_refusal_has_no_echo_or_forwarding_and_closes_on_exception(monkeyp
     with pytest.raises(RuntimeError, match="owner interrupted"), denied as url:
         address = url.removeprefix("http://").split(":")
         port = int(address[1])
-        with pytest.raises(HTTPError) as error:
-            build_opener(ProxyHandler({})).open(url + "/private-marker?secret-marker", timeout=2)
-        assert error.value.code == HTTPStatus.FORBIDDEN
-        assert error.value.read() == b"surface disabled by run policy"
+        with (
+            pytest.raises(HTTPError) as error,
+            build_opener(ProxyHandler({})).open(url + "/private-marker?secret-marker", timeout=2),
+        ):
+            pass
+        with error.value:
+            assert error.value.code == HTTPStatus.FORBIDDEN
+            assert error.value.read() == b"surface disabled by run policy"
         raise RuntimeError("owner interrupted")
     assert timeouts == [1.0]
     output = capfd.readouterr()

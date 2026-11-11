@@ -99,7 +99,8 @@ def _answer(running, request):
         with urlopen(Request(url, headers=request.get("headers", {})), timeout=10) as response:  # noqa: S310
             return {"status": response.status, "body": json.loads(response.read() or "null")}
     except HTTPError as error:
-        return {"status": error.code, "body": json.loads(error.read() or "null")}
+        with error:
+            return {"status": error.code, "body": json.loads(error.read() or "null")}
 
 
 def test_every_recorded_fixture_is_dated_and_pinned():
@@ -142,7 +143,8 @@ def _posted(url, entry):
         with urlopen(request, timeout=10) as response:  # noqa: S310 - the local fixture server
             return response.status
     except HTTPError as error:
-        return error.code
+        with error:
+            return error.code
 
 
 def test_each_published_query_is_answered_by_its_recording_whatever_its_whitespace():

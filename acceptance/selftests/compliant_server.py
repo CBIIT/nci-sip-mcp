@@ -279,7 +279,8 @@ def _ask(
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
             return response.status, _json(response.read()), dict(response.headers)
     except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read() or b"{}"), dict(error.headers)
+        with error:
+            return error.code, json.loads(error.read() or b"{}"), dict(error.headers)
     except OSError as error:
         # A timeout comes as itself, or inside a URLError as its reason.
         reason = getattr(error, "reason", error)

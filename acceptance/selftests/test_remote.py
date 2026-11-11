@@ -15,7 +15,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from contextlib import nullcontext, suppress
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -318,10 +318,14 @@ def test_naming_a_command_and_an_endpoint_stops_the_run_with_a_usage_error(compl
 def fetches_at_startup(path):
     """A state hook whose server asks the fixture server something while it starts."""
 
-    code = (
-        "import os, urllib.request; "
-        f"urllib.request.urlopen(os.environ['NCI_SI_EVS_BASE_URL'] + '{path}')"
-    )
+    code = f"""import os, urllib.error, urllib.request
+try:
+    with urllib.request.urlopen(os.environ['NCI_SI_EVS_BASE_URL'] + '{path}'):
+        pass
+except urllib.error.HTTPError as error:
+    with error:
+        raise
+"""
     return f'{sys.executable} -c "{code}" || true'
 
 
@@ -601,8 +605,12 @@ def reached_directly(upstream):
     """The log entries of a request made to the fixture server, as a server that reaches it
     makes one (the fixture set is empty, so none finds a fixture)."""
 
-    with suppress(urllib.error.HTTPError):
-        urllib.request.urlopen(f"{upstream.url}/evs/api/v1/version")  # noqa: S310
+    try:
+        with urllib.request.urlopen(f"{upstream.url}/evs/api/v1/version"):  # noqa: S310
+            pass
+    except urllib.error.HTTPError as error:
+        with error:
+            pass
     return upstream.log()
 
 

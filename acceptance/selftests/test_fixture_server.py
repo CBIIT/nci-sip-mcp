@@ -44,7 +44,8 @@ def fetch(url, method="GET", headers=None):
         with urlopen(request, timeout=10) as response:  # noqa: S310
             return response.status, response.headers["Content-Type"], response.read()
     except HTTPError as error:
-        return error.code, error.headers["Content-Type"], error.read()
+        with error:
+            return error.code, error.headers["Content-Type"], error.read()
 
 
 @pytest.fixture
@@ -144,9 +145,11 @@ def test_a_request_of_any_method_is_recorded_with_its_body(server):
         server.base_url("ssis-sparql") + "/sparql", data=b"query=ASK{}", method="POST"
     )
     try:
-        urlopen(request, timeout=10)  # noqa: S310
+        with urlopen(request, timeout=10) as response:  # noqa: S310
+            status = response.status
     except HTTPError as error:
-        status = error.code
+        with error:
+            status = error.code
 
     assert status == HTTPStatus.NOT_IMPLEMENTED
     (entry,) = server.log()
@@ -190,9 +193,11 @@ def test_the_headers_of_a_fixture_are_sent_and_override_the_content_type(tmp_pat
     with FixtureServer(load_fixtures(tmp_path)) as running:
         url = running.base_url("evs") + "/api/v1/version"
         try:
-            urlopen(Request(url), timeout=10)  # noqa: S310 - a local test server
+            with urlopen(Request(url), timeout=10) as response:  # noqa: S310 - a local test server
+                status, headers, body = response.status, response.headers, response.read()
         except HTTPError as error:
-            status, headers, body = error.code, error.headers, error.read()
+            with error:
+                status, headers, body = error.code, error.headers, error.read()
 
     assert (status, headers["Retry-After"], headers.get_all("Content-Type")) == (
         429,
@@ -585,8 +590,9 @@ def test_a_close_fault_closes_the_connection_without_an_answer(tmp_path):
     with (
         FixtureServer(load_fixtures(tmp_path)) as running,
         pytest.raises(RemoteDisconnected),
+        urlopen(running.base_url("evs") + "/api/v1/version", timeout=10),  # noqa: S310
     ):
-        urlopen(running.base_url("evs") + "/api/v1/version", timeout=10)  # noqa: S310
+        pass
 
 
 def test_a_delayed_response_waits_before_it_is_sent(tmp_path):
@@ -635,7 +641,8 @@ def fetch_post(url, body, headers=None):
         with urlopen(request, timeout=10) as response:  # noqa: S310
             return response.status
     except HTTPError as error:
-        return error.code
+        with error:
+            return error.code
 
 
 def test_a_selected_scenario_wins_even_where_an_ordinary_fixture_names_the_exact_body(tmp_path):

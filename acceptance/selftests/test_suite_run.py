@@ -77,9 +77,13 @@ def test_requests_without_a_fixture_fail_the_test_and_are_listed(suite):
 EAGER_SERVER = """
 import os, runpy, sys, urllib.error, urllib.request
 try:
-    urllib.request.urlopen(os.environ["NCI_SI_EVS_BASE_URL"] + "/api/v1/metadata/terminologies")
-except urllib.error.HTTPError:
-    pass
+    with urllib.request.urlopen(
+        os.environ["NCI_SI_EVS_BASE_URL"] + "/api/v1/metadata/terminologies"
+    ):
+        pass
+except urllib.error.HTTPError as error:
+    with error:
+        pass
 sys.argv = ["nci-si-mcp", "serve"]
 runpy.run_module("nci_si_mcp.cli", run_name="__main__")
 """
@@ -152,8 +156,11 @@ pytestmark = pytest.mark.gate
 
 @pytest.mark.unmatched_upstream
 def test_first(upstream):
-    with pytest.raises(urllib.error.HTTPError):
-        urllib.request.urlopen(upstream.url + "/evs/api/v1/elsewhere")
+    with pytest.raises(urllib.error.HTTPError) as error:
+        with urllib.request.urlopen(upstream.url + "/evs/api/v1/elsewhere"):
+            pass
+    with error.value:
+        pass
 
 def test_second(server):
     assert server
@@ -421,9 +428,12 @@ def test_without_a_prepare_command_a_test_that_needs_it_is_not_run(suite):
             "failed",
         ),
         (
-            "import os, urllib.request\n"
+            "import os, urllib.error, urllib.request\n"
             "url = os.environ['NCI_SI_EVS_BASE_URL'] + '/api/v1/metadata/terminologies'\n"
-            "try: urllib.request.urlopen(url)\n"
+            "try:\n"
+            "    with urllib.request.urlopen(url): pass\n"
+            "except urllib.error.HTTPError as error:\n"
+            "    with error: pass\n"
             "except OSError: pass\n",
             "*upstream requests without a fixture while preparing*",
             "no_fixture",

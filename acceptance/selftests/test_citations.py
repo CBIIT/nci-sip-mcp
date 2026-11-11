@@ -148,8 +148,9 @@ def test_reference_http_failure_is_one_attempt_and_never_calls_mcp():
     with FixtureServer(fixtures) as upstream:
         with pytest.raises(HTTPError) as failure:
             check(tools, upstream.base_url("cadsr"))
-        assert failure.value.code == HTTPStatus.SERVICE_UNAVAILABLE
-        assert len(upstream.log()) == 1
+        with failure.value:
+            assert failure.value.code == HTTPStatus.SERVICE_UNAVAILABLE
+            assert len(upstream.log()) == 1
     assert tools.calls == []
 
 
