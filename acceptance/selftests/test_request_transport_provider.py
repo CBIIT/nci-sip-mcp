@@ -252,9 +252,18 @@ def test_redirect_never_moves_credentials_or_exposes_private_fields(tmp_path, st
         assert secret not in repr(grant)
 
 
-@pytest.mark.parametrize("trusted", [False, True])
-def test_tls_verification_precedes_credential_http(tmp_path, monkeypatch, trusted):
-    server_context, certificate = tls_certificate(tmp_path)
+@pytest.mark.parametrize(
+    "trusted,certificate_address,accepted",
+    [
+        pytest.param(False, "127.0.0.1", False, id="False"),
+        pytest.param(True, "127.0.0.1", True, id="True"),
+        pytest.param(True, "127.0.0.2", False, id="trusted-wrong-host"),
+    ],
+)
+def test_tls_verification_precedes_credential_http(
+    tmp_path, monkeypatch, trusted, certificate_address, accepted
+):
+    server_context, certificate = tls_certificate(tmp_path, address=certificate_address)
     if trusted:
         client_context = ssl.create_default_context(cafile=certificate)
         assert client_context.check_hostname is True
@@ -289,9 +298,9 @@ def test_tls_verification_precedes_credential_http(tmp_path, monkeypatch, truste
                 result = client.get_json("/owned")
             except UpstreamError as error:
                 result = type(error).__name__
-        assert result == ({"ok": True} if trusted else "UpstreamUnavailableError")
+        assert result == ({"ok": True} if accepted else "UpstreamUnavailableError")
         assert receiver.contacts == 1
-        assert len(receiver.requests) == int(trusted)
-        if trusted:
+        assert len(receiver.requests) == int(accepted)
+        if accepted:
             assert dict(receiver.requests[0][2])["authorization"] == credential
         assert owner.run.snapshot().transport_entries == 1

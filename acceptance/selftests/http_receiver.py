@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 
-def tls_certificate(directory):
+def tls_certificate(directory, *, address="127.0.0.1"):
     """Generate only synthetic loopback trust, with no user key material or trust changes."""
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "owned-loopback")])
@@ -27,7 +27,7 @@ def tls_certificate(directory):
         .not_valid_before(now - timedelta(minutes=1))
         .not_valid_after(now + timedelta(days=1))
         .add_extension(
-            x509.SubjectAlternativeName([x509.IPAddress(ip_address("127.0.0.1"))]), critical=False
+            x509.SubjectAlternativeName([x509.IPAddress(ip_address(address))]), critical=False
         )
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
         .sign(key, hashes.SHA256())
