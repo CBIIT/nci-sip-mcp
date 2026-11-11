@@ -201,7 +201,8 @@ not enforce dashboard request budgets or replace native reports. The separate ex
 [shared accounting API](../CONTRIBUTING.md#explicit-shared-request-accounting) supplies private
 reservations and receipts for cooperating diagnostic callers. Optional
 [owned-run supervision](../CONTRIBUTING.md#explicit-owned-run-supervision) adds finite child
-cleanup and strict sanitized summaries; production transport (#465) and caller adoption
-(#448/#449) remain separate.
+cleanup and strict sanitized summaries. See the
+[controlled HTTP transport API](../CONTRIBUTING.md#explicit-controlled-http-transport).
+Furnished caller adoption remains #448/#449.
 Callers own/reap children and preserve required private ledger/binding/descriptor evidence
 outside managed scratch before pruning. No furnished-caller protection or live access is activated.

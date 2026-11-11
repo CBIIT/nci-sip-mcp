@@ -142,10 +142,49 @@ the callback checks the call's existing budget/deadline. Returned exchanges hide
 and headers in their representation. Core classification alone proves none of the provider's
 I/O guarantees. The `on_request` observer is not an enforcement boundary.
 
-Explicit authorization, shared accounting and owned-run supervision are described below;
-the production provider remains #465. Furnished harness,
+Explicit authorization, shared accounting and owned-run supervision are described below.
+`nci_si_acceptance.request_transport.ControlledHttpPolicy` composes them for explicitly
+cooperating diagnostic callers. Furnished harness,
 prepare, selected stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
-activates no caller protection or live access and changes no native/benchmark report schema.
+activates no furnished caller or live access and changes no native/benchmark report schema.
+
+### Explicit controlled HTTP transport
+
+Given an owner-approved `authorization` and an owned `Path` directory, inject the provider
+into a client inside its supervised run:
+
+```python
+from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_si_acceptance.request_transport import ControlledHttpPolicy
+from nci_si_mcp.http_client import HttpClient
+
+with SupervisedRun.create(authorization, owned_directory) as owner:
+    client = HttpClient(
+        base_url, label="diagnostic", timeout_seconds=10, max_attempts=3,
+        retry_backoff_seconds=0.25, max_response_bytes=65536,
+        size_bound="diagnostic_response", request_policy=ControlledHttpPolicy(owner.run),
+    )
+    result = client.get_json(path)
+```
+
+Every method, absolute URL/raw query, header (including correlation) and body must match a
+grant exactly. The immutable admitted grant supplies every attempt; later Request mutation
+cannot change sent bytes or attempt metadata. Attached callers use the same provider after
+explicit participant authorization/child registration, following the lifecycle below.
+Direct connections ignore ambient proxies, never follow redirects and verify TLS certificates
+and hostnames. Caller headers cannot override `Host`, `Content-Length`, `Transfer-Encoding`,
+`Connection`, `Proxy-Authorization`, `Proxy-Connection`, `Expect`, `Upgrade`, `TE`, `Trailer`,
+`Accept-Encoding` or `Cookie`; these are refused even if granted. Other headers remain exact.
+
+Each attempt reserves capacity before I/O. Framed progress is receipted before deadline checks;
+the open timeout is bounded by the remaining run/call allowance, without a hard DNS/socket
+cancellation guarantee. Success reads include the size sentinel; errors consume at most 4096
+bytes and obey the smaller policy ceiling. Unknown read progress retains pending capacity,
+closes admission and prevents a completed observation. Known incomplete error framing stays
+distinct from proven empty content; existing core parsing/status handling remains authoritative.
+`TransportCleanupError` is a fixed public policy refusal with separate sanitized `initiating`
+and `cleanup_errors` attributes. Unexpected bugs/interrupts remain grouped with cleanup failures,
+and every cleanup failure closes admission even when a caller catches its exception.
 
 ### Explicit request authorization
 
@@ -163,8 +202,9 @@ credentials or the binding. Descriptor records are private IPC, including their 
 keep them and the binding out of public reports.
 
 These values alone enforce no budget; explicit shared accounting is described below.
-Supervision/summaries are explicit opt-ins below; production transport #465 and actual caller adoption
-#448/#449. No furnished caller or live access is activated.
+Supervision/summaries are explicit opt-ins below; the
+[controlled HTTP transport](#explicit-controlled-http-transport) uses these APIs.
+Furnished caller adoption remains #448/#449. No furnished caller or live access is activated.
 
 ### Explicit shared request accounting
 
