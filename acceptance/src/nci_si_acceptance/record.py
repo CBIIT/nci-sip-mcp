@@ -420,7 +420,8 @@ def live_fetch(bases: dict[str, str]) -> Fetch:
             with urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
                 return response.status, _parse(response.read())
         except HTTPError as error:
-            return error.code, _parse(error.read())
+            with error:
+                return error.code, _parse(error.read())
 
     return fetch
 

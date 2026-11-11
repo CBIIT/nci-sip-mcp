@@ -15,7 +15,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -404,6 +404,7 @@ def test_a_remote_server_is_tested_by_one_process(remote):
 # ---- the state hook, called directly
 
 
+@contextmanager
 def hook_for(stub, tmp_path, command, timeout=30, authorization=CREDENTIAL):
     target = Target(
         "fixture",
@@ -414,20 +415,20 @@ def hook_for(stub, tmp_path, command, timeout=30, authorization=CREDENTIAL):
         state_hook=command,
         state_hook_timeout=timeout,
     )
-    return StateHook(target, FixtureServer(FixtureSet({}, {})), tmp_path / "output.log")
+    with FixtureServer(FixtureSet({}, {})) as upstream:
+        yield StateHook(target, upstream, tmp_path / "output.log")
 
 
 def test_a_scenario_set_gets_one_state_change_and_a_server_of_its_own_every_time(stub, tmp_path):
     runs = tmp_path / "runs.txt"
-    hook = hook_for(stub, tmp_path, f'echo "$SETTING" >> {runs}')
-
-    hook.apply(("a/one",), {"SETTING": "one"})
-    hook.apply(("a/one",), {"SETTING": "one"})
-    hook.apply((), {"SETTING": "own"}, fresh=True)
-    hook.apply((), {"SETTING": "own"}, fresh=True)
-    hook.apply(("a/two",), {"SETTING": "two"})
-    hook.restore()
-    hook.restore()
+    with hook_for(stub, tmp_path, f'echo "$SETTING" >> {runs}') as hook:
+        hook.apply(("a/one",), {"SETTING": "one"})
+        hook.apply(("a/one",), {"SETTING": "one"})
+        hook.apply((), {"SETTING": "own"}, fresh=True)
+        hook.apply((), {"SETTING": "own"}, fresh=True)
+        hook.apply(("a/two",), {"SETTING": "two"})
+        hook.restore()
+        hook.restore()
 
     assert runs.read_text(encoding="utf-8").splitlines() == ["one", "own", "own", "two", ""]
 
@@ -441,9 +442,8 @@ def test_the_hook_gets_the_fixture_and_scenario_settings_but_none_of_the_develop
     monkeypatch.setenv("NCI_SI_DATA_DIR", "/developers/data")
     monkeypatch.setenv("NCI_SI_ACCEPTANCE_PREPARED", "1")
     monkeypatch.setenv("NCI_SI_ACCEPTANCE_AUTHORIZATION", CREDENTIAL)
-    hook = hook_for(stub, tmp_path, f"env > {seen}")
-
-    hook.apply(("a/one", "a/two"), {"NCI_SI_EVS_LICENSE_KEY": "the-scenarios"})
+    with hook_for(stub, tmp_path, f"env > {seen}") as hook:
+        hook.apply(("a/one", "a/two"), {"NCI_SI_EVS_LICENSE_KEY": "the-scenarios"})
 
     given = dict(
         line.split("=", 1) for line in seen.read_text(encoding="utf-8").splitlines() if "=" in line
@@ -466,8 +466,8 @@ def test_a_state_hook_that_fails_fails_the_test_with_what_it_said_less_the_crede
         f'echo "told {CREDENTIAL}, has [$NCI_SI_ACCEPTANCE_AUTHORIZATION]"; exit 3'
     )
 
-    with pytest.raises(pytest.fail.Exception) as ended:
-        hook_for(stub, tmp_path, command).apply(("a/one",), {})
+    with pytest.raises(pytest.fail.Exception) as ended, hook_for(stub, tmp_path, command) as hook:
+        hook.apply(("a/one",), {})
 
     said = ended.value.msg
     assert "failed with exit status 3" in said
@@ -475,15 +475,21 @@ def test_a_state_hook_that_fails_fails_the_test_with_what_it_said_less_the_crede
 
 
 def test_a_state_hook_that_does_not_return_fails_the_test(stub, tmp_path):
-    with pytest.raises(pytest.fail.Exception, match=r"did not return within 0\.3 s"):
-        hook_for(stub, tmp_path, "sleep 5", timeout=0.3).apply(("a/one",), {})
+    with (
+        pytest.raises(pytest.fail.Exception, match="did not return within 0\\.3 s"),
+        hook_for(stub, tmp_path, "sleep 5", timeout=0.3) as hook,
+    ):
+        hook.apply(("a/one",), {})
 
 
 def test_a_server_that_does_not_come_back_fails_the_test(tmp_path):
     gone = Stub(f"http://127.0.0.1:{free_port()}/mcp", 0, {}, tmp_path, tmp_path)
 
-    with pytest.raises(pytest.fail.Exception, match=r"does not answer \(nothing within 0\.3 s\)"):
-        hook_for(gone, tmp_path, "true", timeout=0.3).apply(("a/one",), {})
+    with (
+        pytest.raises(pytest.fail.Exception, match="does not answer \\(nothing within 0\\.3 s\\)"),
+        hook_for(gone, tmp_path, "true", timeout=0.3) as hook,
+    ):
+        hook.apply(("a/one",), {})
 
 
 def test_the_configured_timeout_ends_the_wait_for_a_server_that_takes_the_connection_and_is_silent(
@@ -495,8 +501,11 @@ def test_the_configured_timeout_ends_the_wait_for_a_server_that_takes_the_connec
         taking = Stub(f"http://127.0.0.1:{silent.getsockname()[1]}/mcp", 0, {}, tmp_path, tmp_path)
         started = time.monotonic()
 
-        with pytest.raises(pytest.fail.Exception, match=r"nothing within 1 s\) after the state"):
-            hook_for(taking, tmp_path, "true", timeout=1).apply(("a/one",), {})
+        with (
+            pytest.raises(pytest.fail.Exception, match="nothing within 1 s\\) after the state"),
+            hook_for(taking, tmp_path, "true", timeout=1) as hook,
+        ):
+            hook.apply(("a/one",), {})
 
     assert time.monotonic() - started < PROMPTLY_SECONDS
 
@@ -506,10 +515,11 @@ def test_a_server_that_refuses_the_credential_fails_the_test_at_once_naming_the_
 ):
     started = time.monotonic()
 
-    with pytest.raises(pytest.fail.Exception) as ended:
-        hook_for(stub, tmp_path, "true", timeout=30, authorization="Bearer wrong").apply(
-            ("a/one",), {}
-        )
+    with (
+        pytest.raises(pytest.fail.Exception) as ended,
+        hook_for(stub, tmp_path, "true", timeout=30, authorization="Bearer wrong") as hook,
+    ):
+        hook.apply(("a/one",), {})
 
     assert ended.value.msg == (
         "the server under test does not answer (HTTP 401) after the state change"
@@ -545,18 +555,20 @@ def test_a_profile_without_release_discovery_can_pass_the_probe(monkeypatch):
     monkeypatch.setattr(
         remote_module, "open_remote_session", lambda *_args, **_kwargs: nullcontext(session)
     )
-    upstream = FixtureServer(FixtureSet({}, {}))
-
-    assert probe("http://server.example/mcp", None, upstream, PINNED) is None
-    assert upstream.log() == []
+    with FixtureServer(FixtureSet({}, {})) as upstream:
+        assert probe("http://server.example/mcp", None, upstream, PINNED) is None
+        assert upstream.log() == []
 
 
 @pytest.mark.parametrize("settings", [{"url": "http://server.example/mcp"}, {"state_hook": "true"}])
 def test_a_state_hook_requires_both_a_remote_endpoint_and_a_command(tmp_path, settings):
     target = Target("fixture", [], **settings)
 
-    with pytest.raises(ValueError, match="needs a remote server and the operator's hook"):
-        StateHook(target, FixtureServer(FixtureSet({}, {})), tmp_path / "hook.log")
+    with (
+        FixtureServer(FixtureSet({}, {})) as upstream,
+        pytest.raises(ValueError, match="needs a remote server and the operator's hook"),
+    ):
+        StateHook(target, upstream, tmp_path / "hook.log")
 
 
 def test_the_operator_is_told_the_urls_the_server_reaches_the_fixture_server_by(stub):

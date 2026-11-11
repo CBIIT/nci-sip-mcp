@@ -394,8 +394,11 @@ def test_a_fixture_for_every_path_may_not_hide_another_active_scenario(tmp_path)
     )
     fixtures = load_fixtures(tmp_path)
 
-    with pytest.raises(ValueError, match="cannot be active together: one answers every path"):
-        FixtureServer(fixtures).activate("upstream/down", "release/unknown")
+    with (
+        FixtureServer(fixtures) as running,
+        pytest.raises(ValueError, match="cannot be active together: one answers every path"),
+    ):
+        running.activate("upstream/down", "release/unknown")
 
 
 def test_a_fixture_for_every_path_answers_before_the_concept_rules(tmp_path):
