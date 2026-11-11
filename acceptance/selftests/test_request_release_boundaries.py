@@ -7,7 +7,6 @@ from dataclasses import replace
 
 import pytest
 from http_receiver import WireReceiver
-from test_request_budget import refusal
 from test_request_metadata import selected
 from test_request_release_selection import response
 
@@ -369,9 +368,12 @@ def test_duplicate_authentic_selection_rows_refuse_before_content(tmp_path):
 def test_selection_wrong_run_has_sanitized_refusal():
     with WireReceiver() as receiver:
         policy = compile_policy(selected(receiver.origin))
-        assert refusal(lambda: policy.select_release(object(), channel="monthly")) == (
+        with pytest.raises(Exception) as refused:
+            policy.select_release(object(), channel="monthly")
+        assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
             RequestPolicyError,
             "Controlled upstream request refused.",
             None,
         )
+        assert refused.value.reason == "authorization"
         assert receiver.contacts == 0 and receiver.requests == []

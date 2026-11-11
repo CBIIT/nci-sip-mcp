@@ -5,7 +5,6 @@ from dataclasses import replace
 import pytest
 import yaml
 from http_receiver import WireReceiver
-from test_request_budget import refusal
 
 from nci_si_acceptance import request_catalogue
 from nci_si_acceptance.environments import SURFACES, Environment
@@ -300,6 +299,7 @@ def test_invalid_environment_has_sanitized_compiler_refusal(invalid):
             "Controlled upstream request refused.",
             None,
         )
+        assert refused.value.reason == "authorization"
         assert receiver.contacts == 0 and receiver.requests == []
 
 
@@ -317,10 +317,12 @@ def test_duplicate_fixture_key_in_unselected_row_refuses(tmp_path, monkeypatch):
         request_catalogue.compile_policy(selected(receiver.origin))
         duplicate = marker + "      fixture: recorded/evs/version.json\n"
         document.write_text(raw.replace(marker, duplicate, 1))
-        assert document.read_text() == raw.replace(marker, duplicate, 1)
-        assert refusal(lambda: request_catalogue.compile_policy(selected(receiver.origin))) == (
+        with pytest.raises(Exception) as refused:
+            request_catalogue.compile_policy(selected(receiver.origin))
+        assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
             RequestPolicyError,
             "Controlled upstream request refused.",
             None,
         )
+        assert refused.value.reason == "authorization"
         assert receiver.contacts == 0 and receiver.requests == []
