@@ -7,6 +7,7 @@ from dataclasses import replace
 
 import pytest
 from http_receiver import WireReceiver
+from test_request_budget import refusal
 from test_request_metadata import selected
 from test_request_release_selection import response
 
@@ -220,12 +221,15 @@ def test_valid_segment_without_controller_selection_never_opens_content(tmp_path
         [ROW, ROW],
         [{**ROW, "terminology": "go"}],
         [{**ROW, "tags": {"weekly": "true"}}],
+        [{**ROW, "version": "invalid/segment"}],
+        [{**ROW, "latest": False}],
         [{**ROW, "terminologyVersion": "ncit_26.09e/child"}],
     ],
 )
 def test_invalid_discovery_spends_cost_without_binding(tmp_path, rows):
     with scenario(tmp_path, [rows]) as (receiver, policy, owner):
         result = invoke(owner, lambda: policy.select_release(owner.run, channel="monthly"))
+        assert isinstance(result, dict)
         assert result["error"]["code"] == "release_not_available"
         assert receiver.contacts == 1 and bindings(owner) == []
         snapshot = owner.run.snapshot()
@@ -261,7 +265,7 @@ def test_repeated_selection_retains_first_binding_and_all_costs(tmp_path, confli
 @pytest.mark.parametrize("caller", ["attached", "different-authorization"])
 def test_noncontroller_or_other_compilation_refuses_before_discovery(tmp_path, caller):
     with scenario(tmp_path, []) as (receiver, policy, owner):
-        with pytest.raises(RequestPolicyError) as denied, owner:
+        with pytest.raises(Exception) as denied, owner:
             if caller == "attached":
                 owner.run.authorize_participant("owned-worker")
                 run = ControlledRun.attach(
@@ -273,6 +277,7 @@ def test_noncontroller_or_other_compilation_refuses_before_discovery(tmp_path, c
                     policy, authorization=compile_policy(selected(receiver.origin)).authorization
                 )
                 foreign.select_release(owner.run, channel="monthly")
+        assert type(denied.value) is RequestPolicyError
         assert denied.value.reason == "authorization"
         assert receiver.contacts == 0 and bindings(owner) == []
         snapshot = owner.run.snapshot()
@@ -359,3 +364,14 @@ def test_duplicate_authentic_selection_rows_refuse_before_content(tmp_path):
                 1,
             )
             assert connection.execute("SELECT COUNT(*) FROM release_bindings").fetchone() == (3,)
+
+
+def test_selection_wrong_run_has_sanitized_refusal():
+    with WireReceiver() as receiver:
+        policy = compile_policy(selected(receiver.origin))
+        assert refusal(lambda: policy.select_release(object(), channel="monthly")) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert receiver.contacts == 0 and receiver.requests == []

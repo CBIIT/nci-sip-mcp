@@ -29,7 +29,7 @@ from nci_si_acceptance.request_summary import read_summary
 from nci_si_mcp.http_client import RequestPolicyError
 from nci_si_mcp.release import ReleaseContext
 from nci_si_mcp.request_policy import TransportStart
-from nci_si_mcp.validation import RELEASE_FORM, LedgerState, PolicyReason
+from nci_si_mcp.validation import LedgerState, PolicyReason
 
 # Bound cooperative contention, not filesystem or operating-system scheduling latency.
 BUSY_SECONDS = 0.1
@@ -242,11 +242,14 @@ class ControlledRun:
             if not hmac.compare_digest(row["mac"], self._release_mac(fields, key)):
                 self._deny("authorization")
 
-    def _commit_release(self, selection: ReleaseContext, target: ReleaseTarget) -> None:
-        """Commit only the composition's validated selection; never hold a transaction over I/O."""
-        if not self._owner or target not in self.authorization.release_targets():
-            self.refuse("authorization")
-        fields = self._selection_fields(selection, target)
+    def _commit_release(self, selection: ReleaseContext) -> None:
+        """The checked controller path supplies the real resolver's validated selection."""
+        fields = (
+            selection.terminology,
+            selection.channel,
+            selection.version,
+            selection.pinned_terminology,
+        )
         with self._connection() as connection:
             self._guard(connection)
             old = connection.execute(
@@ -262,24 +265,6 @@ class ControlledRun:
                 "WHERE terminology=? AND channel=?",
                 (*fields[2:], self._release_mac(fields, self._key()), *fields[:2]),
             )
-
-    def _selection_fields(
-        self, selection: ReleaseContext, target: ReleaseTarget
-    ) -> tuple[str, str, str, str]:
-        if type(selection) is not ReleaseContext or selection.terminology != target.terminology:
-            self.refuse("authorization")
-        if (
-            selection.channel not in target.channels
-            or re.fullmatch(RELEASE_FORM, selection.version) is None
-            or not target.accepts(selection.pinned_terminology)
-        ):
-            self.refuse("authorization")
-        return (
-            selection.terminology,
-            selection.channel,
-            selection.version,
-            selection.pinned_terminology,
-        )
 
     def _require_release(
         self, connection: sqlite3.Connection, requirement: tuple[ReleaseTarget, str] | None

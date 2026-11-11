@@ -242,7 +242,7 @@ class CompiledPolicy:
         with using_request_policy(ControlledHttpPolicy(run)):
             client = EVSClient(self._origin, license_key=self._license_key)
             selection = resolve_evs_release(client, self._target.terminology, channel)
-        run._commit_release(selection, self._target)
+        run._commit_release(selection)
         return selection
 
 

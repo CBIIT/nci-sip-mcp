@@ -1,8 +1,11 @@
 """Finite metadata permission cannot broaden request fields or private run identity."""
 
+from dataclasses import replace
+
 import pytest
 import yaml
 from http_receiver import WireReceiver
+from test_request_budget import refusal
 
 from nci_si_acceptance import request_catalogue
 from nci_si_acceptance.environments import SURFACES, Environment
@@ -275,4 +278,49 @@ def test_duplicate_registered_query_id_refuses_before_any_contact(tmp_path, monk
         with pytest.raises(RequestPolicyError) as refused:
             request_catalogue.compile_policy(selected(receiver.origin))
         assert refused.value.reason == "authorization"
+        assert receiver.contacts == 0 and receiver.requests == []
+
+
+@pytest.mark.parametrize("invalid", ["type", "name", "hash", "origin", "absent-evs"])
+def test_invalid_environment_has_sanitized_compiler_refusal(invalid):
+    with WireReceiver() as receiver:
+        valid = selected(receiver.origin)
+        request_catalogue.compile_policy(valid)
+        changes = {
+            "name": {"name": "INVALID"},
+            "hash": {"policy_sha256": "invalid"},
+            "origin": {"origins": {**valid.origins, "evs": "invalid"}},
+            "absent-evs": {"origins": {**valid.origins, "evs": None}},
+        }
+        value = object() if invalid == "type" else replace(valid, **changes[invalid])
+        with pytest.raises(Exception) as refused:
+            request_catalogue.compile_policy(value)
+        assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert receiver.contacts == 0 and receiver.requests == []
+
+
+def test_duplicate_fixture_key_in_unselected_row_refuses(tmp_path, monkeypatch):
+    raw = request_catalogue.MANIFEST.read_text()
+    marker = "    - fixture: recorded/evs/version.json\n"
+    assert raw.count(marker) == 1
+    declaration = tmp_path / "policy.yaml"
+    declaration.write_text(VALID_POLICY)
+    document = tmp_path / "manifest.yaml"
+    document.write_text(raw)
+    monkeypatch.setattr(request_catalogue, "POLICY", declaration)
+    monkeypatch.setattr(request_catalogue, "MANIFEST", document)
+    with WireReceiver() as receiver:
+        request_catalogue.compile_policy(selected(receiver.origin))
+        duplicate = marker + "      fixture: recorded/evs/version.json\n"
+        document.write_text(raw.replace(marker, duplicate, 1))
+        assert document.read_text() == raw.replace(marker, duplicate, 1)
+        assert refusal(lambda: request_catalogue.compile_policy(selected(receiver.origin))) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
         assert receiver.contacts == 0 and receiver.requests == []
