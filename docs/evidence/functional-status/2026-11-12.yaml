@@ -1,0 +1,32 @@
+kind: direct-controlled-EVS-discovery
+environment: production-configured EVS HTTPS route; issuing layer of403 unestablished
+source_sha: 52521535f34c28288b3b6615d0bea33548f8af88
+date: '2026-11-12'
+destination: https://api-evsrest.nci.nih.gov:443
+method: GET
+target: /api/v1/metadata/terminologies?terminology=ncit&latest=true&tag=monthly
+started: '2026-11-12T16:53:47.188821+00:00'
+finished: '2026-11-12T16:53:49.417388+00:00'
+command_elapsed_seconds: 2.2285952500533313
+command_exit_code: 1
+status: 403
+content_type: text/html
+body_bytes: 118
+private_body_sha256: 58bf2215b395dcac74c009aa98701854e43cbe54a1cd3a95fee6a647ca9910d4
+failure: response_status
+logical_requests: 1
+attempts: 1
+transport_entries: 1
+active: 0
+pending_receipts: 0
+admission: closed
+summary_state: failed
+observation_complete: true
+release_selected: false
+MCP_concept_observation: 'unexecuted: blocked by discovery'
+new_native_suite_runs: 0
+UAT_runs: 0
+repeats: 0
+first_result: https://github.com/CBIIT/nci-sip-mcp/issues/461#issuecomment-6830139905
+reviewer_disposition: https://github.com/CBIIT/nci-sip-mcp/issues/461#issuecomment-6830205261
+next_owner: 'Project coordinator / #381 access-route follow-up; no repeat authorized'

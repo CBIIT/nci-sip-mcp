@@ -18,7 +18,7 @@ pdm run acceptance-index-codes                       # the index set, one code p
 pdm run acceptance -n 4 --dist worksteal --report=fixture.json  # four workers, stealing work; the same report
 pdm run acceptance-expected check acceptance/fixture.json   # a report against the expected outcomes
 pdm run acceptance-expected update acceptance/fixture.json  # rewrite the expected outcomes from a report
-pdm run acceptance-status                            # regenerate the README's status table
+pdm run acceptance-status                            # regenerate the functional-status tables
 pdm run acceptance-selftest                          # the harness's own tests
 SELFTEST_SHARD=1/8 pdm run acceptance-selftest       # one of eight shards, as CI runs them
 pdm run acceptance-record                            # re-record fixtures/recorded/ from live
@@ -280,7 +280,7 @@ when a test of a tool that still fails stops passing, or starts to pass without 
 A change that moves outcomes on purpose (a tool implemented, a test added or corrected) updates
 the expected outcomes in the same pull request: run the suite as the job does, then
 `pdm run acceptance-expected update acceptance/fixture.json`, and `pdm run acceptance-status` for
-the README's table, which is generated from the expected outcomes and kept current by a
+the functional-status tables, which are generated from the expected outcomes and kept current by a
 self-test. The diff of `expected/fixture.json` is what the review reads.
 
 On a pull request, the generated report must first equal the expected map in the checkout. CI then
@@ -347,10 +347,13 @@ A reviewed workflow transition and the #448 prerequisites are required before en
 live run. Offline fixture verification and stored historical live evidence remain separate;
 no scheduled refresh or automatic wake-up is implied.
 
-### README live evidence (local rendering)
+### Functional-status evidence (local rendering)
 
 `pdm run acceptance-status` renders fixture status and the latest **stored scheduled main**
 live observation; `pdm run acceptance-status --check` fails without writing when it is stale.
+The default destination is [functional status](../docs/functional-status.md). The existing
+`--readme PATH` option selects another Markdown file with the same markers; generated source
+links resolve from that destination. Text outside the markers is preserved.
 Neither command nor the documentation build contacts upstream services. The live table counts
 the native test rows, including a separate unattributed-gates row, and keeps failures visible.
 A partial latest run is labelled incomplete; it is never replaced by an older green run.
@@ -359,8 +362,9 @@ To refresh, a maintainer reviews the latest `schedule` run on `main` of `Accepta
 (including failed runs), downloads its `acceptance-live` artifact from GitHub, and copies the
 original `live.json` bytes to `docs/evidence/acceptance-live/latest.json`. Update `latest.yaml`
 with its SHA-256, run and artifact IDs, event, branch, measured commit SHA and run start date
-(UTC ISO timestamp). Then run `pdm run acceptance-status`, review both the evidence and README
-diff, and run `pdm run acceptance-status --check`. No workflow publishes this automatically.
+(UTC ISO timestamp). Then run `pdm run acceptance-status`, review both the evidence and
+functional-status diff, and run `pdm run acceptance-status --check`. No workflow publishes this
+automatically. This describes retention of an authorized result, not permission to launch a run.
 Missing or invalid evidence is an error, not permission to retain a previous green observation.
 
 New native reports optionally carry `not_live_reason` on `not_live` test rows only:
@@ -390,7 +394,7 @@ rules of a run. `concepts.py` composes EVS concept answers from one recording pe
 concept, `record.py` records the set from live,
 `craft.py` crafts, in memory, the scenarios EVS does not produce on demand, `register.py` writes the
 register of request forms (`request-forms/`), `expected.py` compares a report with the expected
-outcomes (`expected/fixture.json`) and rewrites them, and `status.py` writes the README's status
+outcomes (`expected/fixture.json`) and rewrites them, and `status.py` writes the functional-status
 table from them and the stored native live evidence. `results.py` holds what the tests read from a tool's result and from the upstream
 request log, and `stories.py` renders the domain-readable story of every test from `stories.yaml`.
 `fixtures/` holds the fixtures ([fixtures/README.md](fixtures/README.md)), `tests/` the suite,
