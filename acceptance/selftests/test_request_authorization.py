@@ -623,6 +623,21 @@ def finite_family_authorization(concept):
     return replace(binding_authorization(), families=(family,))
 
 
+@pytest.mark.parametrize("code", ["C0", "C01"])
+def test_concept_family_requires_canonical_ncit_codes(code):
+    family = finite_family_authorization(True).families[0]
+    for valid in ("C1", "C10"):
+        assert replace(family, codes=(valid,)).codes == (valid,)
+    with pytest.raises(Exception) as refused:
+        replace(family, codes=(code,))
+    assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert refused.value.reason == "authorization"
+
+
 @pytest.mark.parametrize("concept", [False, True])
 def test_correlation_disabled_family_admits_exact_fixed_metadata(concept):
     original = finite_family_authorization(concept)
