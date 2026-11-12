@@ -280,3 +280,32 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
             resource._client_stop.set()
             resource.thread.join(5)
             assert not resource.thread.is_alive()
+
+
+def test_transferred_stderr_file_remains_open_until_actual_outside_cleanup(tmp_path):
+    replies = tmp_path / "replies.json"
+    replies.write_text("[]")
+    command = [
+        sys.executable,
+        str(Path(__file__).with_name("live_content_server.py")),
+        str(replies),
+    ]
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    errlog = (tmp_path / "stderr.log").open("w", encoding="utf-8")
+    try:
+        with owner:
+            observed = None
+            try:
+                with open_session(
+                    command, {}, errlog, owner=owner, timeout=3, own_errlog=True
+                ) as session:
+                    assert not errlog.closed
+                    observed = [tool.name for tool in session.list_tools().tools]
+            except TypeError as error:
+                observed = {"entry_error": str(error)}
+            assert observed == []
+            assert not errlog.closed
+        assert errlog.closed
+        assert owner.pending_owners == () and owner.snapshot()["state"] == "completed"
+    finally:
+        errlog.close()
