@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 import threading
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import TracebackType
 from typing import Self, get_args
@@ -13,6 +13,12 @@ from typing import Self, get_args
 from nci_si_acceptance.owned_process import stop_child
 from nci_si_acceptance.request_authorization import Authorization
 from nci_si_acceptance.request_budget import ControlledRun
+from nci_si_acceptance.request_children import (
+    CleanupDeadline,
+    CompletionOwner,
+    Completions,
+    CompletionToken,
+)
 from nci_si_acceptance.request_summary import RunSummary, project, publish
 from nci_si_mcp.errors import RequestPolicyError
 from nci_si_mcp.validation import ChildRole, PolicyReason, SummaryState
@@ -47,6 +53,13 @@ class SupervisedRun:
         self._observer_error: RequestPolicyError | None = None
         self._recording_errors: list[RequestPolicyError] = []
         self._observer = threading.Thread(target=self._observe, name="controlled-run-observer")
+        self._completions = Completions(run.descriptor.run_id, run.descriptor.policy_sha256)
+        self._controlled_cleanup = False
+        self._deadline: CleanupDeadline | None = None
+        self._deadline_lock = threading.Lock()
+        self._resources_complete = False
+        self._closing_threads: list[threading.Thread] = []
+        self._pending_children: set[str] = set()
 
     @classmethod
     def create(cls, authorization: Authorization, owned_directory: Path) -> Self:
@@ -55,7 +68,38 @@ class SupervisedRun:
         return cls(run)
 
     def snapshot(self) -> RunSummary:
-        return project(self.run.snapshot(), self.run.authorization.limits, self._state)
+        snapshot = self.run.snapshot()
+        if self._controlled_cleanup:
+            snapshot = replace(
+                snapshot,
+                observation_complete=(
+                    snapshot.observation_complete
+                    and self._resources_complete
+                    and not self.pending_owners
+                ),
+            )
+        return project(snapshot, self.run.authorization.limits, self._state)
+
+    @property
+    def pending_owners(self) -> tuple[str, ...]:
+        return self._completions.pending + tuple(sorted(self._pending_children))
+
+    def register_completion(self, owner: CompletionOwner, *, participant: str) -> CompletionToken:
+        if not self._entered or self._finishing:
+            raise RequestPolicyError("authorization")
+        self.run.authorize_participant(participant)
+        token = self._completions.register(owner, participant)
+        self._controlled_cleanup = True
+        return token
+
+    def cleanup_deadline(self) -> CleanupDeadline:
+        with self._deadline_lock:
+            if self._deadline is None:
+                self._deadline = CleanupDeadline()
+            return self._deadline
+
+    def _remaining(self, seconds: float) -> float:
+        return seconds if self._deadline is None else min(seconds, self._deadline.remaining())
 
     def _publish(self) -> None:
         publish(self.run.directory / "summary.json", self.snapshot())
@@ -166,14 +210,18 @@ class SupervisedRun:
 
     def _join(self) -> None:
         if self._observer.ident is not None:
-            self._observer.join(timeout=JOIN_SECONDS)
+            self._observer.join(timeout=self._remaining(JOIN_SECONDS))
             if self._observer.is_alive():
                 raise RequestPolicyError("accounting")
 
     def _clean_child(self, child: OwnedChild) -> None:
         actions: list[Callable[[], None]] = [
             lambda: self._settle_child(child),
-            lambda: stop_child(child.process, seconds=STOP_SECONDS),
+            lambda: (
+                stop_child(child.process, seconds=STOP_SECONDS, deadline=self._deadline)
+                if self._controlled_cleanup
+                else stop_child(child.process, seconds=STOP_SECONDS)
+            ),
         ]
         actions.extend(
             stream.close
@@ -189,7 +237,7 @@ class SupervisedRun:
     def _settle_child(self, child: OwnedChild) -> None:
         if child.role == "worker":
             try:
-                child.process.wait(timeout=STOP_SECONDS)
+                child.process.wait(timeout=self._remaining(STOP_SECONDS))
             except subprocess.TimeoutExpired:
                 self.run._deny("transport")
         self._check_child(child)
@@ -220,18 +268,56 @@ class SupervisedRun:
             raise BaseExceptionGroup("Controlled run failed.", errors) from None
 
     def _cleanup(self, errors: list[BaseException], *, terminal: bool) -> None:
+        if self._controlled_cleanup:
+            self.cleanup_deadline()
         errors.extend(self._collect([self._close_admission]))
         errors.extend(self._collect([self._seal_registry]))
         self._stop.set()
-        errors.extend(self._collect([self._join]))
+        resources = self._collect([self._join])
         if terminal:
             known = self._collect([self._terminal_failure])
             errors[:0] = [error for error in known if not self._contains(errors, error)]
         actions: list[Callable[[], None]] = [
-            lambda child=child: self._clean_child(child) for child in self._children
+            lambda child=child: self._finish_child(child) for child in self._children
         ]
-        errors.extend(self._collect(actions))
+        resources.extend(self._collect(actions))
+        if self._controlled_cleanup:
+            resources.extend(self._settle_completions())
+            self._resources_complete = not resources
+        errors.extend(resources)
         errors.extend(self._observed_failures(errors))
+
+    def _settle_completions(self) -> list[BaseException]:
+        deadline = self.cleanup_deadline()
+        return self._collect(
+            lambda token=token: self._completions.settle(token, deadline)
+            for token in self._completions.seal()
+        )
+
+    def _finish_child(self, child: OwnedChild) -> None:
+        if not self._controlled_cleanup:
+            self._clean_child(child)
+            return
+        errors: list[BaseException] = []
+        thread = threading.Thread(
+            target=lambda: self._capture_child_cleanup(child, errors),
+            name=f"controlled-child-close-{child.participant}",
+        )
+        self._closing_threads.append(thread)
+        self._pending_children.add(thread.name)
+        thread.start()
+        thread.join(self.cleanup_deadline().remaining())
+        if thread.is_alive():
+            raise RequestPolicyError("accounting")
+        if errors:
+            raise BaseExceptionGroup("Controlled child cleanup failed.", errors)
+        self._pending_children.remove(thread.name)
+
+    def _capture_child_cleanup(self, child: OwnedChild, errors: list[BaseException]) -> None:
+        try:
+            self._clean_child(child)
+        except BaseException as error:  # noqa: BLE001 - outside owner re-raises thread failures.
+            errors.append(error)
 
     def _observed_failures(self, errors: list[BaseException]) -> list[BaseException]:
         observed = list(self._child_errors.values())
@@ -242,6 +328,7 @@ class SupervisedRun:
 
     def _seal_registry(self) -> None:
         self._registrations.append(None)
+        self._completions.seal()
 
     def _terminal_failure(self) -> None:
         self.run.snapshot()  # Validate private identity and counters before selecting the event.
@@ -272,11 +359,12 @@ class SupervisedRun:
 
     def _finalize(self, clean: bool) -> None:
         snapshot = self.run.snapshot()
-        success = all((clean, snapshot.state == "closed", snapshot.observation_complete))
+        complete = self.snapshot()["observationComplete"]
+        success = all((clean, snapshot.state == "closed", complete))
         self._state = "completed" if success else "failed"
         if self._initial_published:
             self._publish()
-        if clean and (snapshot.state == "failed" or not snapshot.observation_complete):
+        if clean and (snapshot.state == "failed" or not complete):
             raise RequestPolicyError(snapshot.failure or "accounting")
 
     def __exit__(
