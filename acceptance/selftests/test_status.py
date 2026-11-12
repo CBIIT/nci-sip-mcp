@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from unittest.mock import patch
@@ -125,6 +126,45 @@ def suite_of_two(tmp_path, monkeypatch):
         return ["--check", "--readme", str(tmp_path / "README.md")]
 
     return expected
+
+
+def test_default_generation_updates_functional_status_and_preserves_readme(
+    tmp_path, monkeypatch, suite_of_two
+):
+    suite_of_two(dict.fromkeys(ATTRIBUTION_OF_TWO, "passed"))
+    readme = tmp_path / "README.md"
+    original = readme.read_text()
+    target = tmp_path / "docs/functional-status.md"
+    target.parent.mkdir()
+    target.write_text(f"Public summary\n{BEGIN}\n{END}\nEvidence links\n")
+    monkeypatch.setattr(status, "README", readme, raising=False)
+    monkeypatch.setattr(status, "STATUS", target, raising=False)
+
+    assert status.main([]) == 0
+
+    assert readme.read_text() == original
+    text = target.read_text()
+    assert "of the 2 tests" in text
+    assert text.startswith("Public summary\n") and text.endswith("Evidence links\n")
+    assert status.main(["--check"]) == 0
+
+
+def test_explicit_nested_destination_resolves_generated_source_links_from_its_page(
+    tmp_path, monkeypatch, suite_of_two
+):
+    suite_of_two(dict.fromkeys(ATTRIBUTION_OF_TWO, "passed"))
+    monkeypatch.setattr(status, "ACCEPTANCE", tmp_path / "acceptance")
+    target = tmp_path / "docs/functional-status.md"
+    target.parent.mkdir()
+    target.write_text(f"{BEGIN}\n{END}\n")
+
+    assert status.main(["--readme", str(target)]) == 0
+
+    link = re.search(r"\[acceptance/expected/fixture.json\]\(([^)]+)\)", target.read_text())
+    assert link is not None
+    assert (target.parent / link.group(1)).resolve() == (
+        tmp_path / "acceptance/expected/fixture.json"
+    ).resolve()
 
 
 def test_expected_outcomes_for_a_test_the_suite_lacks_are_refused(suite_of_two):
