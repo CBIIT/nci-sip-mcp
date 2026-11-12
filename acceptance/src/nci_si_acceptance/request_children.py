@@ -17,9 +17,11 @@ CLEANUP_SECONDS = 20.0
 
 @dataclass(frozen=True, slots=True)
 class CleanupDeadline:
-    end: float = field(default_factory=lambda: time.monotonic() + CLEANUP_SECONDS)
+    end: float | None = field(default_factory=lambda: time.monotonic() + CLEANUP_SECONDS)
 
     def remaining(self) -> float:
+        if self.end is None:
+            return 0.0  # Failed clock acquisition never receives a replacement allowance.
         now = time.monotonic()
         if not math.isfinite(now) or not math.isfinite(self.end):
             raise RequestPolicyError("accounting")
@@ -46,8 +48,14 @@ class Completions:
         self._identity = run_id, policy_sha256
         self._lock = threading.Lock()
         self._sealed = False
+        self._used = False
         self._owners: dict[CompletionToken, tuple[CompletionOwner, str]] = {}
         self._settling: set[CompletionToken] = set()
+
+    @property
+    def used(self) -> bool:
+        with self._lock:
+            return self._used
 
     @property
     def pending(self) -> tuple[str, ...]:
@@ -61,6 +69,7 @@ class Completions:
                 raise RequestPolicyError("authorization")
             token = CompletionToken(*self._identity, participant)
             self._owners[token] = owner, participant
+            self._used = True
             return token
 
     def seal(self) -> tuple[CompletionToken, ...]:

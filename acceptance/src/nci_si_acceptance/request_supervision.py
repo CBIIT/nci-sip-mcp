@@ -54,7 +54,6 @@ class SupervisedRun:
         self._recording_errors: list[RequestPolicyError] = []
         self._observer = threading.Thread(target=self._observe, name="controlled-run-observer")
         self._completions = Completions(run.descriptor.run_id, run.descriptor.policy_sha256)
-        self._controlled_cleanup = False
         self._deadline: CleanupDeadline | None = None
         self._deadline_lock = threading.Lock()
         self._resources_complete = False
@@ -84,22 +83,30 @@ class SupervisedRun:
     def pending_owners(self) -> tuple[str, ...]:
         return self._completions.pending + tuple(sorted(self._pending_children))
 
+    @property
+    def _controlled_cleanup(self) -> bool:
+        return self._completions.used
+
     def register_completion(self, owner: CompletionOwner, *, participant: str) -> CompletionToken:
         if not self._entered or self._finishing:
             raise RequestPolicyError("authorization")
         self.run.authorize_participant(participant)
-        token = self._completions.register(owner, participant)
-        self._controlled_cleanup = True
-        return token
+        return self._completions.register(owner, participant)
 
     def cleanup_deadline(self) -> CleanupDeadline:
         with self._deadline_lock:
             if self._deadline is None:
-                self._deadline = CleanupDeadline()
+                try:
+                    self._deadline = CleanupDeadline()
+                except BaseException:
+                    self._deadline = CleanupDeadline(None)
+                    raise
             return self._deadline
 
     def _remaining(self, seconds: float) -> float:
-        return seconds if self._deadline is None else min(seconds, self._deadline.remaining())
+        if not self._controlled_cleanup or self._deadline is None:
+            return seconds
+        return min(seconds, self._deadline.remaining())
 
     def _publish(self) -> None:
         publish(self.run.directory / "summary.json", self.snapshot())
@@ -270,8 +277,8 @@ class SupervisedRun:
             raise BaseExceptionGroup("Controlled run failed.", errors) from None
 
     def _cleanup(self, errors: list[BaseException], *, terminal: bool) -> None:
-        if self._controlled_cleanup:
-            self.cleanup_deadline()
+        # Capture once before closure; mode can become visible atomically with a racing offer.
+        errors.extend(self._collect([self.cleanup_deadline]))
         errors.extend(self._collect([self._close_admission]))
         errors.extend(self._collect([self._seal_registry]))
         self._stop.set()
