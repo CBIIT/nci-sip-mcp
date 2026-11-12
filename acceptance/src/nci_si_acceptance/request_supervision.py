@@ -14,7 +14,7 @@ from nci_si_acceptance.owned_process import stop_child
 from nci_si_acceptance.request_authorization import Authorization
 from nci_si_acceptance.request_budget import ControlledRun
 from nci_si_acceptance.request_summary import RunSummary, project, publish
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_si_mcp.errors import RequestPolicyError
 from nci_si_mcp.validation import ChildRole, PolicyReason, SummaryState
 
 # One missed pulse is tolerated by the ledger's two-second stale deadline.
