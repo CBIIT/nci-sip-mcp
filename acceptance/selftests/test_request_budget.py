@@ -2017,6 +2017,8 @@ def test_transport_timeout_refuses_invalid_maximum(tmp_path, maximum):
 
 
 def test_transport_timeout_uses_verified_run_origin(tmp_path, monkeypatch):
+    # An exact origin keeps this deadline assertion independent of float rounding.
+    monkeypatch.setattr(request_budget_module, "_clock", lambda: 1000.0)
     with retirement_run(tmp_path) as (run, _grant):
         assert hasattr(run, "timeout"), "Transport timeout must use guarded ledger time."
         origin = run.started
