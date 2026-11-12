@@ -233,7 +233,7 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
         entered.set()
         await anyio.sleep_forever()
 
-    resource = None
+    resource, timeout = None, None
     try:
         with (
             pytest.raises(BaseException) as outward,
@@ -251,8 +251,8 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
             ) as session,
         ):
             resource = session._resource
-            resource.read_seconds = 0.05
             assert session._call(immediate) == "ready"
+            resource.read_seconds = 0.05
             with pytest.raises(RequestPolicyError) as timeout:
                 resource.call(held_schedule) if held_after_portal_exit else session._call(pending)
             assert entered.is_set() and timeout.value.reason == "deadline"
@@ -261,6 +261,7 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
             assert owner.snapshot()["observationComplete"] is False
             if held_after_portal_exit:
                 monkeypatch.setattr(request_children, "CLEANUP_SECONDS", 0.1)
+        assert timeout is not None, failure_leaves(outward.value)
         assert timeout.value in failure_leaves(outward.value)
         assert owner.pending_owners == ((resource.name,) if held_after_portal_exit else ())
         assert owner.snapshot()["observationComplete"] is (not held_after_portal_exit)

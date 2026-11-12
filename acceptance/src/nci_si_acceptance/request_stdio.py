@@ -8,7 +8,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from contextvars import copy_context
 from typing import TYPE_CHECKING, TextIO
 
@@ -108,7 +108,7 @@ class StdioOwner:
         )
         self.closed: set[str] = set()
         self.pumps: set[str] = set()
-        self.waited = self.pumps_settled = False
+        self.waited = self.pumps_settled = self.process_closed = False
         self._read_send, self.read = anyio.create_memory_object_stream[SessionMessage | Exception](
             0
         )
@@ -269,10 +269,10 @@ class StdioOwner:
             raise error from None
 
     async def _step(
-        self, action: Callable[[], Awaitable[object]], deadline: CleanupDeadline
+        self, action: Callable[[], Awaitable[object]], deadline: CleanupDeadline | None
     ) -> None:
         try:
-            with anyio.fail_after(deadline.remaining()):
+            with nullcontext() if deadline is None else anyio.fail_after(deadline.remaining()):
                 await action()
         except OSError, RuntimeError, TimeoutError:
             self.errors.append(RequestPolicyError("accounting"))
@@ -286,6 +286,12 @@ class StdioOwner:
             raise RequestPolicyError("accounting")
         await stream.aclose()
         self.closed.add(name)
+
+    async def _close_process(self) -> None:
+        # Stream wrappers alone do not close asyncio's underlying read-pipe transports.
+        # This public closer shields cancellation; only the outside thread join bounds it.
+        await self._process().aclose()
+        self.process_closed = True
 
     async def _wait(self, seconds: float, deadline: CleanupDeadline) -> bool:
         try:
@@ -315,6 +321,8 @@ class StdioOwner:
         self.waited = await self._wait(deadline.remaining(), deadline)
         for name in ("stdout", "stderr"):
             await self._step(lambda name=name: self._close(name), deadline)
+        # Its shielded wait cannot honor an inner timeout; outside finish retains custody.
+        await self._step(self._close_process, None)
         for stream in (self.read, self.write, self._read_send, self._write_receive):
             await self._step(stream.aclose, deadline)
 
@@ -342,7 +350,14 @@ class StdioOwner:
             raise RequestPolicyError("accounting")
         if self.errors:
             raise BaseExceptionGroup("Controlled stdio cleanup failed.", self.errors)
-        if not all((self.waited, self.pumps_settled, self.closed == {"stdin", "stdout", "stderr"})):
+        if not all(
+            (
+                self.waited,
+                self.pumps_settled,
+                self.process_closed,
+                self.closed == {"stdin", "stdout", "stderr"},
+            )
+        ):
             raise RequestPolicyError("accounting")
 
 
