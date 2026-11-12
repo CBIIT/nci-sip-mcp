@@ -1,16 +1,18 @@
-"""The README's status table is generated from the expected outcomes and is current."""
+"""The canonical status tables are generated, path-aware and current."""
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 import yaml
 
 from nci_si_acceptance import status
-from nci_si_acceptance.status import BEGIN, END, README, current, render, tool_outcomes
+from nci_si_acceptance.status import BEGIN, END, STATUS, current, render, tool_outcomes
 
 # A gate, and tests of three tools.
 ATTRIBUTION = {
@@ -127,6 +129,45 @@ def suite_of_two(tmp_path, monkeypatch):
     return expected
 
 
+def test_default_generation_updates_functional_status_and_preserves_readme(
+    tmp_path, monkeypatch, suite_of_two
+):
+    suite_of_two(dict.fromkeys(ATTRIBUTION_OF_TWO, "passed"))
+    readme = tmp_path / "README.md"
+    original = readme.read_text()
+    target = tmp_path / "docs/functional-status.md"
+    target.parent.mkdir()
+    target.write_text(f"Public summary\n{BEGIN}\n{END}\nEvidence links\n")
+    monkeypatch.setattr(status, "README", readme, raising=False)
+    monkeypatch.setattr(status, "STATUS", target, raising=False)
+
+    assert status.main([]) == 0
+
+    assert readme.read_text() == original
+    text = target.read_text()
+    assert "of the 2 tests" in text
+    assert text.startswith("Public summary\n") and text.endswith("Evidence links\n")
+    assert status.main(["--check"]) == 0
+
+
+def test_explicit_nested_destination_resolves_generated_source_links_from_its_page(
+    tmp_path, monkeypatch, suite_of_two
+):
+    suite_of_two(dict.fromkeys(ATTRIBUTION_OF_TWO, "passed"))
+    monkeypatch.setattr(status, "ACCEPTANCE", tmp_path / "acceptance")
+    target = tmp_path / "docs/functional-status.md"
+    target.parent.mkdir()
+    target.write_text(f"{BEGIN}\n{END}\n")
+
+    assert status.main(["--readme", str(target)]) == 0
+
+    link = re.search(r"\[acceptance/expected/fixture.json\]\(([^)]+)\)", target.read_text())
+    assert link is not None
+    assert (target.parent / link.group(1)).resolve() == (
+        tmp_path / "acceptance/expected/fixture.json"
+    ).resolve()
+
+
 def test_expected_outcomes_for_a_test_the_suite_lacks_are_refused(suite_of_two):
     arguments = suite_of_two(dict.fromkeys(["t.py::a", "t.py::b", "t.py::extra"], "passed"))
 
@@ -150,7 +191,7 @@ def run_status(*options):
     )
 
 
-def test_the_readme_on_disk_is_what_the_expected_outcomes_generate():
+def test_the_status_page_on_disk_is_what_the_expected_outcomes_generate():
     ran = run_status("--check")
 
     assert (ran.returncode, ran.stderr) == (0, "")
@@ -158,7 +199,7 @@ def test_the_readme_on_disk_is_what_the_expected_outcomes_generate():
 
 def test_a_readme_that_is_not_current_fails_the_check_and_is_rewritten_without_it(tmp_path):
     stale = tmp_path / "README.md"
-    text = README.read_text(encoding="utf-8")
+    text = STATUS.read_text(encoding="utf-8")
     stale.write_text(text.replace(BEGIN, BEGIN + "\nstale table"), encoding="utf-8")
 
     failed = run_status("--check", "--readme", str(stale))
@@ -167,7 +208,9 @@ def test_a_readme_that_is_not_current_fails_the_check_and_is_rewritten_without_i
     assert failed.returncode == 1
     assert "is not current" in failed.stderr
     assert written.returncode == 0
-    assert stale.read_text(encoding="utf-8") == text
+    assert run_status("--check", "--readme", str(stale)).returncode == 0
+    empty = f"{BEGIN}\n{END}"
+    assert current(stale.read_text(encoding="utf-8"), empty) == current(text, empty)
 
 
 def test_failed_collection_cannot_replace_the_existing_readme(tmp_path, monkeypatch):
@@ -235,6 +278,28 @@ def provenance(raw):
         "sha": "b" * 40,
         "date": "2026-10-19T07:10:38Z",
     }
+
+
+def test_nested_destination_resolves_stored_live_context_link_and_anchor(tmp_path, suite_of_two):
+    suite_of_two(dict.fromkeys(ATTRIBUTION_OF_TWO, "passed"))
+    target = tmp_path / "published/status.md"
+    target.parent.mkdir()
+    target.write_text(f"{BEGIN}\n{END}\n")
+    live = tmp_path / "live"
+    live.mkdir()
+    raw = json.dumps(live_rows()).encode()
+    (live / "latest.json").write_bytes(raw)
+    (live / "latest.yaml").write_text(yaml.safe_dump(provenance(raw)))
+
+    assert status.main(["--readme", str(target), "--live-dir", str(live)]) == 0
+
+    link = re.search(r"\[cadsr-access\]\(([^)]+)\)", target.read_text())
+    assert link is not None
+    relative, _, anchor = link.group(1).partition("#")
+    assert (target.parent / relative).resolve() == (
+        Path(__file__).resolve().parents[2] / "docs/upstream/cadsr.md"
+    )
+    assert anchor == "cadsr-access"
 
 
 def test_exact_live_table_with_scenario_and_credential_precedence(monkeypatch):

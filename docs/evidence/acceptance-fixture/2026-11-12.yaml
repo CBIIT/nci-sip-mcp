@@ -1,0 +1,28 @@
+kind: native-fixture-report
+report: 2026-11-12.json
+sha256: a5f55f31c76ee88ca7e6df071968e12d20b95e45e87d38996debedc5f982f8cf
+bytes: 239956
+source_sha: 52521535f34c28288b3b6615d0bea33548f8af88
+run: 43244797057
+branch: main
+artifact: 13955734610
+artifact_created_at: '2026-11-12T15:15:43Z'
+artifact_archive_sha256: 1d55035162bf386b41c25ead898d9c45bd5cf14aeee8bffe73d3c1a8ecdfa82d
+artifact_archive_bytes: 12172
+archive_member: fixture.json
+suite_original:
+  version: 0.37.2.dev1+g5252153
+  fixture_set: ncit_26.09d, recorded 2026-10-26
+  digest: 0d6c23d33fc23cb14a8986b5403574a782ea1b972907c1be7935c49342b97ea6
+run_original:
+  exit_status: 0
+  selected: 1005
+  finished: 1005
+  worker_crashes: 0
+outcomes:
+  passed: 1005
+failed_gates: []
+unrun_gates: []
+verification: Exact node membership and every outcome match acceptance/expected/fixture.json
+  at the source SHA. Original report bytes retained; fixture outcomes include correct
+  refusals/unavailability.

@@ -8,6 +8,7 @@ extra_css = ["assets/ncids.css", "assets/site.css"]
 nav = [
   { "Start here" = [
     { "Overview" = "README.md" },
+    { "Functional status" = "docs/functional-status.md" },
     { "Run locally" = "docs/local-guide.md" },
     { "Installer target interface" = "docs/installer-targets.md" },
     { "Quickstart" = "QUICKSTART.md" },

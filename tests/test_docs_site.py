@@ -13,6 +13,7 @@ PUBLIC_NAVIGATION = [
     {
         "Start here": [
             {"Overview": "README.md"},
+            {"Functional status": "docs/functional-status.md"},
             {"Run locally": "docs/local-guide.md"},
             {"Installer target interface": "docs/installer-targets.md"},
             {"Quickstart": "QUICKSTART.md"},
@@ -99,6 +100,7 @@ class SiteStagingTest(unittest.TestCase):
             {str(path.relative_to(self.destination)) for path in self.destination.rglob("*.md")},
             expected_pages,
         )
+        self.assertFalse((self.destination / "docs/evidence").exists())
         for name in (
             "docs/local-guide.md",
             "docs/installer-targets.md",

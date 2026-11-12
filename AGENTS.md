@@ -15,8 +15,9 @@ an upstream system is reported to its team and stays visible here (see the first
 below). Until NCI issues caDSR credentials, CDE Match and the lists-of-values API are tested
 against fixtures crafted from the published contracts; the data element API, vmMatch and
 Form API 2.0 are anonymous and may be tested live.
-The milestones and issues on GitHub (Phases 0 to 7 delivered; later phases open) are the plan. README.md gives the current
-status per tool group; QUICKSTART.md holds the usage details.
+The milestones and issues on GitHub (Phases 0 to 7 delivered; later phases open) are the plan.
+`docs/functional-status.md` gives dated functional status and evidence, linked from README.md;
+QUICKSTART.md holds the usage details.
 
 Documentation, from short to detailed: `README.md` (what the repository is, who it is for, the
 status per tool group), `QUICKSTART.md` (install and run; settings, tools, resources, error
@@ -89,7 +90,7 @@ pdm run mutation-gate                    # changed Python sites; review every su
 NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SI_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json  # fixture mode, prepared as in CI
 pdm run acceptance-expected check acceptance/fixture.json    # the report against the expected outcomes
 pdm run acceptance-expected update acceptance/fixture.json   # rewrite the expected outcomes
-pdm run acceptance-status                 # regenerate the README status table
+pdm run acceptance-status                 # regenerate the functional-status tables
 pdm run acceptance-selftest               # the acceptance harness's own tests
 pdm run spec-render                       # regenerate docs/specification.md from spec/
 pdm run quickstart-tools                  # regenerate the tool table of QUICKSTART.md from spec/
@@ -171,7 +172,7 @@ it.
 `acceptance/expected/fixture.json`. The job stays green while tools are not implemented or fail,
 and fails when an outcome differs from the expected one. A change that moves an outcome on purpose
 updates that file in the same pull request, written with `pdm run acceptance-expected update` from
-a fresh report, and `pdm run acceptance-status` updates the README table that follows from it; the
+a fresh report, and `pdm run acceptance-status` updates the functional-status tables that follow from it; the
 diff of `expected/fixture.json` is what the review reads. A base `passed` outcome that regresses or
 is removed also needs its exact base-bound transition in `acceptance/expected/regressions.yaml`.
 The `Acceptance (live)` workflow runs the
