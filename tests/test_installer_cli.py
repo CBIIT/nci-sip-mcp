@@ -1,9 +1,11 @@
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -266,6 +268,85 @@ class InstallerCliTest(unittest.TestCase):
         blocked = cast("list[dict[str, Any]]", record["blocked"])[0]
         self.assertEqual((code, blocked["missing"]), (1, ["Repair it."]))
         self.assertEqual(persisted.outcomes[0].status, "blocked")
+
+    def test_status_persists_progress_after_prerequisite_recovery(self):
+        cases = (
+            (
+                None,
+                0,
+                {
+                    "components": ["server"],
+                    "completed": ["check_prerequisites", "install", "configure", "verify"],
+                    "failed": [],
+                    "blocked": [],
+                    "pending": [],
+                    "nextAction": None,
+                },
+                (
+                    ("check_prerequisites", "completed"),
+                    ("install", "completed"),
+                    ("configure", "completed"),
+                    ("verify", "completed"),
+                ),
+            ),
+            (
+                "install",
+                1,
+                {
+                    "components": ["server"],
+                    "completed": ["check_prerequisites"],
+                    "failed": ["install"],
+                    "blocked": [],
+                    "pending": ["configure", "verify"],
+                    "nextAction": "Retry failed step install.",
+                },
+                (("check_prerequisites", "completed"), ("install", "failed")),
+            ),
+        )
+        for invalid, expected_code, expected_record, expected_outcomes in cases:
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                sentinel = root / "installation-applied"
+                stages = ("check_prerequisites", "install", "configure", "verify")
+                state = installer_state.InstallationState(
+                    2,
+                    "local",
+                    ("server",),
+                    tuple(installer_state.StepOutcome(step, "completed") for step in stages),
+                )
+                installer_state.write_state(root, state)
+                prerequisites = iter((False, True))
+
+                def verify(step, prerequisites=prerequisites, invalid=invalid):
+                    if step == "check_prerequisites":
+                        return next(prerequisites)
+                    return step != invalid
+
+                output, error = io.StringIO(), io.StringIO()
+                with (
+                    patch.object(installer.LocalActions, "verify", side_effect=verify),
+                    patch.object(installer.LocalActions, "missing_inputs", return_value=()),
+                    patch.object(installer.LocalActions, "apply", side_effect=sentinel.write_text),
+                    redirect_stdout(output),
+                    redirect_stderr(error),
+                ):
+                    code = installer.main(["status", "--target", "local", "--data-dir", directory])
+                self.assertEqual(code, expected_code)
+                self.assertEqual(json.loads(output.getvalue()), expected_record)
+                self.assertEqual(error.getvalue(), "")
+                self.assertEqual(
+                    installer_state.read_state(root, "local", ("server",)),
+                    installer_state.InstallationState(
+                        2,
+                        "local",
+                        ("server",),
+                        tuple(
+                            installer_state.StepOutcome(step, outcome)
+                            for step, outcome in expected_outcomes
+                        ),
+                    ),
+                )
+                self.assertFalse(sentinel.exists())
 
     def test_failed_and_pending_state_commands_exit_nonzero(self):
         states = (

@@ -40,6 +40,9 @@ and the status snapshot hold `installer-state.lock`. State version 2 binds the t
 components, local transport and domain profile. Version 1 is refused without migration. State
 uses an fsynced temporary sibling, atomic replacement and a directory fsync.
 
+`status` revalidates recorded stages and continues after verified recovery, stopping at the
+first unresolved stage. It never installs or applies steps; unrecorded stages stay pending.
+
 Non-restart runs reverify from the beginning; the first stale step and later records are
 discarded. Missing prerequisites are BLOCKED with static corrections. HTTP readiness failures
 with no missing input are FAILED. Stdio launch or timeout failures, and any unsuccessful server
