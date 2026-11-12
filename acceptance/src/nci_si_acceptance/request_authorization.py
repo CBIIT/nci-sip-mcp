@@ -15,7 +15,13 @@ from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 from nci_si_acceptance.concepts import MAX_BATCH
 from nci_si_mcp.errors import safe_correlation
 from nci_si_mcp.http_client import RequestPolicyError
-from nci_si_mcp.validation import RELEASE_CHANNELS, RELEASE_FORM, ReleaseChannel, RequestMethod
+from nci_si_mcp.validation import (
+    NCIT_CODE_FORM,
+    RELEASE_CHANNELS,
+    RELEASE_FORM,
+    ReleaseChannel,
+    RequestMethod,
+)
 
 # These fields belong to direct transport framing, not caller-selected request content.
 TRANSPORT_HEADERS = frozenset(
@@ -291,7 +297,7 @@ class ConceptRequestFamily:
         ExactRequestFamily(self.request, self.correlation, self.release)
         _require(self.request.method == "GET" and self.request.body is None)
         _require(self.request.url.endswith("/api/v1/concept/{release}"))
-        _strings(self.codes, r"C[0-9]+")
+        _strings(self.codes, NCIT_CODE_FORM)
         _strings(self.includes, r"[A-Za-z]+(?:,[A-Za-z]+)*")
         _strings(self.relations, r"[A-Za-z]+")
 
