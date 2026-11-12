@@ -9,12 +9,15 @@ from contextlib import suppress
 from pathlib import Path
 
 import anyio
+import pytest
+from test_request_supervision import authorization, failure_leaves
 
 from nci_si_acceptance import request_children
 from nci_si_acceptance.client import open_session
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_stdio import StdioOwner
 from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_si_mcp.errors import RequestPolicyError
 
 
 async def _reap_for_test(resource):
@@ -208,3 +211,71 @@ def test_held_stderr_sink_cannot_block_finish_scheduling_past_shared_deadline(
     assert resource.process.returncode is not None
     assert returned, "finish blocked in portal scheduling beyond shared deadline\n" + blocked_stack
     assert failures, "unproved blocked cleanup cannot report settlement"
+
+
+@pytest.mark.parametrize("held_after_portal_exit", [False, True])
+def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
+    tmp_path, monkeypatch, held_after_portal_exit
+):
+    replies = tmp_path / "replies.json"
+    replies.write_text("[]")
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    entered, release = threading.Event(), threading.Event()
+
+    def held_schedule():
+        entered.set()
+        release.wait()
+
+    async def immediate():
+        return "ready"
+
+    async def pending():
+        entered.set()
+        await anyio.sleep_forever()
+
+    resource = None
+    try:
+        with (
+            pytest.raises(BaseException) as outward,
+            owner,
+            open_session(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("live_content_server.py")),
+                    str(replies),
+                ],
+                {},
+                errlog=io.StringIO(),
+                timeout=3,
+                owner=owner,
+            ) as session,
+        ):
+            resource = session._resource
+            resource.read_seconds = 0.05
+            assert session._call(immediate) == "ready"
+            with pytest.raises(RequestPolicyError) as timeout:
+                resource.call(held_schedule) if held_after_portal_exit else session._call(pending)
+            assert entered.is_set() and timeout.value.reason == "deadline"
+            calls = tuple(owner_ for owner_, _ in resource._calls._owners.values())
+            assert any(call.thread.is_alive() for call in calls)
+            assert owner.snapshot()["observationComplete"] is False
+            if held_after_portal_exit:
+                monkeypatch.setattr(request_children, "CLEANUP_SECONDS", 0.1)
+        assert timeout.value in failure_leaves(outward.value)
+        assert owner.pending_owners == ((resource.name,) if held_after_portal_exit else ())
+        assert owner.snapshot()["observationComplete"] is (not held_after_portal_exit)
+        assert owner.snapshot()["state"] == "failed"
+        assert not resource.thread.is_alive()
+        assert any(call.thread.is_alive() for call in calls) is held_after_portal_exit
+        assert resource.waited and resource.closed == {"stdin", "stdout", "stderr"}
+    finally:
+        release.set()
+        if resource is not None:
+            for call, _ in resource._calls._owners.values():
+                if call.thread.ident is not None:
+                    call.thread.join(5)
+                assert not call.thread.is_alive()
+            resource._stop.set()
+            resource._client_stop.set()
+            resource.thread.join(5)
+            assert not resource.thread.is_alive()
