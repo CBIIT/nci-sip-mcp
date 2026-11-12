@@ -21,11 +21,13 @@ from nci_si_acceptance.request_authorization import (
     MAX_COUNTER,
     Authorization,
     Limits,
+    ReleaseTarget,
     RequestGrant,
     RunDescriptor,
 )
 from nci_si_acceptance.request_summary import read_summary
 from nci_si_mcp.http_client import RequestPolicyError
+from nci_si_mcp.release import ReleaseContext
 from nci_si_mcp.request_policy import TransportStart
 from nci_si_mcp.validation import LedgerState, PolicyReason
 
@@ -130,6 +132,10 @@ class ControlledRun:
                     reserved INTEGER, consumed INTEGER, entered INTEGER
                 ) STRICT;
                 CREATE TABLE workers (name TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE release_bindings (
+                    terminology TEXT, channel TEXT, version TEXT, pinned TEXT, mac BLOB,
+                    PRIMARY KEY (terminology, channel)
+                ) STRICT;
                 CREATE TABLE supervision (enabled INTEGER, heartbeat REAL) STRICT;
                 INSERT INTO supervision VALUES (0, NULL);
                 CREATE TABLE requests (
@@ -151,6 +157,15 @@ class ControlledRun:
                 ),
             )
             connection.execute("INSERT INTO workers VALUES (?)", (self.participant,))
+            for terminology, channel in self._release_keys():
+                connection.execute(
+                    "INSERT INTO release_bindings VALUES (?,?,NULL,NULL,?)",
+                    (
+                        terminology,
+                        channel,
+                        self._release_mac((terminology, channel, None, None), key),
+                    ),
+                )
         os.chmod(self.directory / "ledger.sqlite", 0o600)
 
     @classmethod
@@ -196,6 +211,75 @@ class ControlledRun:
         ):
             self._deny("authorization")
         self.started = started
+        self._verify_releases(connection)
+
+    def _release_keys(self) -> set[tuple[str, str]]:
+        return {
+            (target.terminology, channel)
+            for target in self.authorization.release_targets()
+            for channel in target.channels
+        }
+
+    def _release_mac(self, fields: tuple[object, ...], key: bytes) -> bytes:
+        encoded = json.dumps(fields, separators=(",", ":"), allow_nan=False).encode()
+        return hmac.digest(
+            key, b"release-selection\0" + self._binding(key, self.started) + encoded, hashlib.sha256
+        )
+
+    def _verify_releases(self, connection: sqlite3.Connection) -> None:
+        expected = self._release_keys()
+        if not expected:
+            return
+        rows = connection.execute("SELECT * FROM release_bindings").fetchall()
+        if (
+            len(rows) != len(expected)
+            or {(row["terminology"], row["channel"]) for row in rows} != expected
+        ):
+            self._deny("authorization")
+        key = self._key()
+        for row in rows:
+            fields = (row["terminology"], row["channel"], row["version"], row["pinned"])
+            if not hmac.compare_digest(row["mac"], self._release_mac(fields, key)):
+                self._deny("authorization")
+
+    def _commit_release(self, selection: ReleaseContext) -> None:
+        """The checked controller path supplies the real resolver's validated selection."""
+        fields = (
+            selection.terminology,
+            selection.channel,
+            selection.version,
+            selection.pinned_terminology,
+        )
+        with self._connection() as connection:
+            self._guard(connection)
+            old = connection.execute(
+                "SELECT version,pinned FROM release_bindings WHERE terminology=? AND channel=?",
+                fields[:2],
+            ).fetchone()
+            if old["version"] is not None:
+                if tuple(old) != fields[2:]:
+                    self._deny("authorization")
+                return
+            connection.execute(
+                "UPDATE release_bindings SET version=?,pinned=?,mac=? "
+                "WHERE terminology=? AND channel=?",
+                (*fields[2:], self._release_mac(fields, self._key()), *fields[:2]),
+            )
+
+    def _require_release(
+        self, connection: sqlite3.Connection, requirement: tuple[ReleaseTarget, str] | None
+    ) -> None:
+        if requirement is None:
+            return
+        target, pinned = requirement
+        for channel in target.channels:
+            row = connection.execute(
+                "SELECT pinned FROM release_bindings WHERE terminology=? AND channel=?",
+                (target.terminology, channel),
+            ).fetchone()
+            if row is not None and row["pinned"] == pinned:
+                return
+        self._deny("authorization")
 
     def _key(self) -> bytes:
         with (self.directory / "key").open("rb") as stream:
@@ -430,11 +514,20 @@ class ControlledRun:
 
     @contextmanager
     def logical(self, grant: RequestGrant) -> Iterator[LogicalRequest]:
-        if grant not in self.authorization.grants:
+        if type(grant) is not RequestGrant:
+            self._deny("authorization")
+        try:
+            admitted, requirement = self.authorization._match(
+                grant.method, grant.url, grant.headers, grant.body
+            )
+        except RequestPolicyError:
+            self._deny("authorization")
+        if admitted != grant:
             self._deny("authorization")
         request_id = uuid.uuid4().hex
         with self._connection() as connection:
             self._guard(connection)
+            self._require_release(connection, requirement)
             if (
                 connection.execute(
                     "UPDATE run SET logical=logical+1 WHERE logical<?",
