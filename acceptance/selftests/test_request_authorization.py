@@ -11,7 +11,10 @@ import pytest
 
 from nci_si_acceptance.request_authorization import (
     Authorization,
+    ConceptRequestFamily,
+    ExactRequestFamily,
     Limits,
+    ReleaseTarget,
     RequestGrant,
     RunDescriptor,
 )
@@ -178,9 +181,14 @@ def test_valid_authority_is_an_immutable_snapshot():
         ("credential_origin", "http://127.0.0.1:9"),
     ],
 )
-def test_each_request_field_changes_private_binding(field, value):
+@pytest.mark.parametrize("family", [False, True])
+def test_each_request_field_changes_private_binding(field, value, family):
     original = binding_authorization()
     changed = replace(original, grants=(replace(original.grants[0], **{field: value}),))
+    if family:
+        declared = ExactRequestFamily(original.grants[0])
+        changed = replace(original, families=(replace(declared, request=changed.grants[0]),))
+        original = replace(original, families=(declared,))
     assert changed.binding(b"k" * 32) != original.binding(b"k" * 32)
     assert changed.policy_sha256 == original.policy_sha256 == "a" * 64
 
@@ -378,6 +386,18 @@ def test_private_descriptor_refuses_extra_or_malformed_fields(changes):
     "make,field,value",
     [
         pytest.param(Limits, "logical", 1, id="limits"),
+        pytest.param(
+            lambda: ReleaseTarget("ncit", ("monthly",)), "channels", ("weekly",), id="target"
+        ),
+        pytest.param(
+            lambda: finite_family_authorization(False).families[0], "correlation", False, id="exact"
+        ),
+        pytest.param(
+            lambda: finite_family_authorization(True).families[0],
+            "correlation",
+            False,
+            id="concept",
+        ),
         pytest.param(binding_authorization, "policy_sha256", "b" * 64, id="authorization"),
         pytest.param(
             lambda: RunDescriptor("b" * 32, "a" * 64, Path("/owned")),
@@ -556,12 +576,14 @@ class AttachedInteger(int):
         pytest.param("method", AttachedText, id="method"),
         pytest.param("url", AttachedText, id="url"),
         pytest.param("headers", AttachedText, id="header-value"),
+        pytest.param("headers", NonfiniteText, id="header-nan"),
         pytest.param("body", AttachedBytes, id="body"),
         pytest.param("credential_origin", AttachedText, id="credential-origin"),
         pytest.param("logical", AttachedInteger, id="limit-integer"),
     ],
 )
-def test_binding_uses_scalar_values_without_dataclass_attachments(field, wrap):
+@pytest.mark.parametrize("family", [False, True])
+def test_binding_uses_scalar_values_without_dataclass_attachments(field, wrap, family):
     original = binding_authorization()
     if field == "policy_sha256":
         changed = replace(original, policy_sha256=wrap(original.policy_sha256))
@@ -575,8 +597,279 @@ def test_binding_uses_scalar_values_without_dataclass_attachments(field, wrap):
         else:
             value = wrap(value)
         changed = replace(original, grants=(replace(grant, **{field: value}),))
+    if family:
+        original = replace(original, families=(ExactRequestFamily(original.grants[0]),))
+        changed = replace(changed, families=(ExactRequestFamily(changed.grants[0]),))
     try:
         result = changed.binding(b"k" * 32)
     except (RequestPolicyError, TypeError, ValueError) as error:
         result = type(error), str(error)
     assert result == original.binding(b"k" * 32)
+
+
+def finite_family_authorization(concept):
+    grant = RequestGrant(
+        "GET",
+        "http://127.0.0.1:9/api/v1/concept/{release}",
+        (("accept", "application/json"),),
+        credential_origin="http://127.0.0.1:9",
+    )
+    target = ReleaseTarget("ncit", ("monthly",))
+    family = (
+        ConceptRequestFamily(grant, ("C4817",), ("summary",), ("parents",), target, True)
+        if concept
+        else ExactRequestFamily(grant, True, target)
+    )
+    return replace(binding_authorization(), families=(family,))
+
+
+@pytest.mark.parametrize("code", ["C0", "C01"])
+def test_concept_family_requires_canonical_ncit_codes(code):
+    family = finite_family_authorization(True).families[0]
+    for valid in ("C1", "C10"):
+        assert replace(family, codes=(valid,)).codes == (valid,)
+    with pytest.raises(Exception) as refused:
+        replace(family, codes=(code,))
+    assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert refused.value.reason == "authorization"
+
+
+@pytest.mark.parametrize("concept", [False, True])
+def test_correlation_disabled_family_admits_exact_fixed_metadata(concept):
+    original = finite_family_authorization(concept)
+    family = replace(original.families[0], correlation=False)
+    authority = replace(original, families=(family,))
+    url = "http://127.0.0.1:9/api/v1/concept/ncit_26.09e"
+    if concept:
+        url += "/C4817?include=summary"
+    headers = (("accept", "application/json"),)
+    expected = RequestGrant("GET", url, headers, credential_origin="http://127.0.0.1:9")
+    try:
+        admitted = authority.admit("GET", url, headers, None)
+    except RequestPolicyError as error:
+        admitted = error
+    assert admitted == expected
+    with pytest.raises(Exception) as denied:
+        authority.admit("GET", url, (*headers, ("x-correlation-id", "ungranted")), None)
+    assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert denied.value.reason == "authorization"
+
+
+@pytest.mark.parametrize("concept", [False, True])
+@pytest.mark.parametrize("url", [None, 7, b"http://127.0.0.1:9/owned"])
+def test_family_malformed_destination_has_sanitized_refusal(concept, url):
+    authority = finite_family_authorization(concept)
+    with pytest.raises(Exception) as denied:
+        authority.admit("GET", url, (("accept", "application/json"),), None)
+    assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert denied.value.reason == "authorization"
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    ["/C4817", "/C4817?include=full", "/C4817?include=summary&extra=1", "/C4817/parents?x=1"],
+)
+def test_single_concept_and_relation_refuse_ungranted_query(suffix):
+    authority = finite_family_authorization(True)
+    base = "http://127.0.0.1:9/api/v1/concept/ncit_26.09e"
+    headers = (("accept", "application/json"),)
+    for valid in ("/C4817?include=summary", "/C4817/parents"):
+        assert authority.admit("GET", base + valid, headers, None) == RequestGrant(
+            "GET", base + valid, headers, credential_origin="http://127.0.0.1:9"
+        )
+    with pytest.raises(Exception) as denied:
+        authority.admit("GET", base + suffix, headers, None)
+    assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert denied.value.reason == "authorization"
+
+
+@pytest.mark.parametrize("kind", ["iterator", "foreign", "extended"])
+def test_family_constructor_refuses_unsupported_shapes_without_consuming(kind):
+    original = finite_family_authorization(False)
+    family = original.families[0]
+
+    @dataclass(frozen=True, slots=True)
+    class ExtendedFamily(ExactRequestFamily):
+        extra: int = 1
+
+    iterator = iter((family,))
+    invalid = {
+        "iterator": iterator,
+        "foreign": (object(),),
+        "extended": (ExtendedFamily(family.request, True, family.release),),
+    }
+    for valid in ([family], (family,)):
+        assert replace(original, families=valid).families == (family,)
+    with pytest.raises(Exception) as denied:
+        replace(original, families=invalid[kind])
+    assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert denied.value.reason == "authorization"
+    if kind == "iterator":
+        assert tuple(iterator) == (family,)
+
+
+@pytest.mark.parametrize(
+    "concept,expected",
+    [
+        (False, "79a7058f12fd4e3f2d21effee77af53628a664c92c4281bf32776738defa204d"),
+        (True, "b5e801da90dbc8905782eb14d26f003e902a93785c4a77daaeb272ec3453a0c4"),
+    ],
+)
+@pytest.mark.parametrize("field", [None, "method", "url", "headers", "credential_origin"])
+def test_family_scalar_binding_matches_independent_vector(concept, expected, field):
+    original = finite_family_authorization(concept)
+    family = original.families[0]
+    if field is not None:
+        value = (
+            (("accept", NonfiniteText("application/json")),)
+            if field == "headers"
+            else NonfiniteText(getattr(family.request, field))
+        )
+        family = replace(family, request=replace(family.request, **{field: value}))
+    changed = replace(original, families=(family,))
+    try:
+        result = changed.binding(b"k" * 32).hex()
+    except (RequestPolicyError, TypeError, ValueError) as error:
+        result = type(error), str(error)
+    # Literal canonical records independently checked with OpenSSL; no serializer oracle.
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("codes", ("C2991",)),
+        ("includes", ("full",)),
+        ("relations", ("children",)),
+        ("release", ReleaseTarget("ncit", ("weekly",))),
+        ("correlation", False),
+    ],
+)
+def test_each_concept_family_authority_field_changes_binding(field, value):
+    original = finite_family_authorization(True)
+    changed = replace(original, families=(replace(original.families[0], **{field: value}),))
+    assert changed.binding(b"k" * 32) != original.binding(b"k" * 32)
+
+
+@pytest.mark.parametrize(
+    "kind,field,value",
+    [
+        pytest.param("target", "terminology", 7, id="terminology-type"),
+        pytest.param("target", "terminology", "NCIt", id="terminology-grammar"),
+        pytest.param("target", "channels", ["monthly"], id="channels-list"),
+        pytest.param("target", "channels", (), id="channels-empty"),
+        pytest.param("target", "channels", (7,), id="channel-type"),
+        pytest.param("target", "channels", (NonfiniteText("monthly"),), id="channel-subclass"),
+        pytest.param("target", "channels", ("annual",), id="channel-unknown"),
+        pytest.param("target", "channels", ("monthly", "monthly"), id="channel-duplicate"),
+        pytest.param("exact", "request", object(), id="request-type"),
+        pytest.param("exact", "correlation", 1, id="correlation-type"),
+        pytest.param("exact", "release", object(), id="release-type"),
+        pytest.param("exact", "release", None, id="unresolved-template"),
+        pytest.param("exact", "headers", (("x-correlation-id", "owned"),), id="fixed-and-dynamic"),
+        *[
+            pytest.param("exact", "headers", ((name, "owned"),), id=f"reserved-{name}")
+            for name in (
+                "host",
+                "content-length",
+                "transfer-encoding",
+                "connection",
+                "proxy-authorization",
+                "proxy-connection",
+                "expect",
+                "upgrade",
+                "te",
+                "trailer",
+                "accept-encoding",
+                "cookie",
+            )
+        ],
+        pytest.param("plain", "url", "/owned{", id="unbound-open"),
+        pytest.param("plain", "url", "/owned}", id="unbound-close"),
+        pytest.param("exact", "url", "/api/v1/version", id="missing-template"),
+        pytest.param("exact", "url", "/{release}/{release}", id="repeated-template"),
+        pytest.param("exact", "url", "/owned?release={release}", id="query-template"),
+        pytest.param("exact", "url", "/prefix{release}", id="embedded-template"),
+        pytest.param("exact", "url", "/{release}/{", id="extra-open"),
+        pytest.param("exact", "url", "/{release}/}", id="extra-close"),
+        pytest.param("concept", "correlation", 1, id="concept-exact-delegation"),
+        pytest.param("concept", "method", "POST", id="concept-method"),
+        pytest.param("concept", "body", b"{}", id="concept-body"),
+        pytest.param("concept", "url", "/other/{release}", id="concept-base"),
+        *[
+            pytest.param("concept", field, value, id=f"{field}-{defect}")
+            for field, valid, bad in (
+                ("codes", ("C4817",), ("Cbad",)),
+                ("includes", ("summary",), ("summary,",)),
+                ("relations", ("parents",), ("parents/child",)),
+            )
+            for defect, value in (
+                ("empty", ()),
+                ("list", list(valid)),
+                ("duplicate", valid * 2),
+                ("type", (7,)),
+                ("grammar", bad),
+            )
+        ],
+    ],
+)
+def test_finite_authority_records_refuse_malformed_fields(kind, field, value):
+    declared = finite_family_authorization(True).families[0]
+    records = {
+        "target": ReleaseTarget("ncit", ("monthly",)),
+        "plain": ExactRequestFamily(
+            replace(
+                finite_family_authorization(False).families[0].request,
+                url="http://127.0.0.1:9/owned",
+            )
+        ),
+        "exact": finite_family_authorization(False).families[0],
+        "concept": ConceptRequestFamily(
+            declared.request,
+            declared.codes,
+            declared.includes,
+            declared.relations,
+            declared.release,
+        ),
+    }
+    record = records[kind]
+    assert records["plain"].correlation is False and records["concept"].correlation is False
+    assert records["target"].channels == ("monthly",)
+    assert records["exact"].request.method == records["concept"].request.method == "GET"
+    if field in ("headers", "url", "method", "body"):
+        changed = "http://127.0.0.1:9" + value if field == "url" else value
+        request = replace(record.request, **{field: changed})
+        changes = {"request": request}
+        if field == "headers" and value == (("x-correlation-id", "owned"),):
+            fixed = replace(record, request=request, correlation=False)
+            assert fixed.request.headers == value and fixed.correlation is False
+    else:
+        changes = {field: value}
+    with pytest.raises(Exception) as refused:
+        replace(record, **changes)
+    assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert refused.value.reason == "authorization"

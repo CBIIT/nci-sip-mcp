@@ -2017,6 +2017,8 @@ def test_transport_timeout_refuses_invalid_maximum(tmp_path, maximum):
 
 
 def test_transport_timeout_uses_verified_run_origin(tmp_path, monkeypatch):
+    # An exact origin keeps this deadline assertion independent of float rounding.
+    monkeypatch.setattr(request_budget_module, "_clock", lambda: 1000.0)
     with retirement_run(tmp_path) as (run, _grant):
         assert hasattr(run, "timeout"), "Transport timeout must use guarded ledger time."
         origin = run.started
@@ -2256,3 +2258,22 @@ def test_pending_entry_receipt_refuses_body_read(tmp_path):
             # Only the deliberately injected inconsistency is repaired for ordinary release.
             with storage:
                 storage.execute("UPDATE leases SET entry_pending=0 WHERE id=?", (lease.lease_id,))
+
+
+def test_wrong_logical_record_has_sanitized_refusal(tmp_path):
+    with retirement_run(tmp_path) as (run, _grant):
+        entered = []
+
+        def reserve():
+            with run.logical(object()):
+                entered.append(True)
+
+        assert refusal(reserve) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert entered == []
+        result = run.snapshot()
+        assert (result.logical, result.attempts, result.transport_entries) == (0, 0, 0)
+        assert (result.state, result.failure) == ("failed", "authorization")

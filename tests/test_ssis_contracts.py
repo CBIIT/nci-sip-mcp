@@ -444,6 +444,27 @@ class SSISRegisterTest(unittest.TestCase):
             ]
             self.assertEqual(actual, expected)
 
+    def test_registered_request_arguments_are_exact(self):
+        entries = yaml.safe_load(REGISTER.read_text())["queries"]
+        self.assertEqual(
+            [(entry["operation"], entry["args"], entry["kwargs"]) for entry in entries],
+            [
+                ("get_graph_identities", [], {}),
+                ("find_data_elements", ["C17357"], {"expand_descendants": False, "maximum": 1000}),
+                ("find_data_elements", ["C17357"], {"expand_descendants": True, "maximum": 1000}),
+                (
+                    "find_permissible_values",
+                    ["C20197"],
+                    {"expand_descendants": False, "maximum": 1000},
+                ),
+                (
+                    "find_permissible_values",
+                    ["C17357"],
+                    {"expand_descendants": True, "maximum": 1000},
+                ),
+            ],
+        )
+
     def test_real_client_requests_match_independent_evidence_only_parameters_vary(self):
         register = yaml.safe_load(REGISTER.read_text())
         for entry in register["queries"]:
@@ -464,10 +485,17 @@ class SSISRegisterTest(unittest.TestCase):
                     (captured.path, captured.accept),
                     (expected["path"], expected["headers"]["Accept"]),
                 )
-                self.assertEqual(set(captured.fields), {"query"})
-                self.assertEqual(
-                    normalized(captured.fields["query"]), normalized(expected["form"]["query"])
-                )
+                expected_query = expected["form"]["query"]
+                if entry["id"] == "values-descendants":
+                    # The independent recording has this one graph block on three lines.
+                    # Declare the current packet's exact formatting; this grants no transport.
+                    expected_query = expected_query.replace(
+                        "  GRAPH <http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.rdf> {\n"
+                        "    ?concept rdfs:subClassOf* ncit:C17357 .\n  }",
+                        "  GRAPH <http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.rdf> "
+                        "{ ?concept rdfs:subClassOf* ncit:C17357 . }",
+                    )
+                self.assertEqual(captured.fields, {"query": expected_query})
                 self.assertEqual(
                     captured.fields["query"].split()[-2:], ["LIMIT", str(entry["limit"])]
                 )

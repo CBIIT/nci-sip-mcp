@@ -1,0 +1,58 @@
+# Explicit finite forms only; furnished caller adoption remains #448.
+version: 1
+correlation: true
+channels: [monthly, weekly]
+includes:
+  - minimal
+  - summary
+  - synonyms
+  - definitions
+  - properties
+  - parents
+  - children
+  - roles
+  - inverseRoles
+  - associations
+  - inverseAssociations
+  - maps
+  - history
+  - full
+  - summary,definitions,synonyms,properties
+  - summary,definitions,synonyms,properties,parents,children,roles,inverseRoles,associations,inverseAssociations
+relations: [parents, children, roles, inverseRoles, associations, inverseAssociations, maps]
+# Recorded GO has no reviewed selection contract. Invalid-release and restricted-MDR
+# scenarios are also intentionally ungranted; these are distinct from unknown forms.
+exact:
+  - recorded/evs/terminologies.json
+  - recorded/evs/roles.json
+  - recorded/evs/associations.json
+  - recorded/evs/search-contains.json
+  - recorded/evs/search-contains-page-2.json
+  - recorded/evs/search-starts-with.json
+  - recorded/evs/search-retired-default.json
+  - recorded/evs/search-retired-only.json
+  - recorded/evs/search-retired-only-page-2.json
+  - recorded/evs/search-retired-typeahead.json
+  - recorded/evs/search-no-match.json
+  - recorded/evs/paths-to-root.json
+  - recorded/evs/descendants-c4817-level-2.json
+  - recorded/evs/replacement-active.json
+  - recorded/evs/replacement-merge-c15368.json
+  - recorded/evs/concept-statuses.json
+  - recorded/evs/replacement-retired.json
+  - recorded/evs/replacements-active.json
+  - recorded/evs/subset-gdc-unpinned.json
+  - recorded/evs/subset-gdc-members.json
+  - recorded/evs/mapsets.json
+  - recorded/evs/mapset-gdc.json
+  - recorded/evs/mapset-gdc-maps-value.json
+  - recorded/evs/mapset-gdc-maps-code.json
+  - recorded/evs/mapset-gdc-maps-none.json
+  - recorded/evs-fhir/expand-c85492.json
+  - scenarios/batch/silent-drop/concepts/C999999999.json
+  - scenarios/retired/with-replacement/concepts/C154421.json
+  - scenarios/retired/with-replacement/replacement.json
+  - scenarios/retired/with-replacement/replacements.json
+  - scenarios/retired/with-replacement/replacements-with-active.json
+# Recognition and identity only: both Shared SI destinations remain held and ungranted.
+paused_queries: [graph-identities, elements-exact, elements-descendants, values-exact, values-descendants]

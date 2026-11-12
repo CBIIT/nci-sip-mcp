@@ -10,30 +10,13 @@ from typing import NoReturn
 from urllib.parse import urlsplit
 from urllib.request import Request
 
-from nci_si_acceptance.request_authorization import RequestGrant, destination
+from nci_si_acceptance.request_authorization import TRANSPORT_HEADERS, RequestGrant, destination
 from nci_si_acceptance.request_budget import AttemptLease, ControlledRun, LogicalRequest
 from nci_si_mcp.bounds import CallDeadlineError, RequestBudgetError, check_deadline
 from nci_si_mcp.http_client import RequestPolicyError
 from nci_si_mcp.request_policy import ControlledRequest, Exchange, TransportStart
 from nci_si_mcp.validation import PolicyReason
 
-# These fields belong to direct transport framing, not caller-selected request content.
-TRANSPORT_HEADERS = frozenset(
-    (
-        "host",
-        "content-length",
-        "transfer-encoding",
-        "connection",
-        "proxy-authorization",
-        "proxy-connection",
-        "expect",
-        "upgrade",
-        "te",
-        "trailer",
-        "accept-encoding",
-        "cookie",
-    )
-)
 # Core error classification consumes a bounded prefix, independently of the success limit.
 ERROR_BYTES = 4096
 
@@ -178,16 +161,12 @@ class ControlledHttpPolicy:
         names = [name for name, _ in pairs]
         if len(set(names)) != len(names) or TRANSPORT_HEADERS.intersection(names):
             self.run.refuse("authorization")
-        headers = tuple(sorted(pairs))
-        for grant in self.run.authorization.grants:
-            if (request.get_method(), request.full_url, headers, request.data) == (
-                grant.method,
-                grant.url,
-                grant.headers,
-                grant.body,
-            ):
-                return grant
-        self.run.refuse("authorization")
+        try:
+            return self.run.authorization.admit(
+                request.get_method(), request.full_url, pairs, request.data
+            )
+        except RequestPolicyError:
+            self.run.refuse("authorization")
 
     @contextmanager
     def request(self, request: Request) -> Iterator[ControlledRequest]:
