@@ -1,5 +1,8 @@
 """Reviewed finite forms reach only their selected destination with immutable metadata."""
 
+from dataclasses import FrozenInstanceError, replace
+
+import pytest
 from http_receiver import WireReceiver
 
 from nci_si_acceptance.environments import SURFACES, Environment
@@ -13,6 +16,24 @@ from nci_si_mcp.invocation import call
 # Two separately correlated calls each receive the independently twelve-byte response.
 EXPECTED_CONTACTS = 2
 EXPECTED_BODY_BYTES = 24
+
+
+def test_compiled_policy_keeps_private_fields_out_of_representation():
+    origin, credential = "http://127.0.0.1:9/private-origin", "synthetic-policy-license-key"
+    policy = compile_policy(
+        Environment(
+            "evs-only",
+            dict.fromkeys(SURFACES) | {"evs": origin},
+            {"NCI_SI_EVS_LICENSE_KEY": credential},
+            "e" * 64,
+        )
+    )
+    grant = policy.authorization.grants[0]
+    assert policy.authorization.admit(grant.method, grant.url, grant.headers, grant.body) == grant
+    assert origin not in repr(policy) and credential not in repr(policy)
+    with pytest.raises(FrozenInstanceError):
+        policy.authorization = replace(policy.authorization, policy_sha256="a" * 64)
+    assert policy.authorization.grants == (grant,)
 
 
 def correlated_responses(owner, origin, identifiers):

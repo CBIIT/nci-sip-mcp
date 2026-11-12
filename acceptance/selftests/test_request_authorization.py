@@ -623,6 +623,96 @@ def finite_family_authorization(concept):
     return replace(binding_authorization(), families=(family,))
 
 
+@pytest.mark.parametrize("concept", [False, True])
+def test_correlation_disabled_family_admits_exact_fixed_metadata(concept):
+    original = finite_family_authorization(concept)
+    family = replace(original.families[0], correlation=False)
+    authority = replace(original, families=(family,))
+    url = "http://127.0.0.1:9/api/v1/concept/ncit_26.09e"
+    if concept:
+        url += "/C4817?include=summary"
+    headers = (("accept", "application/json"),)
+    expected = RequestGrant("GET", url, headers, credential_origin="http://127.0.0.1:9")
+    try:
+        admitted = authority.admit("GET", url, headers, None)
+    except RequestPolicyError as error:
+        admitted = error
+    assert admitted == expected
+    with pytest.raises(Exception) as denied:
+        authority.admit("GET", url, (*headers, ("x-correlation-id", "ungranted")), None)
+    assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert denied.value.reason == "authorization"
+
+
+@pytest.mark.parametrize("concept", [False, True])
+@pytest.mark.parametrize("url", [None, 7, b"http://127.0.0.1:9/owned"])
+def test_family_malformed_destination_has_sanitized_refusal(concept, url):
+    authority = finite_family_authorization(concept)
+    with pytest.raises(Exception) as denied:
+        authority.admit("GET", url, (("accept", "application/json"),), None)
+    assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert denied.value.reason == "authorization"
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    ["/C4817", "/C4817?include=full", "/C4817?include=summary&extra=1", "/C4817/parents?x=1"],
+)
+def test_single_concept_and_relation_refuse_ungranted_query(suffix):
+    authority = finite_family_authorization(True)
+    base = "http://127.0.0.1:9/api/v1/concept/ncit_26.09e"
+    headers = (("accept", "application/json"),)
+    for valid in ("/C4817?include=summary", "/C4817/parents"):
+        assert authority.admit("GET", base + valid, headers, None) == RequestGrant(
+            "GET", base + valid, headers, credential_origin="http://127.0.0.1:9"
+        )
+    with pytest.raises(Exception) as denied:
+        authority.admit("GET", base + suffix, headers, None)
+    assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert denied.value.reason == "authorization"
+
+
+@pytest.mark.parametrize("kind", ["iterator", "foreign", "extended"])
+def test_family_constructor_refuses_unsupported_shapes_without_consuming(kind):
+    original = finite_family_authorization(False)
+    family = original.families[0]
+
+    @dataclass(frozen=True, slots=True)
+    class ExtendedFamily(ExactRequestFamily):
+        extra: int = 1
+
+    iterator = iter((family,))
+    invalid = {
+        "iterator": iterator,
+        "foreign": (object(),),
+        "extended": (ExtendedFamily(family.request, True, family.release),),
+    }
+    for valid in ([family], (family,)):
+        assert replace(original, families=valid).families == (family,)
+    with pytest.raises(Exception) as denied:
+        replace(original, families=invalid[kind])
+    assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert denied.value.reason == "authorization"
+    if kind == "iterator":
+        assert tuple(iterator) == (family,)
+
+
 @pytest.mark.parametrize(
     "concept,expected",
     [
@@ -674,6 +764,7 @@ def test_each_concept_family_authority_field_changes_binding(field, value):
         pytest.param("target", "channels", ["monthly"], id="channels-list"),
         pytest.param("target", "channels", (), id="channels-empty"),
         pytest.param("target", "channels", (7,), id="channel-type"),
+        pytest.param("target", "channels", (NonfiniteText("monthly"),), id="channel-subclass"),
         pytest.param("target", "channels", ("annual",), id="channel-unknown"),
         pytest.param("target", "channels", ("monthly", "monthly"), id="channel-duplicate"),
         pytest.param("exact", "request", object(), id="request-type"),

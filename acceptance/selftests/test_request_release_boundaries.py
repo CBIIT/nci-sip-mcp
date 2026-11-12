@@ -4,17 +4,19 @@ import json
 import sqlite3
 from contextlib import closing, contextmanager
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from http_receiver import WireReceiver
 from test_request_metadata import selected
 from test_request_release_selection import response
 
-from nci_si_acceptance import request_catalogue
+from nci_si_acceptance import request_budget, request_catalogue
 from nci_si_acceptance.request_budget import ControlledRun
 from nci_si_acceptance.request_catalogue import compile_policy
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_acceptance.request_transport import ControlledHttpPolicy
+from nci_si_mcp.errors import correlated
 from nci_si_mcp.http_client import HttpClient, RequestPolicyError
 from nci_si_mcp.invocation import call
 
@@ -334,7 +336,8 @@ def test_corrupt_or_missing_selection_state_never_resets(tmp_path, statement):
                 )
 
 
-def test_duplicate_authentic_selection_rows_refuse_before_content(tmp_path):
+@pytest.mark.parametrize("substitute", [False, True])
+def test_duplicate_authentic_selection_rows_refuse_before_content(tmp_path, substitute):
     with scenario(tmp_path, [[ROW], {"ok": True}]) as (receiver, policy, owner):
 
         def duplicate_and_read():
@@ -346,6 +349,19 @@ def test_duplicate_authentic_selection_rows_refuse_before_content(tmp_path):
                     INSERT INTO release_bindings
                         SELECT * FROM original_bindings WHERE channel='monthly';
                 """)
+                if substitute:
+                    with connection:
+                        connection.execute("DELETE FROM release_bindings WHERE channel='weekly'")
+                count = connection.execute("SELECT COUNT(*) FROM release_bindings").fetchone()[0]
+                keys = connection.execute(
+                    "SELECT terminology,channel FROM release_bindings ORDER BY channel"
+                ).fetchall()
+                assert count == (2 if substitute else 3)
+                assert keys == (
+                    [("ncit", "monthly")] * 2
+                    if substitute
+                    else [("ncit", "monthly"), ("ncit", "monthly"), ("ncit", "weekly")]
+                )
             return client(receiver, owner).get_json(ROOT, {"list": "C4817", "include": "summary"})
 
         with pytest.raises(ExceptionGroup) as failed:
@@ -362,7 +378,114 @@ def test_duplicate_authentic_selection_rows_refuse_before_content(tmp_path):
                 1,
                 1,
             )
-            assert connection.execute("SELECT COUNT(*) FROM release_bindings").fetchone() == (3,)
+            assert connection.execute("SELECT COUNT(*) FROM release_bindings").fetchone() == (
+                2 if substitute else 3,
+            )
+
+
+@pytest.mark.parametrize("channel,reason", [("weekly", "authorization"), ("monthly", "deadline")])
+def test_expired_selection_preserves_public_refusal_order(tmp_path, monkeypatch, channel, reason):
+    declaration = tmp_path / "policy.yaml"
+    declaration.write_text(
+        request_catalogue.POLICY.read_text()
+        .replace("[monthly, weekly]", "[monthly]")
+        .replace("correlation: true", "correlation: false")
+    )
+    monkeypatch.setattr(request_catalogue, "POLICY", declaration)
+    with WireReceiver() as receiver:
+        policy = compile_policy(selected(receiver.origin))
+        run = ControlledRun.create(policy.authorization, tmp_path)
+        run.open()
+        with monkeypatch.context() as clock, correlated("owned-expired-selection"):
+            clock.setattr(
+                request_budget,
+                "time",
+                SimpleNamespace(monotonic=lambda: run.started + run.authorization.limits.seconds),
+            )
+            with pytest.raises(Exception) as denied:
+                policy.select_release(run, channel=channel)
+        assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert denied.value.reason == reason
+        # Cleanup is a distinct public operation, outside the expired clock/context.
+        run.close()
+        snapshot = run.snapshot()
+        assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (0, 0, 0)
+        assert snapshot.failure == reason and snapshot.state == "failed"
+        assert receiver.contacts == 0 and receiver.requests == []
+
+
+def test_expiry_after_validated_discovery_never_commits_selection(tmp_path, monkeypatch):
+    with WireReceiver([response([ROW])]) as receiver:
+        policy = compile_policy(selected(receiver.origin))
+        run = ControlledRun.create(policy.authorization, tmp_path)
+        run.open()
+        resolve = request_catalogue.resolve_evs_release
+
+        def discover_then_expire(*args):
+            selection = resolve(*args)
+            restore.setattr(
+                request_budget,
+                "time",
+                SimpleNamespace(monotonic=lambda: run.started + run.authorization.limits.seconds),
+            )
+            return selection
+
+        with monkeypatch.context() as restore:
+            restore.setattr(request_catalogue, "resolve_evs_release", discover_then_expire)
+            with pytest.raises(Exception) as denied:
+                policy.select_release(run, channel="monthly")
+        assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
+        assert denied.value.reason == "deadline"
+        run.close()
+        snapshot = run.snapshot()
+        assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (1, 1, 1)
+        assert snapshot.failure == "deadline" and snapshot.state == "failed"
+        assert receiver.contacts == 1 and len(receiver.requests) == 1
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection:
+            assert connection.execute(
+                "SELECT version,pinned FROM release_bindings WHERE channel='monthly'"
+            ).fetchall() == [(None, None)]
+
+
+def test_nonfinite_altered_ledger_preserves_initiating_and_cleanup_refusals(tmp_path):
+    with WireReceiver() as receiver:
+        policy = compile_policy(selected(receiver.origin))
+        run = ControlledRun.create(policy.authorization, tmp_path)
+        run.open()
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection:
+            connection.executescript("""
+                ALTER TABLE release_bindings RENAME TO original_bindings;
+                CREATE TABLE release_bindings AS
+                    SELECT terminology,channel,CAST(version AS REAL) AS version,pinned,mac
+                    FROM original_bindings;
+                UPDATE release_bindings SET version=1e999 WHERE channel='monthly';
+            """)
+            assert connection.execute(
+                "SELECT typeof(version),version FROM release_bindings WHERE channel='monthly'"
+            ).fetchone() == ("real", float("inf"))
+        failures = []
+        for operation in (lambda: policy.select_release(run, channel="monthly"), run.close):
+            with pytest.raises(Exception) as denied:
+                operation()
+            assert type(denied.value) is RequestPolicyError
+            failures.append((str(denied.value), denied.value.reason, denied.value.__cause__))
+        assert failures == [("Controlled upstream request refused.", "accounting", None)] * 2
+        assert receiver.contacts == 0 and receiver.requests == []
+        assert (run.directory / "failed").read_text() == "accounting"
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as connection:
+            assert connection.execute("SELECT logical,attempts,entered FROM run").fetchone() == (
+                0,
+                0,
+                0,
+            )
 
 
 def test_selection_wrong_run_has_sanitized_refusal():

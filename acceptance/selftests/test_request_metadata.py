@@ -8,7 +8,7 @@ from http_receiver import WireReceiver
 
 from nci_si_acceptance import request_catalogue
 from nci_si_acceptance.environments import SURFACES, Environment
-from nci_si_acceptance.request_authorization import Authorization, ExactRequestFamily
+from nci_si_acceptance.request_authorization import Authorization, ExactRequestFamily, RequestGrant
 from nci_si_acceptance.request_budget import ControlledRun
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_acceptance.request_transport import ControlledHttpPolicy
@@ -125,6 +125,21 @@ def test_metadata_family_refuses_another_origin(tmp_path):
         pytest.param(VALID_POLICY.replace("[parents]", "[unreviewed]"), id="unknown-relation"),
         pytest.param(VALID_POLICY.replace("[monthly]", "[]"), id="empty-channels"),
         pytest.param(VALID_POLICY.replace("[monthly]", "monthly"), id="scalar-channels"),
+        pytest.param(VALID_POLICY.replace("[recorded/evs/mapsets.json]", "[]"), id="empty-exact"),
+        pytest.param(
+            VALID_POLICY.replace("mapsets.json]", "mapsets.json, recorded/evs/mapsets.json]"),
+            id="duplicate-exact",
+        ),
+        pytest.param(
+            VALID_POLICY.replace("graph-identities,", "graph-identities, graph-identities,"),
+            id="duplicate-paused",
+        ),
+        pytest.param(
+            VALID_POLICY.replace("[summary]", "[!!str {bad: value}]"), id="text-tag-mapping"
+        ),
+        pytest.param(
+            VALID_POLICY.replace("[summary]", "[!!str [summary]]"), id="text-tag-sequence"
+        ),
         pytest.param(
             VALID_POLICY.replace("[monthly]", "[monthly, monthly]"), id="duplicate-channels"
         ),
@@ -138,11 +153,18 @@ def test_metadata_family_refuses_another_origin(tmp_path):
 )
 def test_invalid_reviewed_policy_refuses_before_any_contact(tmp_path, monkeypatch, text):
     document = tmp_path / "policy.yaml"
-    document.write_text(text)
+    document.write_text(VALID_POLICY)
     monkeypatch.setattr(request_catalogue, "POLICY", document)
     with WireReceiver() as receiver:
-        with pytest.raises(RequestPolicyError) as refused:
+        request_catalogue.compile_policy(selected(receiver.origin))
+        document.write_text(text)
+        with pytest.raises(Exception) as refused:
             request_catalogue.compile_policy(selected(receiver.origin))
+        assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
         assert refused.value.reason == "authorization"
         assert receiver.contacts == 0
 
@@ -191,11 +213,14 @@ def test_selected_record_rejects_unreviewed_executable_fields(tmp_path, monkeypa
     [
         (("manifest", "record", "requests"), 7),
         (("manifest", "record", "requests"), [7]),
+        (("manifest", "record", "requests"), [["not-a-row"]]),
         (("manifest", "record", "requests"), None),
         (("manifest", "evs", "release"), "not-a-release"),
         (("row", "path"), {}),
         (("row", "path"), "http://other.invalid/api/v1/mapset"),
         (("row", "path"), "/api/v1/mapset?include=minimal&include=full"),
+        (("row", "path"), "/api/v1/mapset?bare-member"),
+        (("row", "surface"), "cadsr"),
     ],
 )
 def test_malformed_manifest_refuses_before_any_contact(tmp_path, monkeypatch, path, value):
@@ -208,11 +233,6 @@ def test_malformed_manifest_refuses_before_any_contact(tmp_path, monkeypatch, pa
     parent = {"manifest": manifest, "row": row}
     for key in path[:-1]:
         parent = parent[key]
-    # None requests omission of that field; all unrelated declaration inputs stay valid.
-    if value is None:
-        del parent[path[-1]]
-    else:
-        parent[path[-1]] = value
     document = tmp_path / "manifest.yaml"
     document.write_text(yaml.safe_dump(manifest))
     declaration = tmp_path / "policy.yaml"
@@ -220,9 +240,63 @@ def test_malformed_manifest_refuses_before_any_contact(tmp_path, monkeypatch, pa
     monkeypatch.setattr(request_catalogue, "MANIFEST", document)
     monkeypatch.setattr(request_catalogue, "POLICY", declaration)
     with WireReceiver() as receiver:
-        with pytest.raises(RequestPolicyError) as refused:
+        request_catalogue.compile_policy(selected(receiver.origin))
+        # None requests omission; the successful control differs only at this boundary.
+        if value is None:
+            del parent[path[-1]]
+        else:
+            parent[path[-1]] = value
+        document.write_text(yaml.safe_dump(manifest))
+        with pytest.raises(Exception) as refused:
             request_catalogue.compile_policy(selected(receiver.origin))
+        assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
+            RequestPolicyError,
+            "Controlled upstream request refused.",
+            None,
+        )
         assert refused.value.reason == "authorization" and receiver.contacts == 0
+
+
+@pytest.mark.parametrize("change", ["duplicate", "blank-query"])
+def test_selected_fixture_rows_preserve_exact_membership_and_query(tmp_path, monkeypatch, change):
+    manifest = yaml.safe_load(request_catalogue.MANIFEST.read_text())
+    row = next(
+        row
+        for row in manifest["record"]["requests"]
+        if row["fixture"] == "recorded/evs/mapsets.json"
+    )
+    document, declaration = tmp_path / "manifest.yaml", tmp_path / "policy.yaml"
+    document.write_text(yaml.safe_dump(manifest))
+    declaration.write_text(VALID_POLICY)
+    monkeypatch.setattr(request_catalogue, "MANIFEST", document)
+    monkeypatch.setattr(request_catalogue, "POLICY", declaration)
+    origin = "http://127.0.0.1:9"
+    request_catalogue.compile_policy(selected(origin))
+    if change == "duplicate":
+        manifest["record"]["requests"].append(dict(row))
+        document.write_text(yaml.safe_dump(manifest))
+        with pytest.raises(Exception) as refused:
+            request_catalogue.compile_policy(selected(origin))
+    else:
+        row["path"] = "/api/v1/mapset?include="
+        document.write_text(yaml.safe_dump(manifest))
+        policy = request_catalogue.compile_policy(selected(origin))
+        headers = (("accept", "application/json"),)
+        try:
+            admitted = policy.authorization.admit("GET", origin + row["path"], headers, None)
+        except RequestPolicyError as error:
+            admitted = error
+        assert admitted == RequestGrant(
+            "GET", origin + "/api/v1/mapset?include=", headers, credential_origin=origin
+        )
+        with pytest.raises(Exception) as refused:
+            policy.authorization.admit("GET", origin + "/api/v1/mapset", headers, None)
+    assert (type(refused.value), str(refused.value), refused.value.__cause__) == (
+        RequestPolicyError,
+        "Controlled upstream request refused.",
+        None,
+    )
+    assert refused.value.reason == "authorization"
 
 
 def test_family_default_and_binding_keep_strict_authority(tmp_path):
