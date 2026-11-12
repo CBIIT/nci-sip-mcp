@@ -172,7 +172,7 @@ it.
 `acceptance/expected/fixture.json`. The job stays green while tools are not implemented or fail,
 and fails when an outcome differs from the expected one. A change that moves an outcome on purpose
 updates that file in the same pull request, written with `pdm run acceptance-expected update` from
-a fresh report, and `pdm run acceptance-status` updates the functional-status tables that follows from it; the
+a fresh report, and `pdm run acceptance-status` updates the functional-status tables that follow from it; the
 diff of `expected/fixture.json` is what the review reads. A base `passed` outcome that regresses or
 is removed also needs its exact base-bound transition in `acceptance/expected/regressions.yaml`.
 The `Acceptance (live)` workflow runs the

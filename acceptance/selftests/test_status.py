@@ -5,6 +5,7 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -277,6 +278,28 @@ def provenance(raw):
         "sha": "b" * 40,
         "date": "2026-10-19T07:10:38Z",
     }
+
+
+def test_nested_destination_resolves_stored_live_context_link_and_anchor(tmp_path, suite_of_two):
+    suite_of_two(dict.fromkeys(ATTRIBUTION_OF_TWO, "passed"))
+    target = tmp_path / "published/status.md"
+    target.parent.mkdir()
+    target.write_text(f"{BEGIN}\n{END}\n")
+    live = tmp_path / "live"
+    live.mkdir()
+    raw = json.dumps(live_rows()).encode()
+    (live / "latest.json").write_bytes(raw)
+    (live / "latest.yaml").write_text(yaml.safe_dump(provenance(raw)))
+
+    assert status.main(["--readme", str(target), "--live-dir", str(live)]) == 0
+
+    link = re.search(r"\[cadsr-access\]\(([^)]+)\)", target.read_text())
+    assert link is not None
+    relative, _, anchor = link.group(1).partition("#")
+    assert (target.parent / relative).resolve() == (
+        Path(__file__).resolve().parents[2] / "docs/upstream/cadsr.md"
+    )
+    assert anchor == "cadsr-access"
 
 
 def test_exact_live_table_with_scenario_and_credential_precedence(monkeypatch):

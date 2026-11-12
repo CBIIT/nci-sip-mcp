@@ -1,5 +1,5 @@
 kind: direct-controlled-EVS-discovery
-environment: production-configured EVS HTTPS route; issuing layer of403 unestablished
+environment: production-configured EVS HTTPS route; issuing layer of 403 unestablished
 source_sha: 52521535f34c28288b3b6615d0bea33548f8af88
 date: '2026-11-12'
 destination: https://api-evsrest.nci.nih.gov:443
