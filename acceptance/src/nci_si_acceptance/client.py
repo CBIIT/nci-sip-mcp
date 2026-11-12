@@ -380,13 +380,16 @@ class Session:
         self._portal = portal
         self._client = client
 
+    def _call[T](self, operation: Callable[[], Awaitable[T]]) -> T:
+        return self._portal.call(operation)
+
     def list_tools(self) -> types.ListToolsResult:
-        return self._portal.call(self._client.list_tools)
+        return self._call(self._client.list_tools)
 
     def call_tool(
         self, name: str, arguments: dict[str, Any], meta: types.RequestParamsMeta | None = None
     ) -> types.CallToolResult:
-        return self._portal.call(partial(self._client.call_tool, name, arguments, meta=meta))
+        return self._call(partial(self._client.call_tool, name, arguments, meta=meta))
 
     def _every_page[T: types.PaginatedResult](
         self, list_page: Callable[..., Awaitable[T]], field: str
@@ -394,10 +397,10 @@ class Session:
         """Every page of a list method, followed by nextCursor: the first page's result (and
         so its caching hint) holding the items of all of them."""
 
-        first = page = self._portal.call(list_page)
+        first = page = self._call(list_page)
         items = list(getattr(page, field))
         while page.next_cursor:
-            page = self._portal.call(partial(list_page, cursor=page.next_cursor))
+            page = self._call(partial(list_page, cursor=page.next_cursor))
             items += getattr(page, field)
         return first.model_copy(update={field: items, "next_cursor": None})
 
@@ -405,7 +408,7 @@ class Session:
         return self._every_page(self._client.list_prompts, "prompts")
 
     def get_prompt(self, name: str, arguments: dict[str, str]) -> types.GetPromptResult:
-        return self._portal.call(partial(self._client.get_prompt, name, arguments))
+        return self._call(partial(self._client.get_prompt, name, arguments))
 
     def list_resources(self) -> types.ListResourcesResult:
         return self._every_page(self._client.list_resources, "resources")
@@ -414,7 +417,7 @@ class Session:
         return self._every_page(self._client.list_resource_templates, "resource_templates")
 
     def read_resource(self, uri: str) -> types.ReadResourceResult:
-        return self._portal.call(partial(self._client.read_resource, uri))
+        return self._call(partial(self._client.read_resource, uri))
 
 
 @contextmanager

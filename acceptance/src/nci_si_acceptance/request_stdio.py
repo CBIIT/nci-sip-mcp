@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import subprocess
 import threading
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import asynccontextmanager, contextmanager
+from contextvars import copy_context
 from typing import TYPE_CHECKING, TextIO
 
 import anyio
@@ -20,6 +22,7 @@ from mcp.client import Client, Transport
 from mcp.shared.message import SessionMessage
 
 from nci_si_acceptance.client import READ_TIMEOUT_SECONDS, Session
+from nci_si_acceptance.request_children import Completions
 from nci_si_mcp.errors import RequestPolicyError
 
 if TYPE_CHECKING:
@@ -32,6 +35,49 @@ type Streams = tuple[
 
 # Preserve the SDK's two-second normal exit and TERM grace within the one run deadline.
 EXIT_SECONDS = 2.0
+# Poll explicit thread-safe stop signals promptly; actual joins, not elapsed polls, prove exit.
+STOP_POLL_SECONDS = 0.01
+
+
+class _PortalCall[T]:
+    def __init__(self, operation: Callable[[], T]) -> None:
+        self.operation = operation
+        self.result: Future[T] = Future()
+        self.started: Future[None] = Future()
+        self.name = "controlled-portal-call"
+        self.thread = threading.Thread(target=self._invoke, name=self.name, context=copy_context())
+
+    def _invoke(self) -> None:
+        try:
+            self.result.set_result(self.operation())
+        except BaseException as error:  # noqa: BLE001 - caller receives the original event.
+            self.result.set_exception(error)
+
+    def start(self) -> None:
+        try:
+            self.thread.start()
+        except BaseException as error:
+            self.started.set_exception(error)
+            raise
+        self.started.set_result(None)
+
+    def finish(self, deadline: CleanupDeadline) -> None:
+        try:
+            self.started.result(timeout=deadline.remaining())
+        finally:
+            if self.thread.ident is not None:
+                self.thread.join(deadline.remaining())
+        if self.thread.is_alive():
+            raise RequestPolicyError("accounting")
+
+
+class _OwnedSession(Session):
+    def __init__(self, resource: StdioOwner, portal: BlockingPortal, client: Client) -> None:
+        super().__init__(portal, client)
+        self._resource = resource
+
+    def _call[T](self, operation: Callable[[], Awaitable[T]]) -> T:
+        return self._resource.call(lambda: self._portal.call(operation))
 
 
 class StdioOwner:
@@ -41,6 +87,8 @@ class StdioOwner:
         command: list[str],
         environment: dict[str, str],
         errlog: TextIO,
+        *,
+        read_seconds: float = READ_TIMEOUT_SECONDS,
     ) -> None:
         self.controller, self.command, self.environment, self.errlog = (
             controller,
@@ -53,6 +101,11 @@ class StdioOwner:
         self.portal_ready: Future[BlockingPortal] = Future()
         self.client_ready: Future[Client] = Future()
         self.errors: list[BaseException] = []
+        self.initiating: BaseException | None = None
+        self.read_seconds = read_seconds
+        self._calls = Completions(
+            controller.run.descriptor.run_id, controller.run.descriptor.policy_sha256
+        )
         self.closed: set[str] = set()
         self.pumps: set[str] = set()
         self.waited = self.pumps_settled = False
@@ -60,17 +113,23 @@ class StdioOwner:
             0
         )
         self.write, self._write_receive = anyio.create_memory_object_stream[SessionMessage](0)
-        self._stop, self._client_stop = anyio.Event(), anyio.Event()
+        self._stop, self._client_stop = threading.Event(), threading.Event()
+        self._cleanup_started = self._pumps_started = False
         self.thread = threading.Thread(target=self._thread_main, name=self.name)
 
     def _thread_main(self) -> None:
         try:
             anyio.run(self._main)
         except BaseException as error:  # noqa: BLE001 - outside owner re-raises thread failures.
-            self.errors.append(error)
+            self._initiate(error)
             for ready in (self.portal_ready, self.client_ready):
                 if not ready.done():
                     ready.set_exception(error)
+
+    def _initiate(self, error: BaseException) -> None:
+        if self.initiating is None:
+            self.initiating = error
+            self.controller._record_failure(error, "transport")
 
     async def _main(self) -> None:
         async with BlockingPortal() as portal:
@@ -86,17 +145,24 @@ class StdioOwner:
                     )
                 await self._io_scope(portal)
             finally:
-                await portal.stop(cancel_remaining=True)
+                with anyio.CancelScope(shield=True):
+                    if self.process is not None and not self._cleanup_started:
+                        await self._cleanup_process()
+                    if not self._pumps_started:
+                        self.pumps_settled = True  # No pump task was created before this failure.
+                    await portal.stop(cancel_remaining=True)
 
     async def _io_scope(self, portal: BlockingPortal) -> None:
         try:
             async with anyio.create_task_group() as tasks:
+                self._pumps_started = True
                 tasks.start_soon(self._pump, "stdout", self._stdout)
                 tasks.start_soon(self._pump, "stdin", self._stdin)
                 tasks.start_soon(self._pump, "stderr", self._stderr)
+                tasks.start_soon(self._client, self.read_seconds)
                 self.portal_ready.set_result(portal)
                 try:
-                    await self._stop.wait()
+                    await self._wait_signal(self._stop)
                 finally:
                     with anyio.CancelScope(shield=True):
                         await self._cleanup_process()
@@ -104,6 +170,12 @@ class StdioOwner:
         finally:
             # TaskGroup exit and the outside thread join additionally prove actual settlement.
             self.pumps_settled = self.pumps == {"stdin", "stdout", "stderr"}
+
+    @staticmethod
+    async def _wait_signal(event: threading.Event) -> None:
+        # A cross-thread stop must never wait for event-loop acknowledgement.
+        while not event.is_set():  # noqa: ASYNC110
+            await anyio.sleep(STOP_POLL_SECONDS)
 
     def _process(self) -> Process:
         if self.process is None:
@@ -115,7 +187,11 @@ class StdioOwner:
             await action()
         except anyio.ClosedResourceError, anyio.BrokenResourceError:
             if not self._stop.is_set():
-                self.errors.append(RequestPolicyError("transport"))
+                self._initiate(RequestPolicyError("transport"))
+        except BaseException as error:
+            if not (self._stop.is_set() and isinstance(error, anyio.get_cancelled_exc_class())):
+                self._initiate(error)
+            raise
         finally:
             self.pumps.add(name)
 
@@ -171,20 +247,26 @@ class StdioOwner:
         try:
             async with Client(transport, cache=None, read_timeout_seconds=read_seconds) as client:
                 self.client_ready.set_result(client)
-                await self._client_stop.wait()
+                await self._wait_signal(self._client_stop)
         except BaseException as error:
             if not self.client_ready.done():
                 self.client_ready.set_exception(error)
             if not (self._stop.is_set() and isinstance(error, anyio.get_cancelled_exc_class())):
-                self.errors.append(error)
+                self._initiate(error)
             raise
 
-    async def _end_client(self) -> None:
-        self._client_stop.set()
-
-    async def _end_run(self) -> None:
-        self._client_stop.set()
-        self._stop.set()
+    def call[T](self, operation: Callable[[], T]) -> T:
+        seconds = self.controller.run.timeout(self.read_seconds)
+        end = time.monotonic() + seconds
+        call = _PortalCall(operation)
+        self._calls.register(call, "stdio-rpc")
+        call.start()
+        try:
+            return call.result.result(timeout=max(0.0, end - time.monotonic()))
+        except FutureTimeout:
+            error = RequestPolicyError("deadline")
+            self.controller._record_failure(error, "deadline")
+            raise error from None
 
     async def _step(
         self, action: Callable[[], Awaitable[object]], deadline: CleanupDeadline
@@ -212,9 +294,19 @@ class StdioOwner:
             return code == self._process().returncode
         except TimeoutError:
             return False
+        except BaseException as error:  # noqa: BLE001 - preserve cleanup failure and keep stopping.
+            self.errors.append(error)
+            return False
 
     async def _cleanup_process(self) -> None:
+        self._cleanup_started = True
         deadline = self.controller.cleanup_deadline()
+        self._client_stop.set()
+        self._stop.set()
+        try:
+            self.controller._close_admission()
+        except BaseException as error:  # noqa: BLE001 - preserve closure and independent cleanup errors.
+            self.errors.append(error)
         await self._step(lambda: self._close("stdin"), deadline)
         if not await self._wait(EXIT_SECONDS, deadline):
             self._signal(kill=False)
@@ -235,14 +327,16 @@ class StdioOwner:
                 self.errors.append(RequestPolicyError("accounting"))
 
     def finish(self, deadline: CleanupDeadline) -> None:
-        try:
-            portal = self.portal_ready.result(timeout=deadline.remaining())
-            portal.start_task_soon(self._end_run)
-        except FutureTimeout, RuntimeError:
-            self.errors.append(RequestPolicyError("accounting"))
-        finally:
-            if self.thread.ident is not None:
-                self.thread.join(deadline.remaining())
+        self._client_stop.set()
+        self._stop.set()
+        calls = self._calls.seal()
+        if self.thread.ident is not None:
+            self.thread.join(deadline.remaining())
+        self.errors.extend(
+            self.controller._collect(
+                lambda token=token: self._calls.settle(token, deadline) for token in calls
+            )
+        )
         if self.thread.is_alive():
             self._signal(kill=True)
             raise RequestPolicyError("accounting")
@@ -260,14 +354,19 @@ def controlled_session(
     errlog: TextIO,
     timeout: float | None,
 ) -> Iterator[Session]:
-    resource = StdioOwner(owner, command, environment, errlog)
-    owner.register_completion(resource, participant="stdio")
-    resource.thread.start()
-    seconds = READ_TIMEOUT_SECONDS if timeout is None else timeout
-    portal = resource.portal_ready.result(timeout=seconds)
-    portal.start_task_soon(resource._client, seconds)
-    client = resource.client_ready.result(timeout=seconds)
+    seconds = owner.run.timeout(READ_TIMEOUT_SECONDS if timeout is None else timeout)
+    resource = StdioOwner(owner, command, environment, errlog, read_seconds=seconds)
     try:
-        yield Session(portal, client)
+        owner.register_completion(resource, participant="stdio")
+    except BaseException:
+        for stream in (resource.read, resource.write, resource._read_send, resource._write_receive):
+            stream.close()
+        raise
+    end = time.monotonic() + seconds
+    resource.thread.start()
+    portal = resource.portal_ready.result(timeout=max(0.0, end - time.monotonic()))
+    client = resource.client_ready.result(timeout=max(0.0, end - time.monotonic()))
+    try:
+        yield _OwnedSession(resource, portal, client)
     finally:
-        portal.start_task_soon(resource._end_client)
+        resource._client_stop.set()

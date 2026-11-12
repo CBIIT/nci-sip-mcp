@@ -252,6 +252,8 @@ class SupervisedRun:
                 errors.append(error)
             except OSError, RuntimeError, subprocess.SubprocessError:
                 errors.append(RequestPolicyError("accounting"))
+            except BaseException as error:  # noqa: BLE001 - preserve unexpected initiating/cleanup events.
+                errors.append(error)
         return errors
 
     def _finish(self, initiating: BaseException | None) -> None:
