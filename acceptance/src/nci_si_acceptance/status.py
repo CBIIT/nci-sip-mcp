@@ -1,12 +1,12 @@
-"""The README's fixture status and stored scheduled-live observations, generated offline.
+"""The functional-status page's fixture and stored live tables, generated offline.
 
     pdm run acceptance-status [--check]
 
 The table shows each tool group's tools by their fixture-mode outcome, which the per-tool report
 derives from the outcomes of the tests (report.py); the tests' tools and gates are read from
 the suite's markers, so the front page reports what the suite measures and not what someone last
-wrote. It is written between two markers of the README. `--check` writes nothing and exits with
-1 when the README is not current, and a self-test fails then as well.
+wrote. It is written between two markers of the destination page. `--check` writes nothing and
+exits with 1 when that page is not current, and a self-test fails then as well.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -44,7 +45,7 @@ from nci_si_acceptance.requirements import load_requirements
 from nci_si_acceptance.spec import REQUIRED_TOOLS, TOOLS
 
 ACCEPTANCE = EXPECTED.parents[1]
-README = ACCEPTANCE.parent / "README.md"
+STATUS = ACCEPTANCE.parent / "docs/functional-status.md"
 LIVE = ACCEPTANCE.parent / "docs/evidence/acceptance-live"
 CATALOGUE = ACCEPTANCE.parent / "docs/upstream/catalogue.yaml"
 # Stored pre-rename live evidence retains its historical run/commit URL identity.
@@ -132,7 +133,7 @@ def _row(group: str, title: str, outcomes: dict[str, str]) -> str:
 
 
 def render(expected: dict[str, str], attribution: Attribution) -> str:
-    """The README's table: for each group, its tools listed under their outcome."""
+    """For each group, its tools listed under their fixture outcome."""
 
     outcomes = tool_outcomes(expected, attribution)
     lines = [
@@ -290,19 +291,19 @@ def _live_tool_rows(rows: list[dict[str, Any]], contexts: dict[str, str]) -> lis
 
 
 def current(readme: str, table: str) -> str:
-    """The README with the text between the markers replaced by `table`."""
+    """The destination page with only the text between its markers replaced."""
 
     before, found, rest = readme.partition(BEGIN)
     _, end, after = rest.partition(END)
     if not (found and end):
-        raise SystemExit(f"the README lacks the markers {BEGIN} and {END}")
+        raise SystemExit(f"the destination page lacks the markers {BEGIN} and {END}")
     return before + table + after
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Write the README's status table.")
+    parser = argparse.ArgumentParser(description="Write the functional-status page's tables.")
     parser.add_argument("--check", action="store_true", help="write nothing; fail if not current")
-    parser.add_argument("--readme", type=Path, default=README, help="the README to write")
+    parser.add_argument("--readme", type=Path, default=STATUS, help="destination Markdown page")
     parser.add_argument("--live-dir", type=Path, default=LIVE, help="stored native live evidence")
     options = parser.parse_args(arguments)
     expected: dict[str, Any] = json.loads(EXPECTED.read_text(encoding="utf-8"))
@@ -316,6 +317,10 @@ def main(arguments: list[str] | None = None) -> int:
     live, provenance = load_live(options.live_dir)
     fixture = render(expected, attribution).removesuffix(END)
     table = fixture + "\n" + render_live(live, provenance, skip_contexts()) + "\n" + END
+    prefix = Path(os.path.relpath(ACCEPTANCE.parent, options.readme.parent)).as_posix()
+    if prefix != ".":
+        for directory in ("acceptance", "docs"):
+            table = table.replace(f"]({directory}/", f"]({prefix}/{directory}/")
     written = current(readme, table)
     if written == readme:
         return 0

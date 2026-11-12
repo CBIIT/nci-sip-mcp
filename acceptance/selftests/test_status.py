@@ -1,4 +1,4 @@
-"""The README's status table is generated from the expected outcomes and is current."""
+"""The canonical status tables are generated, path-aware and current."""
 
 import hashlib
 import json
@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from nci_si_acceptance import status
-from nci_si_acceptance.status import BEGIN, END, README, current, render, tool_outcomes
+from nci_si_acceptance.status import BEGIN, END, STATUS, current, render, tool_outcomes
 
 # A gate, and tests of three tools.
 ATTRIBUTION = {
@@ -190,7 +190,7 @@ def run_status(*options):
     )
 
 
-def test_the_readme_on_disk_is_what_the_expected_outcomes_generate():
+def test_the_status_page_on_disk_is_what_the_expected_outcomes_generate():
     ran = run_status("--check")
 
     assert (ran.returncode, ran.stderr) == (0, "")
@@ -198,7 +198,7 @@ def test_the_readme_on_disk_is_what_the_expected_outcomes_generate():
 
 def test_a_readme_that_is_not_current_fails_the_check_and_is_rewritten_without_it(tmp_path):
     stale = tmp_path / "README.md"
-    text = README.read_text(encoding="utf-8")
+    text = STATUS.read_text(encoding="utf-8")
     stale.write_text(text.replace(BEGIN, BEGIN + "\nstale table"), encoding="utf-8")
 
     failed = run_status("--check", "--readme", str(stale))
@@ -207,7 +207,9 @@ def test_a_readme_that_is_not_current_fails_the_check_and_is_rewritten_without_i
     assert failed.returncode == 1
     assert "is not current" in failed.stderr
     assert written.returncode == 0
-    assert stale.read_text(encoding="utf-8") == text
+    assert run_status("--check", "--readme", str(stale)).returncode == 0
+    empty = f"{BEGIN}\n{END}"
+    assert current(stale.read_text(encoding="utf-8"), empty) == current(text, empty)
 
 
 def test_failed_collection_cannot_replace_the_existing_readme(tmp_path, monkeypatch):

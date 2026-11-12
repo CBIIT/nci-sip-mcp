@@ -4,6 +4,7 @@ The tools and resources in QUICKSTART.md are compared with the running server in
 """
 
 import asyncio
+import hashlib
 import importlib
 import json
 import logging
@@ -14,6 +15,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 from typing import get_args
@@ -223,6 +225,110 @@ def operations_signals(settings):
         "ErrorCode": sorted(get_args(ErrorCode)),
         next(spec.uri for spec in SPECS if spec.operation == "index_resource"): manifest_fields,
     }
+
+
+class FunctionalStatusDocumentationTest(unittest.TestCase):
+    def test_readme_links_the_single_canonical_status_and_public_evidence(self):
+        overview = section(read("README.md"), "Status")
+        page = read("docs/functional-status.md")
+        self.assertIn("[Functional status](docs/functional-status.md)", overview)
+        self.assertNotIn("<!-- acceptance-status:", read("README.md"))
+        self.assertEqual(page.count("<!-- acceptance-status:begin -->"), 1)
+        self.assertEqual(page.count("<!-- acceptance-status:end -->"), 1)
+        self.assertIn("(evidence/acceptance-fixture/2026-11-12.json)", page)
+        self.assertIn("(evidence/acceptance-fixture/2026-11-12.yaml)", page)
+        self.assertIn("(evidence/functional-status/2026-11-12.yaml)", page)
+
+    def test_dated_fixture_provenance_matches_original_report_bytes_and_results(self):
+        directory = ROOT / "docs/evidence/acceptance-fixture"
+        record = yaml.safe_load((directory / "2026-11-12.yaml").read_text())
+        raw = (directory / record["report"]).read_bytes()
+        report = json.loads(raw)
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), record["sha256"])
+        self.assertEqual(len(raw), record["bytes"])
+        self.assertEqual(record["source_sha"], "52521535f34c28288b3b6615d0bea33548f8af88")
+        self.assertEqual((record["run"], record["artifact"]), (43244797057, 13955734610))
+        self.assertEqual((report["mode"], report["transport"]), ("fixture", "stdio"))
+        self.assertEqual(report["suite"], record["suite_original"])
+        self.assertEqual(report["run"], record["run_original"])
+        self.assertEqual(
+            report["run"],
+            {"exit_status": 0, "selected": 1005, "finished": 1005, "worker_crashes": 0},
+        )
+        self.assertEqual(
+            Counter(row["outcome"] for row in report["tests"].values()), {"passed": 1005}
+        )
+        self.assertEqual(record["outcomes"], {"passed": 1005})
+        self.assertEqual(len(report["tests"]), 1005)
+        self.assertEqual(report["failed_gates"], [])
+        self.assertEqual(report["unrun_gates"], [])
+        self.assertFalse(any(row["unmatched"] for row in report["tests"].values()))
+
+    def test_public_discovery_record_preserves_failed_and_unexecuted_results(self):
+        record = yaml.safe_load(
+            (ROOT / "docs/evidence/functional-status/2026-11-12.yaml").read_text()
+        )
+        self.assertEqual(
+            set(record),
+            {
+                "kind",
+                "environment",
+                "source_sha",
+                "date",
+                "destination",
+                "method",
+                "target",
+                "started",
+                "finished",
+                "command_elapsed_seconds",
+                "command_exit_code",
+                "status",
+                "content_type",
+                "body_bytes",
+                "private_body_sha256",
+                "failure",
+                "logical_requests",
+                "attempts",
+                "transport_entries",
+                "active",
+                "pending_receipts",
+                "admission",
+                "summary_state",
+                "observation_complete",
+                "release_selected",
+                "MCP_concept_observation",
+                "new_native_suite_runs",
+                "UAT_runs",
+                "repeats",
+                "first_result",
+                "reviewer_disposition",
+                "next_owner",
+            },
+        )
+        self.assertEqual(record["destination"], "https://api-evsrest.nci.nih.gov:443")
+        self.assertEqual(
+            record["target"],
+            "/api/v1/metadata/terminologies?terminology=ncit&latest=true&tag=monthly",
+        )
+        self.assertEqual(
+            (record["status"], record["content_type"], record["body_bytes"]),
+            (403, "text/html", 118),
+        )
+        self.assertEqual(
+            record["private_body_sha256"],
+            "58bf2215b395dcac74c009aa98701854e43cbe54a1cd3a95fee6a647ca9910d4",
+        )
+        self.assertEqual(
+            (record["logical_requests"], record["attempts"], record["transport_entries"]), (1, 1, 1)
+        )
+        self.assertEqual((record["active"], record["pending_receipts"]), (0, 0))
+        self.assertEqual((record["admission"], record["summary_state"]), ("closed", "failed"))
+        self.assertEqual(record["MCP_concept_observation"], "unexecuted: blocked by discovery")
+        self.assertEqual(
+            (record["new_native_suite_runs"], record["UAT_runs"], record["repeats"]), (0, 0, 0)
+        )
+        self.assertIs(record["release_selected"], False)
+        self.assertIs(record["observation_complete"], True)
 
 
 class OperationsDocumentationTest(unittest.TestCase):
