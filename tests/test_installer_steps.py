@@ -12,6 +12,7 @@ class Actions:
 
     def __init__(self):
         self.present = set()
+        self.observations: dict[str, list[bool]] = {}
         self.missing = {}
         self.calls = []
         self.bug: str | None = None
@@ -27,6 +28,8 @@ class Actions:
 
     def verify(self, step):
         self.calls.append(("verify", step))
+        if self.observations.get(step):
+            return self.observations[step].pop(0)
         return step in self.present
 
 
@@ -133,6 +136,88 @@ class InstallerStepsTest(unittest.TestCase):
         self.actions.missing.clear()
         self.actions.present.add("first")
         self.assertEqual(API.reverify(current, self.actions).outcomes[0].status, "completed")
+
+    def recovering_state(self, *recorded):
+        self.actions.present.update(("first", "second", "third"))
+        self.actions.observations["first"] = [False, True]
+        return self.state(*(API.StepOutcome(step, "completed") for step in recorded))
+
+    def test_recovered_prerequisite_rechecks_all_recorded_later_stages(self):
+        state = self.recovering_state("first", "second", "third")
+        current = API.reverify(state, self.actions)
+        self.assertEqual(
+            API.current_status(current, self.actions),
+            {
+                "components": ["server"],
+                "completed": ["first", "second", "third"],
+                "failed": [],
+                "blocked": [],
+                "pending": [],
+                "nextAction": None,
+            },
+        )
+        self.assertEqual(
+            self.actions.calls,
+            [("verify", "first"), ("verify", "first"), ("verify", "second"), ("verify", "third")],
+        )
+
+    def test_recovery_keeps_later_failure_or_missing_input_incomplete(self):
+        cases = (
+            ("second", (), ["first"], ["second"], [], ["third"], "Retry failed step second."),
+            (
+                "second",
+                ("Repair second.",),
+                ["first"],
+                [],
+                [{"step": "second", "missing": ["Repair second."]}],
+                ["third"],
+                "Resolve the failed prerequisites: Repair second.",
+            ),
+            ("third", (), ["first", "second"], ["third"], [], [], "Retry failed step third."),
+            (
+                "third",
+                ("Repair third.",),
+                ["first", "second"],
+                [],
+                [{"step": "third", "missing": ["Repair third."]}],
+                [],
+                "Resolve the failed prerequisites: Repair third.",
+            ),
+        )
+        for step, missing, complete, failed, blocked, pending, next_action in cases:
+            with self.subTest(step=step, missing=missing):
+                self.actions = Actions()
+                state = self.recovering_state("first", "second", "third")
+                self.actions.present.remove(step)
+                self.actions.missing[step] = missing
+                current = API.reverify(state, self.actions)
+                self.assertEqual(
+                    API.current_status(current, self.actions),
+                    {
+                        "components": ["server"],
+                        "completed": complete,
+                        "failed": failed,
+                        "blocked": blocked,
+                        "pending": pending,
+                        "nextAction": next_action,
+                    },
+                )
+                self.assertEqual({kind for kind, _step in self.actions.calls}, {"verify"})
+
+    def test_recovery_never_completes_unrecorded_stages(self):
+        current = API.reverify(self.recovering_state("first"), self.actions)
+        self.assertEqual(
+            API.current_status(current, self.actions),
+            {
+                "components": ["server"],
+                "completed": ["first"],
+                "failed": [],
+                "blocked": [],
+                "pending": ["second", "third"],
+                "nextAction": "Run second.",
+            },
+        )
+        self.assertEqual(self.actions.calls, [("verify", "first"), ("verify", "first")])
 
     def test_restart_resets_progress_for_the_same_selection(self):
         self.reconcile()
