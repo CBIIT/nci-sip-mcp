@@ -293,25 +293,38 @@ def test_noncontroller_or_other_compilation_refuses_before_discovery(tmp_path, c
         "DROP TABLE release_bindings",
     ],
 )
-def test_corrupt_or_missing_selection_state_never_resets(tmp_path, statement):
+def test_corrupt_or_missing_selection_state_never_resets(tmp_path, statement, monkeypatch):
+    monkeypatch.setattr(request_budget, "_clock", lambda: 1000.0)
+    milestones: list[str] = []
     with scenario(tmp_path, [[ROW]]) as (receiver, policy, owner):
 
         def tamper_and_read():
             policy.select_release(owner.run, channel="monthly")
+            assert bindings(owner) == [("ncit", "monthly", "26.09d", "ncit_26.09e")]
+            milestones.append("selected")
             with (
                 closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as connection,
                 connection,
             ):
                 connection.execute(statement)
+            milestones.append("tampered")
             return client(receiver, owner).get_json(ROOT, {"list": "C4817", "include": "summary"})
 
-        with pytest.raises(ExceptionGroup) as failed:
+        failed: ExceptionGroup[Exception] | None = None
+        try:
             invoke(owner, tamper_and_read)
+        except ExceptionGroup as error:
+            failed = error
+        assert milestones == ["selected", "tampered"]
+        assert [(method, path, body) for method, path, _headers, body in receiver.requests] == [
+            ("GET", "/api/v1/metadata/terminologies?terminology=ncit&latest=true&tag=monthly", b"")
+        ]
+        assert receiver.contacts == 1
+        assert isinstance(failed, ExceptionGroup)
         # Corrupt identity also prevents close and final projection; retain all three failures.
-        assert [type(error) for error in failed.value.exceptions] == [RequestPolicyError] * 3
+        assert list(map(type, failed.exceptions)) == [RequestPolicyError] * 3
         reason = "accounting" if statement == "DROP TABLE release_bindings" else "authorization"
-        assert [error.reason for error in failed.value.exceptions] == [reason] * 3
-        assert receiver.contacts == 1 and len(receiver.requests) == 1
+        assert [error.reason for error in failed.exceptions] == [reason] * 3
         assert (
             json.loads((owner.run.directory / "summary.json").read_text())["state"] == "incomplete"
         )
