@@ -364,16 +364,19 @@ def reconcile(
 
 
 def reverify(state: InstallationState, actions: StepActions) -> InstallationState:
-    outcomes = _verified_prefix(state, actions)
-    if len(outcomes) < len(state.outcomes):
-        stale = state.outcomes[len(outcomes)]
-        missing = actions.missing_inputs(stale.step)
+    outcomes: tuple[StepOutcome, ...] = ()
+    for previous in state.outcomes:
+        if previous.status == "completed" and actions.verify(previous.step):
+            outcomes = (*outcomes, previous)
+            continue
+        missing = actions.missing_inputs(previous.step)
         if missing:
-            outcomes = (*outcomes, StepOutcome(stale.step, "blocked", missing))
-        elif actions.verify(stale.step):
-            outcomes = (*outcomes, StepOutcome(stale.step, "completed"))
-        else:
-            outcomes = (*outcomes, StepOutcome(stale.step, "failed"))
+            outcomes = (*outcomes, StepOutcome(previous.step, "blocked", missing))
+            break
+        valid = actions.verify(previous.step)
+        outcomes = (*outcomes, StepOutcome(previous.step, "completed" if valid else "failed"))
+        if not valid:
+            break
     return replace(state, outcomes=outcomes)
 
 
