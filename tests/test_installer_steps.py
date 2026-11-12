@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from nci_si_mcp import installer_state
 
@@ -218,6 +219,52 @@ class InstallerStepsTest(unittest.TestCase):
             },
         )
         self.assertEqual(self.actions.calls, [("verify", "first"), ("verify", "first")])
+
+    def observe_later_verifier(self, missing):
+        state = self.recovering_state("first", "second", "third")
+        self.actions.present.remove("second")
+        self.actions.missing["second"] = missing
+        sentinel = self.data_dir / "later-verifier-ran"
+        original = self.actions.verify
+
+        def verify(step):
+            if step == "third":
+                sentinel.write_text("unexpected verification", encoding="utf-8")
+            return original(step)
+
+        with patch.object(self.actions, "verify", side_effect=verify):
+            current = API.reverify(state, self.actions)
+        return API.current_status(current, self.actions), sentinel.exists()
+
+    def test_failed_stage_prevents_later_verifier_activity(self):
+        status, later_active = self.observe_later_verifier(())
+        self.assertEqual(
+            status,
+            {
+                "components": ["server"],
+                "completed": ["first"],
+                "failed": ["second"],
+                "blocked": [],
+                "pending": ["third"],
+                "nextAction": "Retry failed step second.",
+            },
+        )
+        self.assertFalse(later_active)
+
+    def test_blocked_stage_prevents_later_verifier_activity(self):
+        status, later_active = self.observe_later_verifier(("Repair second.",))
+        self.assertEqual(
+            status,
+            {
+                "components": ["server"],
+                "completed": ["first"],
+                "failed": [],
+                "blocked": [{"step": "second", "missing": ["Repair second."]}],
+                "pending": ["third"],
+                "nextAction": "Resolve the failed prerequisites: Repair second.",
+            },
+        )
+        self.assertFalse(later_active)
 
     def test_restart_resets_progress_for_the_same_selection(self):
         self.reconcile()
