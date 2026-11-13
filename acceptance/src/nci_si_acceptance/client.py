@@ -70,6 +70,7 @@ if TYPE_CHECKING:
 
     from mcp import types
 
+    from nci_si_acceptance.request_stdio import StderrTransfer
     from nci_si_acceptance.request_supervision import SupervisedRun
 
 type Mode = Literal["fixture", "live"]
@@ -428,6 +429,7 @@ def open_session(
     *,
     timeout: float | None = None,
     owner: SupervisedRun | None = None,
+    stderr_transfer: StderrTransfer | None = None,
 ) -> Iterator[Session]:
     """Start the server's command, its standard error going to `errlog`, and hold one MCP
     session with it."""
@@ -435,10 +437,14 @@ def open_session(
     if owner is not None:
         from nci_si_acceptance.request_stdio import controlled_session  # noqa: PLC0415
 
-        with controlled_session(owner, command, environment, errlog, timeout) as session:
+        with controlled_session(
+            owner, command, environment, errlog, timeout, stderr_transfer
+        ) as session:
             yield session
         return
 
+    if stderr_transfer is not None:
+        raise ValueError("stderr transfer requires a controlled owner")
     server = StdioServerParameters(command=command[0], args=command[1:], env=environment)
     transport = stdio_client(server, errlog=errlog)
     with (

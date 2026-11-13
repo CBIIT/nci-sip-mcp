@@ -71,6 +71,64 @@ class _PortalCall[T]:
             raise RequestPolicyError("accounting")
 
 
+class StderrTransfer:
+    """Creator custody until acceptance; a joined writer precedes the owned close operation."""
+
+    name = "controlled-stderr"
+
+    def __init__(self, stream: TextIO) -> None:
+        self.stream = stream
+        self._lock = threading.Lock()
+        self._accepted = self._sealed = self.closed = False
+        self._writer: threading.Thread | None = None
+        self._closer: _PortalCall[None] | None = None
+
+    @property
+    def accepted(self) -> bool:
+        with self._lock:
+            return self._accepted
+
+    @staticmethod
+    def require_stream(transfer: StderrTransfer, stream: TextIO) -> None:
+        if (
+            type(transfer) is not StderrTransfer
+            or transfer.stream is not stream
+            or transfer.accepted
+        ):
+            raise RequestPolicyError("authorization")
+
+    def accept(self, writer: threading.Thread) -> None:
+        with self._lock:
+            if self._sealed or self._accepted:
+                raise RequestPolicyError("authorization")
+            self._writer = writer
+            self._accepted = True
+
+    def finish(self, deadline: CleanupDeadline) -> None:
+        with self._lock:
+            self._sealed = True
+            accepted, writer = self._accepted, self._writer
+        if not accepted:
+            return
+        if writer is None or writer.ident is None:
+            raise RequestPolicyError("accounting")
+        writer.join(deadline.remaining())
+        if writer.is_alive():
+            raise RequestPolicyError("accounting")
+        self._finish_close(deadline)
+
+    def _finish_close(self, deadline: CleanupDeadline) -> None:
+        try:
+            if self._closer is None:
+                self._closer = _PortalCall(self.stream.close)
+                self._closer.start()
+            self._closer.finish(deadline)
+            self._closer.result.result()
+        except OSError, RuntimeError:
+            raise RequestPolicyError("accounting") from None
+        self.closed = True
+
+
 class _OwnedSession(Session):
     def __init__(self, resource: StdioOwner, portal: BlockingPortal, client: Client) -> None:
         super().__init__(portal, client)
@@ -368,11 +426,17 @@ def controlled_session(
     environment: dict[str, str],
     errlog: TextIO,
     timeout: float | None,
+    stderr_transfer: StderrTransfer | None = None,
 ) -> Iterator[Session]:
+    if stderr_transfer is not None:
+        StderrTransfer.require_stream(stderr_transfer, errlog)
     seconds = owner.run.timeout(READ_TIMEOUT_SECONDS if timeout is None else timeout)
     resource = StdioOwner(owner, command, environment, errlog, read_seconds=seconds)
     try:
         owner.register_completion(resource, participant="stdio")
+        if stderr_transfer is not None:
+            owner.register_completion(stderr_transfer, participant="stdio-stderr")
+            stderr_transfer.accept(resource.thread)
     except BaseException:
         for stream in (resource.read, resource.write, resource._read_send, resource._write_receive):
             stream.close()

@@ -260,7 +260,8 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
             assert any(call.thread.is_alive() for call in calls)
             assert owner.snapshot()["observationComplete"] is False
             if held_after_portal_exit:
-                monkeypatch.setattr(request_children, "CLEANUP_SECONDS", 0.1)
+                # Isolate the held caller after the SDK's two-second child-exit grace.
+                monkeypatch.setattr(request_children, "CLEANUP_SECONDS", 3.0)
         assert timeout is not None, failure_leaves(outward.value)
         assert timeout.value in failure_leaves(outward.value)
         assert owner.pending_owners == ((resource.name,) if held_after_portal_exit else ())
