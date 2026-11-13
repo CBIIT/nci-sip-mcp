@@ -329,10 +329,12 @@ class SupervisedRun:
             errors.append(error)
 
     def _observed_failures(self, errors: list[BaseException]) -> list[BaseException]:
-        observed = list(self._child_errors.values())
+        observed: list[BaseException] = list(self._child_errors.values())
         if self._observer_error is not None:
             observed.append(self._observer_error)
         observed.extend(self._recording_errors)
+        if self._controlled_cleanup:
+            observed.extend(self._collect([self._terminal_failure]))
         return [error for error in observed if not self._contains(errors, error)]
 
     def _seal_registry(self) -> None:
