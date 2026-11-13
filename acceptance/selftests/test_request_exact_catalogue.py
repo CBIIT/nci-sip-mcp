@@ -84,9 +84,11 @@ def test_exact_catalogue_uses_selected_origin_and_bound_release(
             "evs_contacts": evs.contacts,
             "fhir_contacts": fhir.contacts,
             "logical": snapshot.logical,
-            "snapshot": snapshot,
-            "evs_requests": len(evs.requests),
-            "fhir_requests": len(fhir.requests),
+            "snapshot": {
+                "ledger": snapshot,
+                "evs_requests": len(evs.requests),
+                "fhir_requests": len(fhir.requests),
+            },
         }
         assert evs.contacts + fhir.contacts == EXPECTED_CONTACTS
         assert evs.requests[0][0:2] == (
