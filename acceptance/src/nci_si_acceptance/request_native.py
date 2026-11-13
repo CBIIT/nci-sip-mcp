@@ -9,17 +9,18 @@ import sys
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from nci_si_acceptance.environments import (
     LAUNCHER,
     NATIVE_HANDOFF,
     Environment,
+    EnvironmentRecord,
     _record_map,
     _selected,
     environment_record,
 )
-from nci_si_acceptance.request_authorization import RunDescriptor
+from nci_si_acceptance.request_authorization import DescriptorRecord, RunDescriptor
 from nci_si_acceptance.request_budget import ControlledRun
 from nci_si_acceptance.request_catalogue import compile_policy
 from nci_si_acceptance.request_supervision import SupervisedRun
@@ -71,6 +72,12 @@ def _selection(config: pytest.Config, target: Target) -> Environment:
         raise ValueError(REFUSAL)
     assert target.environment is not None  # noqa: S101 - frozen Target.from_env validates live state.
     return target.environment
+
+
+class NativeHandoffRecord(TypedDict):
+    environment: EnvironmentRecord
+    run: DescriptorRecord
+    participant: str
 
 
 class NativeRun:
@@ -125,7 +132,7 @@ class NativeRun:
         policy.select_release(owner.run, channel="monthly")
         owner.run.authorize_participant(PARTICIPANT)
         path = owner.run.directory / "native.json"
-        record = {
+        record: NativeHandoffRecord = {
             "environment": self.environment.to_record(),
             "run": owner.run.descriptor.to_record(),
             "participant": PARTICIPANT,
