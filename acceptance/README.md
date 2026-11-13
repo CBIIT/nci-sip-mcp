@@ -64,7 +64,8 @@ The explicit `--controlled-run-dir=PATH` option supports only
 `tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance`
 in managed live mode, with `--report=PATH` and one serial process (`-n 0`). It grants no
 permission to contact upstream services. Preparation, remote servers, extra or duplicate
-nodes, selection filters, collection-only execution and parallel workers are refused.
+nodes, selection filters, collection/setup modes, fixture inspection, interactive debugging
+and parallel workers are refused.
 Effective collection must still contain exactly that node before any controller or target
 is acquired. Other acceptance commands retain their existing behavior.
 

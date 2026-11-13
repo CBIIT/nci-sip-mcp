@@ -41,7 +41,22 @@ PARTICIPANT = "native-serial"
 
 
 def _selection(config: pytest.Config, target: Target) -> Environment:
-    blocked = ("collectonly", "keyword", "markexpr", "deselect", "numprocesses", "tx", "pyargs")
+    # Inspection/setup modes preserve items without executing them; debuggers can wait for input.
+    blocked = (
+        "collectonly",
+        "keyword",
+        "markexpr",
+        "deselect",
+        "numprocesses",
+        "tx",
+        "pyargs",
+        "setuponly",
+        "setupplan",
+        "showfixtures",
+        "show_fixtures_per_test",
+        "usepdb",
+        "trace",
+    )
     valid = (
         target.mode == "live",
         target.command == [*LAUNCHER, "serve"],
