@@ -107,6 +107,59 @@ def test_real_pipe_failures_preserve_the_original_error_and_actual_custody(
         anyio.run(_reap_for_test, resource)
 
 
+@pytest.mark.parametrize("caller_failure", [False, True])
+def test_late_decode_failure_is_preserved_beside_the_callers_error(
+    tmp_path, monkeypatch, caller_failure
+):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    marker = tmp_path / "decoder-returned"
+    script = (
+        "import sys,time;from pathlib import Path;sys.stdin.buffer.read();"
+        "sys.stdout.buffer.write(b'\\xff\\n');sys.stdout.buffer.flush();"
+        "end=time.monotonic()+2\n"
+        "while not Path(sys.argv[1]).exists() and time.monotonic()<end:time.sleep(.01)"
+    )
+    resource = StdioOwner(owner, [sys.executable, "-c", script, str(marker)], {}, io.StringIO())
+    original_stdout = resource._stdout
+    initiating = LookupError("owned caller failure")
+
+    async def stdout():
+        try:
+            await original_stdout()
+        finally:
+            marker.touch()  # Actual decoder unwound; the child can now exit.
+
+    monkeypatch.setattr(resource, "_stdout", stdout)
+    try:
+        with pytest.raises(BaseException) as outward, owner:
+            owner.register_completion(resource, participant="stdio")
+            resource.thread.start()
+            resource.portal_ready.result(timeout=3)
+            if caller_failure:
+                raise initiating
+        assert owner.snapshot()["state"] == "failed"
+        assert owner.snapshot()["observationComplete"] is True
+        assert owner.pending_owners == ()
+        assert type(resource.process.returncode) is int
+        assert resource.waited and resource.process_closed
+        assert resource.closed == {"stdin", "stdout", "stderr"}
+        assert [
+            (s.open_send_streams, s.open_receive_streams)
+            for s in (resource.read.statistics(), resource.write.statistics())
+        ] == [(0, 0), (0, 0)]
+        leaves = failure_leaves(outward.value)
+        assert list(map(type, leaves)) == (
+            [LookupError, UnicodeDecodeError] if caller_failure else [UnicodeDecodeError]
+        )
+        if caller_failure:
+            assert leaves[0] is initiating
+    finally:
+        resource._stop.set()
+        resource.thread.join(5)
+        assert not resource.thread.is_alive()
+        anyio.run(_reap_for_test, resource)
+
+
 def test_accepted_thread_start_failure_retains_each_resource_until_fallback(tmp_path, monkeypatch):
     owner = SupervisedRun.create(authorization(), tmp_path / "run")
     initiating = RuntimeError("owned stdio thread start failure")
