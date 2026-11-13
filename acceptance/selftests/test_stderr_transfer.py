@@ -162,6 +162,48 @@ def test_uncertain_or_failed_close_retains_named_custody(transfer_case, fault):
         )
 
 
+def test_live_writer_settles_before_transferred_file_custody_completes(tmp_path, monkeypatch):
+    path, release = tmp_path / "stderr.log", threading.Event()
+    with path.open("w") as stream:
+        transfer = StderrTransfer(stream)
+        owner = SupervisedRun.create(authorization(), tmp_path / "run")
+
+        def write():
+            release.wait()
+            stream.write("last owned stderr\n")
+
+        writer = threading.Thread(target=write, name="owned-final-stderr-writer")
+        actual_join = writer.join
+
+        def finish_writer(seconds=None):
+            # Schedule the required actual join, not a general scheduler-independent wait.
+            release.set()
+            actual_join(seconds)
+
+        monkeypatch.setattr(writer, "join", finish_writer)
+        failure = None
+        try:
+            writer.start()
+            try:
+                with owner:
+                    owner.register_completion(transfer, participant="stderr")
+                    transfer.accept(writer)
+            except Exception as error:  # noqa: BLE001 - assert the actual outward completion below.
+                failure = error
+            assert failure is None
+            assert not writer.is_alive()
+            assert transfer.closed and stream.closed
+            assert path.read_text() == "last owned stderr\n"
+            assert owner.pending_owners == ()
+            summary = owner.snapshot()
+            assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+        finally:
+            release.set()
+            if writer.ident is not None:
+                actual_join(3)
+            assert not writer.is_alive()
+
+
 def test_accepted_child_startup_error_closes_the_transferred_file(tmp_path):
     stream = (tmp_path / "stderr.log").open("w")
     transfer = StderrTransfer(stream)
