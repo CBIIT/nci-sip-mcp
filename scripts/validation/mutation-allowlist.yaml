@@ -1,3 +1,21 @@
+# Approved: #479 comment 6864302547; official SURVIVED at 6bf6bbc, independently confirmed with real-process controls.
+- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+  qualname: "StdioOwner._wait"
+  operator: "return:True"
+  site: "/body/0/body/1"
+  context: "4f47465e0635d547718aacf31dd973188a76a2f27c3f47be7f3bf309177e14a1"
+  original: "922989227bd89a35925276b40e10c6a0536db7a085aecff7ccb8da3da323fbc2"
+  mutated: "4d40361fc85c2c1588359b7bbefb67ffbd5ed15730fe3cec6085464279212055"
+  reason: "The fixed anyio.run asyncio acquisition uses the locked AnyIO process: wait awaits exit, asserts the underlying returncode is non-None and returns that same value exposed by its property. The process is not replaced; the real await, timeout and exception paths remain. Independent real SDK, startup/closure and backpressure controls pass on original, exact mutant and restored source. A mismatched fake wait/property pair is outside this collaborator contract. Reassess on backend/API/acquisition changes."
+# Approved: #479 comment 6864302547; official SURVIVED at 6bf6bbc, independently confirmed with closed-consumer controls.
+- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+  qualname: "StdioOwner._deliver"
+  operator: "return:None"
+  site: "/body/1/handlers/0/body/0"
+  context: "5adefa72f0a96102ec7863a1301e845610585b333a9d82f1ecbcd24f206a583b"
+  original: "dd863ea504e8543d2fb185a820aa7e2cf2d0ceddec9c835185a3510fc2ab463d"
+  mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
+  reason: "The sole tracked supported caller of this private return is _stdout, which consumes it as discard = not await self._deliver(line). False and None select the same drain/discard branch; the successful True path, parsing and error delivery remain. Independent actual-pipe backpressure/closed-consumer controls pass on original, exact mutant and restored source. Reassess if a caller inspects identity/type instead of truthiness."
 # Approved: #479 comment 6846499522; official sampled SURVIVED at b841e29, independently verified at 2942dd9.
 - file: "acceptance/src/nci_si_acceptance/request_stdio.py"
   qualname: "StdioOwner._settled"
