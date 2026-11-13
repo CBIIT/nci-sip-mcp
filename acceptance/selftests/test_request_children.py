@@ -199,30 +199,31 @@ def test_sealed_receipt_is_one_use_and_callbacks_do_not_hold_registry_lock(calls
 
     call = calls(observe)
     token = registry.register(call, "participant")
-    call.start()
-    assert entered.wait(1)
-    with pytest.raises(RequestPolicyError):
-        registry.register(call, "duplicate")
-    assert registry.seal() == (token,)
-    with pytest.raises(RequestPolicyError):
-        registry.register(calls(lambda: "late"), "participant")
-    original_finish = call.finish
-
-    def finish(deadline):
-        finishing.set()
-        original_finish(deadline)
-
-    call.finish = finish
-    errors = []
-
-    def settle():
-        try:
-            registry.settle(token, CleanupDeadline(time.monotonic() + 0.25))
-        except BaseException as error:  # noqa: BLE001 - assert original callback outcome below.
-            errors.append(error)
-
-    settler = threading.Thread(target=settle, name="owned-receipt-settler")
+    settler = None
     try:
+        call.start()
+        assert entered.wait(1)
+        with pytest.raises(RequestPolicyError):
+            registry.register(call, "duplicate")
+        assert registry.seal() == (token,)
+        with pytest.raises(RequestPolicyError):
+            registry.register(calls(lambda: "late"), "participant")
+        original_finish = call.finish
+
+        def finish(deadline):
+            finishing.set()
+            original_finish(deadline)
+
+        call.finish = finish
+        errors = []
+
+        def settle():
+            try:
+                registry.settle(token, CleanupDeadline(time.monotonic() + 0.25))
+            except BaseException as error:  # noqa: BLE001 - assert original callback outcome below.
+                errors.append(error)
+
+        settler = threading.Thread(target=settle, name="owned-receipt-settler")
         settler.start()
         assert finishing.wait(1)
         release.set()
@@ -234,8 +235,9 @@ def test_sealed_receipt_is_one_use_and_callbacks_do_not_hold_registry_lock(calls
         assert repeated.value.reason == "authorization"
     finally:
         release.set()
-        settler.join(21)
-        assert not settler.is_alive()
+        if settler is not None and settler.ident is not None:
+            settler.join(21)
+            assert not settler.is_alive()
 
 
 def test_shutdown_cannot_miss_an_accepted_owner_before_registration_returns(
