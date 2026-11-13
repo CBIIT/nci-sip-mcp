@@ -15,7 +15,7 @@ from test_request_supervision import authorization, failure_leaves
 from nci_si_acceptance import request_children, request_stdio
 from nci_si_acceptance.client import open_session
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_acceptance.request_stdio import StdioOwner
+from nci_si_acceptance.request_stdio import StderrTransfer, StdioOwner
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import RequestPolicyError
 
@@ -86,6 +86,78 @@ def test_missing_executable_is_reported_once_by_the_public_controlled_session(tm
     assert summary["observationComplete"] is True
     assert owner.pending_owners == ()
     assert list(map(type, failure_leaves(outward.value))) == [FileNotFoundError]
+
+
+def test_sealed_controller_refuses_the_actual_offer_and_returns_creator_custody(
+    tmp_path, monkeypatch
+):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    offered, release = threading.Event(), threading.Event()
+    resources, failures = [], []
+    register = owner.register_completion
+    marker = tmp_path / "child-started"
+    stream = (tmp_path / "stderr.log").open("w")
+    transfer = StderrTransfer(stream)
+
+    def hold_offer(resource, **options):
+        resources.append(resource)
+        offered.set()
+        assert release.wait(2), "creator was not released after controller closure"
+        return register(resource, **options)
+
+    def caller():
+        try:
+            with open_session(
+                [
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path;Path(__import__('sys').argv[1]).touch()",
+                    str(marker),
+                ],
+                {},
+                stream,
+                timeout=0.2,
+                owner=owner,
+                stderr_transfer=transfer,
+            ):
+                raise AssertionError("a sealed controller yielded a session")
+        except BaseException as error:  # noqa: BLE001 - retain the actual actor event for the caller.
+            failures.append(error)
+
+    actor = threading.Thread(target=caller, name="owned-refused-offer")
+    monkeypatch.setattr(owner, "register_completion", hold_offer)
+    try:
+        with owner:
+            actor.start()
+            assert offered.wait(2)
+        assert owner.run.snapshot().state == "closed"
+        release.set()
+        actor.join(3)
+        assert not actor.is_alive()
+        assert list(map(type, failures)) == [RequestPolicyError]
+        assert failures[0].reason == "authorization"
+        assert len(resources) == 1
+        resource = resources[0]
+        assert resource.thread.ident is None and resource.process is None
+        assert not marker.exists()
+        assert not transfer.accepted and not stream.closed
+        assert owner.pending_owners == ()
+        assert [
+            (s.open_send_streams, s.open_receive_streams)
+            for s in (resource.read.statistics(), resource.write.statistics())
+        ] == [(0, 0), (0, 0)]
+    finally:
+        release.set()
+        for resource in resources:
+            resource._stop.set()
+            if resource.thread.ident is not None:
+                resource.thread.join(5)
+            assert not resource.thread.is_alive()
+            anyio.run(_reap_for_test, resource)
+        if actor.ident is not None:
+            actor.join(3)
+        assert not actor.is_alive()
+        stream.close()
 
 
 def test_real_sdk_session_keeps_completion_pending_until_external_cleanup(tmp_path):
