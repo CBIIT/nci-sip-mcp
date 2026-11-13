@@ -124,6 +124,14 @@ def test_completion_cleanup_sees_closed_admission(tmp_path):
     assert owner.pending_owners == ()
 
 
+@pytest.mark.parametrize(("end", "now"), [(float("inf"), 1.0), (2.0, float("nan"))])
+def test_nonfinite_cleanup_time_refuses_accounting(monkeypatch, end, now):
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: now))
+    with pytest.raises(RequestPolicyError) as refused:
+        CleanupDeadline(end).remaining()
+    assert refused.value.reason == "accounting"
+
+
 def test_successful_controlled_child_releases_actual_custody(tmp_path, calls):
     owner = SupervisedRun.create(authorization(), tmp_path / "run")
     call = calls(lambda: "settled")

@@ -44,6 +44,31 @@ def test_refusal_before_acceptance_keeps_creator_custody(tmp_path, boundary):
     assert stream.closed
 
 
+def test_transfer_without_a_controller_refuses_before_launch(tmp_path):
+    marker = tmp_path / "child-started"
+    with (tmp_path / "stderr.log").open("w") as stream:
+        transfer = StderrTransfer(stream)
+        try:
+            with open_session(
+                [
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path;Path(__import__('sys').argv[1]).touch()",
+                    str(marker),
+                ],
+                {},
+                stream,
+                timeout=0.2,
+                stderr_transfer=transfer,
+            ):
+                failure = (None, "opened")
+        except Exception as error:  # noqa: BLE001 - compare the actual entry contract below.
+            failure = (type(error), str(error))
+        assert failure == (ValueError, "stderr transfer requires a controlled owner")
+        assert not marker.exists()
+        assert not transfer.accepted and not stream.closed
+
+
 @dataclass(frozen=True, slots=True)
 class TransferCase:
     owner: SupervisedRun

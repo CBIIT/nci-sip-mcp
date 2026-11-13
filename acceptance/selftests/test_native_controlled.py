@@ -279,6 +279,7 @@ report._publish_native = publish
         (NODE, NODE),
         (NODE, "tests/test_evs.py"),
         (NODE, "-n", "2"),
+        pytest.param((NODE, "--controlled-run-dir="), id="empty-run-directory"),
         pytest.param((NODE, "--setup-only"), id="setup-only"),
         pytest.param((NODE, "--setup-plan"), id="setup-plan"),
         pytest.param((NODE, "--fixtures"), id="fixtures"),
@@ -332,7 +333,9 @@ def test_native_startup_or_effective_collection_failure_acquires_nothing(
         }
 
 
-@pytest.mark.parametrize("origin", ["furnished", "interpreter", "module", "compiled"])
+@pytest.mark.parametrize(
+    "origin", ["furnished", "interpreter", "module", "compiled", "unattributed"]
+)
 def test_native_handoff_refuses_before_operational_imports(native_tree, origin):
     tree, python, env = native_tree
     catalogue = tree / "acceptance/src/nci_si_acceptance/request_catalogue.py"
@@ -346,7 +349,7 @@ def test_native_handoff_refuses_before_operational_imports(native_tree, origin):
         "    return wrapped\n"
     )
     script = """
-import importlib.util, inspect, json, os, sys
+import importlib.util, inspect, json, os, runpy, sys
 from pathlib import Path
 root = Path.cwd()
 if sys.argv[1] == 'interpreter':
@@ -385,9 +388,13 @@ try:
     elif origin == 'compiled':
         from foreign_wrapper import decorate
         native.compile_policy = decorate(native.compile_policy)
+    elif origin == 'unattributed':
+        native.compile_policy = runpy.run_path(
+            str(root / 'acceptance/src/nci_si_acceptance/request_catalogue.py'))['compile_policy']
     expected = root / 'acceptance/src/nci_si_acceptance/request_catalogue.py'
+    module = inspect.getmodule(native.compile_policy)
     origins = [Path(sys.prefix).resolve() == (root / '.venv').resolve(),
-        Path(inspect.getmodule(native.compile_policy).__file__).resolve() == expected,
+        module is not None and Path(module.__file__).resolve() == expected,
         Path(inspect.getfile(native.compile_policy)).resolve() == expected]
     if origin != 'furnished':
         refused = False
@@ -440,7 +447,12 @@ print('authenticated attachment and four pre-import refusals')
     if origin == "furnished":
         assert outcome.stdout.strip() == "authenticated attachment and four pre-import refusals"
     else:
-        expected = [name != origin for name in ("interpreter", "module", "compiled")]
+        expected = {
+            "interpreter": [False, True, True],
+            "module": [True, False, True],
+            "compiled": [True, True, False],
+            "unattributed": [True, False, True],
+        }[origin]
         assert json.loads(outcome.stdout) == {"origins": expected, "refused": True}
 
 
