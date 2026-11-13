@@ -166,7 +166,7 @@ class StdioOwner:
         )
         self.closed: set[str] = set()
         self.pumps: set[str] = set()
-        self.waited = self.pumps_settled = self.process_closed = False
+        self.waited = self.pumps_settled = self.process_closed = self.endpoints_closed = False
         self._read_send, self.read = anyio.create_memory_object_stream[SessionMessage | Exception](
             0
         )
@@ -202,13 +202,25 @@ class StdioOwner:
                         stderr=subprocess.PIPE,
                     )
                 await self._io_scope(portal)
+            except BaseException as error:
+                self._initiate(error)
+                raise
             finally:
-                with anyio.CancelScope(shield=True):
-                    if self.process is not None and not self._cleanup_started:
-                        await self._cleanup_process()
-                    if not self._pumps_started:
-                        self.pumps_settled = True  # No pump task was created before this failure.
-                    await portal.stop(cancel_remaining=True)
+                await self._shutdown(portal)
+
+    async def _shutdown(self, portal: BlockingPortal) -> None:
+        with anyio.CancelScope(shield=True):
+            try:
+                if self.process is None:
+                    await self._close_endpoints(self.controller.cleanup_deadline())
+                elif not self._cleanup_started:
+                    await self._cleanup_process()
+            except BaseException as error:  # noqa: BLE001 - preserve cleanup beside acquisition failure.
+                self.errors.append(error)
+            finally:
+                if not self._pumps_started:
+                    self.pumps_settled = True  # No pump task was created before this failure.
+                await portal.stop(cancel_remaining=True)
 
     async def _io_scope(self, portal: BlockingPortal) -> None:
         try:
@@ -328,14 +340,23 @@ class StdioOwner:
 
     async def _step(
         self, action: Callable[[], Awaitable[object]], deadline: CleanupDeadline | None
-    ) -> None:
+    ) -> bool:
         try:
             with nullcontext() if deadline is None else anyio.fail_after(deadline.remaining()):
                 await action()
+            return True
         except OSError, RuntimeError, TimeoutError:
             self.errors.append(RequestPolicyError("accounting"))
         except BaseException as error:  # noqa: BLE001 - outside owner re-raises cleanup failures.
             self.errors.append(error)
+        return False
+
+    async def _close_endpoints(self, deadline: CleanupDeadline) -> None:
+        completed = [
+            await self._step(stream.aclose, deadline)
+            for stream in (self.read, self.write, self._read_send, self._write_receive)
+        ]
+        self.endpoints_closed = all(completed)
 
     async def _close(self, name: str) -> None:
         process = self._process()
@@ -381,8 +402,7 @@ class StdioOwner:
             await self._step(lambda name=name: self._close(name), deadline)
         # Its shielded wait cannot honor an inner timeout; outside finish retains custody.
         await self._step(self._close_process, None)
-        for stream in (self.read, self.write, self._read_send, self._write_receive):
-            await self._step(stream.aclose, deadline)
+        await self._close_endpoints(deadline)
 
     def _signal(self, *, kill: bool) -> None:
         process = self.process
@@ -408,15 +428,14 @@ class StdioOwner:
             raise RequestPolicyError("accounting")
         if self.errors:
             raise BaseExceptionGroup("Controlled stdio cleanup failed.", self.errors)
-        if not all(
-            (
-                self.waited,
-                self.pumps_settled,
-                self.process_closed,
-                self.closed == {"stdin", "stdout", "stderr"},
-            )
-        ):
+        if not self._settled():
             raise RequestPolicyError("accounting")
+
+    def _settled(self) -> bool:
+        process_settled = self.process is None or all(
+            (self.waited, self.process_closed, self.closed == {"stdin", "stdout", "stderr"})
+        )
+        return self.pumps_settled and self.endpoints_closed and process_settled
 
 
 @contextmanager
