@@ -90,6 +90,7 @@ def run_native(tree, python, env, *arguments):
         ],
         cwd=tree / "acceptance",
         env=env,
+        input="",
         capture_output=True,
         text=True,
         timeout=30,
@@ -290,6 +291,12 @@ report._publish_native = publish
         (NODE, NODE),
         (NODE, "tests/test_evs.py"),
         (NODE, "-n", "2"),
+        pytest.param((NODE, "--setup-only"), id="setup-only"),
+        pytest.param((NODE, "--setup-plan"), id="setup-plan"),
+        pytest.param((NODE, "--fixtures"), id="fixtures"),
+        pytest.param((NODE, "--fixtures-per-test"), id="fixtures-per-test"),
+        pytest.param((NODE, "--pdb"), id="pdb"),
+        pytest.param((NODE, "--trace"), id="trace"),
     ],
 )
 def test_unsupported_controlled_selections_have_no_resources_or_contacts(native_tree, arguments):
