@@ -15,11 +15,11 @@ from http_receiver import WireReceiver
 from test_request_release_selection import response
 
 from nci_si_acceptance import environments
+from nci_si_acceptance.suite_identity import identity
 
 NODE = "tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance"
 DISCOVERY = "/api/v1/metadata/terminologies?terminology=ncit&latest=true&tag=monthly"
 CONTENT = "/api/v1/concept/ncit_26.09d/C4817?include=minimal"
-SHA256_LENGTH = 64
 
 
 @pytest.fixture
@@ -235,13 +235,14 @@ def test_native_startup_or_effective_collection_failure_acquires_nothing(
     )
     with WireReceiver() as receiver:
         local_policy(tree, receiver)
+        expected_suite = identity(tree)
         outcome = run_native(tree, python, env, NODE, "-p", "native_boundary_probe", "-n", "0")
         assert outcome.returncode != 0, outcome.stdout + outcome.stderr
         assert receiver.contacts == 0
         assert not (tree / "acceptance/tmp/native-run").exists()
     report = json.loads((tree / "acceptance/tmp/native-report.json").read_text())
     assert report["tests"] == {}
-    assert len(report["suite"]["digest"]) == SHA256_LENGTH
+    assert report["suite"] == expected_suite
     assert report["environment"]["name"] == "evs-only"
     if before_collection:
         assert report["run"] is None
