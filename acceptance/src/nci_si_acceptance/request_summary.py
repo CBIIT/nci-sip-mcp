@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, get_args
 
 from nci_si_acceptance.request_authorization import MAX_COUNTER, Limits
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_si_mcp.errors import RequestPolicyError
 from nci_si_mcp.validation import SummaryState
 
 if TYPE_CHECKING:

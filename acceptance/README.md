@@ -58,6 +58,30 @@ no table. Combined CLI input is validated before rendering. Fixture reports/outc
 Selected-environment stdio benchmarking reuses this managed launcher and refusal lifecycle;
 [Benchmark](../docs/benchmark.md) owns its commands, selector boundary and measurement limits.
 
+### Bounded serial execution
+
+The explicit `--controlled-run-dir=PATH` option supports only
+`tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance`
+in managed live mode, with `--report=PATH` and one serial process (`-n 0`). It grants no
+permission to contact upstream services. Preparation, remote servers, extra or duplicate
+nodes, selection filters, collection/setup modes, fixture inspection, interactive debugging
+and parallel workers are refused.
+Effective collection must still contain exactly that node before any controller or target
+is acquired. Other acceptance commands retain their existing behavior.
+
+The controller creates a private exclusive run directory beneath the supplied parent,
+publishes an incomplete native report before acquisition, and authenticates the furnished
+isolated child against the same frozen environment and shared request ledger. Private
+handoff files contain local run authority; do not publish them. The native report retains
+its existing schema and actual per-case outcomes. The separate sanitized `summary.json`
+records request accounting and whether resource observation completed.
+
+Admission closes before cleanup. Registered child operations, the refusal listener and
+transferred stderr files share one cleanup deadline. Completion requires actual joins and
+process reaping; an unjoined owner remains pending and cannot produce successful completion.
+Report publication failures propagate rather than leaving a successful command result.
+The creator retains responsibility for private run directories and evidence cleanup.
+
 ## Writing a test
 
 ### Registry-release selection

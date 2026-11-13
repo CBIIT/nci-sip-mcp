@@ -37,7 +37,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
 from enum import Enum
@@ -678,14 +680,46 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         session.config.stash[SUITE] = suite_state(session.config)
 
 
-def write_report(config: pytest.Config, mode: str) -> None:
+def write_report(config: pytest.Config, mode: str, *, atomic: bool = False) -> None:
     """Write the run's report where `--report` says, if it says."""
 
     path = config.getoption("report")
     # A worker holds part of the run; the controller writes the report.
     if path and not hasattr(config, "workerinput"):
         report = config.stash[COLLECTOR].report(mode) | {"suite": config.stash[SUITE]}
-        Path(path).write_text(json.dumps(withheld(report), indent=2) + "\n")
+        text = json.dumps(withheld(report), indent=2) + "\n"
+        if atomic:
+            _publish_native(Path(path), text)
+        else:
+            Path(path).write_text(text)
+
+
+def _publish_native(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    failures: list[BaseException] = []
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    except BaseException as error:  # noqa: BLE001 - retain initiating and cleanup errors separately.
+        failures.append(error)
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except BaseException as error:  # noqa: BLE001 - do not replace the initiating failure.
+                failures.append(error)
+    if len(failures) == 1:
+        raise failures[0]
+    if failures:
+        raise BaseExceptionGroup("Native report publication failed.", failures)
 
 
 def withheld(value: Any) -> Any:

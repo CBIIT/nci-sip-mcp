@@ -27,7 +27,7 @@ from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 
 from fakes import FakeEVS, concept, release, terminology_row
-from nci_si_mcp import http_client
+from nci_si_mcp import errors, http_client, request_policy
 from nci_si_mcp.audit import audited
 from nci_si_mcp.bounds import Budget, budgeted, deadline_scope
 from nci_si_mcp.cadsr import CaDSRClient
@@ -51,6 +51,21 @@ from test_evs_client import FakeResponse
 
 KEY = "placeholder-licence-key"
 OK = b'{"ok": true}'
+
+
+class PolicyErrorCompatibilityTest(unittest.TestCase):
+    def test_public_exports_preserve_catch_identity_and_private_reason(self):
+        self.assertIs(RequestPolicyError, errors.RequestPolicyError)
+        self.assertIs(http_client.UpstreamError, errors.UpstreamError)
+        self.assertEqual(LICENSE_KEY_HEADER, request_policy.LICENSE_KEY_HEADER)
+        try:
+            raise errors.RequestPolicyError("authorization")
+        except http_client.UpstreamError as error:
+            self.assertIsInstance(error, RequestPolicyError)
+            self.assertEqual(str(error), "Controlled upstream request refused.")
+            self.assertEqual((error.reason, error.details), ("authorization", {}))
+        plain = http_client.UpstreamError("failed", upstream="owned")
+        self.assertEqual((str(plain), plain.details), ("failed", {"upstream": "owned"}))
 
 
 @dataclass

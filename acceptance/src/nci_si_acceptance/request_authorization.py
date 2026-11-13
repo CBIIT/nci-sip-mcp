@@ -13,8 +13,7 @@ from typing import Self, TypedDict, final, get_args
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 from nci_si_acceptance.concepts import MAX_BATCH
-from nci_si_mcp.errors import safe_correlation
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_si_mcp.errors import RequestPolicyError, safe_correlation
 from nci_si_mcp.validation import (
     NCIT_CODE_FORM,
     RELEASE_CHANNELS,

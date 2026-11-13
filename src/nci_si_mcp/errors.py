@@ -6,8 +6,28 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from .validation import PolicyReason
+
+
+class UpstreamError(RuntimeError):
+    """Base error of a request that failed; `details` is what the error record carries."""
+
+    def __init__(self, message: str, /, **details: Any) -> None:
+        super().__init__(message)
+        self.details = details
+
+
+class RequestPolicyError(UpstreamError):
+    """Terminal refusal: internal reason is never a public error detail or cache fallback."""
+
+    def __init__(self, reason: PolicyReason) -> None:
+        super().__init__("Controlled upstream request refused.")
+        self.reason: PolicyReason = reason
+
 
 # The closed set of error codes: the specification's error record (spec/records.yaml).
 ErrorCode = Literal[
