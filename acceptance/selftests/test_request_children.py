@@ -73,8 +73,12 @@ def test_zero_http_leases_do_not_settle_an_owned_thread(
 
 
 @pytest.mark.parametrize("field", ["run_id", "policy_sha256", "participant"])
-def test_completion_receipt_identity_rejects_ordinary_assignment(field):
-    token = CompletionToken("b" * 32, "a" * 64, "participant")
+def test_completion_receipt_identity_rejects_ordinary_assignment(field, calls):
+    registry = Completions("b" * 32, "a" * 64)
+    call = calls(lambda: "completed")
+    token = registry.register(call, "participant")
+    call.start()
+    registry.settle(token, CleanupDeadline())
     with pytest.raises(FrozenInstanceError):
         setattr(token, field, "foreign")
     assert (token.run_id, token.policy_sha256, token.participant) == (
