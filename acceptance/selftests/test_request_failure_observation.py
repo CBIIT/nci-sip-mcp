@@ -49,33 +49,55 @@ def test_real_snapshot_retains_refusal_before_cleanup(tmp_path, request, capsys)
 
 
 def test_junit_keeps_initiating_record_after_teardown_failure(pytester):
-    helper = Path(__file__).with_name("request_failure_observation.py")
-    # Copy only this test helper; core/harness remain the installed owning tree.
-    (pytester.path / helper.name).write_bytes(helper.read_bytes())
+    for name in (
+        "request_failure_observation.py",
+        "test_request_transport_children.py",
+        "http_receiver.py",
+    ):
+        source = Path(__file__).with_name(name)
+        (pytester.path / name).write_bytes(source.read_bytes())
     pytester.makeconftest(f'''
+import sqlite3
+from contextlib import closing
+from threading import current_thread, main_thread
 import pytest
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_budget import ControlledRun
-@pytest.fixture
-def cleanup():
+from nci_si_mcp.http_client import RequestPolicyError
+PRIVATE_CANARY = "{CANARY}"
+@pytest.fixture(autouse=True)
+def controlled_refusal(monkeypatch):
+    original = ControlledRun.snapshot
+    injected = False
+    def held_snapshot(run):
+        nonlocal injected
+        value = original(run)
+        ready = value.consumed_body_bytes == 7 and value.pending_receipts == 1
+        if not injected and current_thread() is main_thread() and ready:
+            injected = True
+            with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+                blocker.execute("BEGIN IMMEDIATE")
+                try:
+                    return original(run)
+                except RequestPolicyError as error:
+                    assert isinstance(error.__context__, sqlite3.OperationalError)
+                    error.__context__.args = (PRIVATE_CANARY,)
+                    raise
+        return value
+    monkeypatch.setattr(ControlledRun, "snapshot", held_snapshot)
     yield
     raise RuntimeError("later cleanup")
-@pytest.fixture
-def run(tmp_path, monkeypatch):
-    grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
-    run = ControlledRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
-    def private_failure(connection):
-        raise ValueError("{CANARY}")
-    monkeypatch.setattr(run, "_identity", private_failure)
-    return run
 ''')
-    pytester.makepyfile("""
-from request_failure_observation import snapshot
-def test_refusal(run, request, cleanup):
-    snapshot(run, request.node)
-""")
     result = pytester.runpytest_subprocess(
-        "--junitxml=result.xml", "-q", "-W", "error::ResourceWarning", timeout=60
+        "test_request_transport_children.py::test_registered_children_share_transport_capacity[1-130-concurrency_limit]",
+        "--junitxml=result.xml",
+        "-q",
+        "-W",
+        "error::ResourceWarning",
+        "-W",
+        "error::pytest.PytestUnraisableExceptionWarning",
+        "-W",
+        "error::pytest.PytestUnhandledThreadExceptionWarning",
+        timeout=60,
     )
     result.assert_outcomes(failed=1, errors=1)
     root = ElementTree.parse(pytester.path / "result.xml").getroot()  # noqa: S314
@@ -86,7 +108,7 @@ def test_refusal(run, request, cleanup):
         record
         == {
             "complete": True,
-            "chain": [{"kind": "value"}],
+            "chain": [{"kind": "sqlite", "code": 5, "name": "SQLITE_BUSY", "metadata": "known"}],
             "ending": "end",
         }
         for record in records
