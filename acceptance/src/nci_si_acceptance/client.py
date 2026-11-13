@@ -145,6 +145,8 @@ class Target:
     registry_release: Literal["required", "optional"] = "optional"
     environment: Environment | None = None
     denied_url: str | None = field(default=None, repr=False)
+    controller: SupervisedRun | None = field(default=None, repr=False)
+    handoff: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_env(cls, *, mode_override: Mode | None = None) -> Target:
@@ -193,6 +195,9 @@ class Target:
 
     @contextmanager
     def managed(self) -> Iterator[Target]:
+        if self.controller is not None:
+            yield self
+            return
         if self.environment is None:
             yield self
             return

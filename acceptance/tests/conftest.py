@@ -38,6 +38,7 @@ from nci_si_acceptance.client import (
     open_session,
     server_environment,
 )
+from nci_si_acceptance.environments import NATIVE_HANDOFF
 from nci_si_acceptance.fixture_server import (
     MANIFEST,
     FixtureServer,
@@ -66,15 +67,28 @@ from nci_si_acceptance.tools import Process, Tools
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from typing import TextIO
 
     from nci_si_acceptance.client import Session
+    from nci_si_acceptance.request_native import NativeRun
+    from nci_si_acceptance.request_stdio import StderrTransfer
 
 pytest_plugins = ["nci_si_acceptance.report"]
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 TARGET = pytest.StashKey[Target]()
+NATIVE: pytest.StashKey[NativeRun] = pytest.StashKey()
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--controlled-run-dir",
+        metavar="PATH",
+        help="create an explicitly guarded serial run beneath PATH",
+    )
+
+
+@pytest.hookimpl(trylast=True)
 def pytest_configure(config: pytest.Config) -> None:
     try:
         config.stash[TARGET] = Target.from_env()
@@ -83,6 +97,26 @@ def pytest_configure(config: pytest.Config) -> None:
     if config.stash[TARGET].url and config.getoption("numprocesses", None):
         # Workers would each run the probe and the state-change hook against the one server.
         raise pytest.UsageError("a remote server (NCI_SI_ACCEPTANCE_URL) is tested by one process")
+    if config.getoption("controlled_run_dir") is not None:
+        # Furnished opt-in keeps ordinary fixture installs independent of the core.
+        from nci_si_acceptance.request_native import NativeRun  # noqa: PLC0415
+
+        try:
+            config.stash[NATIVE] = NativeRun(config, config.stash[TARGET])
+        except ValueError as error:
+            raise pytest.UsageError(str(error)) from None
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    if (native := session.config.stash.get(NATIVE, None)) is not None:
+        try:
+            session.config.stash[TARGET] = native.start(session)
+        except ValueError as error:
+            native.errors.append(error)
+            raise pytest.UsageError(str(error)) from None
+        except BaseException as error:
+            native.errors.append(error)
+            raise
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -98,10 +132,23 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             order_for_state_changes(items)
 
 
-def pytest_sessionfinish(session: pytest.Session) -> None:
-    target = session.config.stash[TARGET]
-    session.config.stash[COLLECTOR].transport = target.transport
-    write_report(session.config, target.mode)
+@pytest.hookimpl(wrapper=True)
+def pytest_sessionfinish(session: pytest.Session) -> Iterator[None]:
+    native = session.config.stash.get(NATIVE, None)
+    if native is None:
+        yield
+        target = session.config.stash[TARGET]
+        session.config.stash[COLLECTOR].transport = target.transport
+        write_report(session.config, target.mode)
+        return
+    native.before_teardown()
+    try:
+        yield
+    except BaseException as error:
+        native.errors.append(error)
+        raise
+    finally:
+        native.complete(session)
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -280,6 +327,22 @@ def _remote_tools(
 
 
 @contextmanager
+def _session_log(target: Target, path: Path) -> Iterator[tuple[TextIO, StderrTransfer | None]]:
+    stream = path.open("w", encoding="utf-8")
+    transfer = None
+    try:
+        if target.controller is not None:
+            # Only a controlled caller transfers its diagnostic file.
+            from nci_si_acceptance.request_stdio import StderrTransfer  # noqa: PLC0415
+
+            transfer = StderrTransfer(stream)
+        yield stream, transfer
+    finally:
+        if transfer is None or not transfer.accepted:
+            stream.close()
+
+
+@contextmanager
 def _tools(
     target: Target,
     upstream: FixtureServer | None,
@@ -296,11 +359,19 @@ def _tools(
     environment = server_environment(
         target.mode, data, url, environment=target.environment, denied_url=target.denied_url
     )
+    if target.handoff is not None:
+        environment[NATIVE_HANDOFF] = target.handoff
     log = tmp_path_factory.mktemp("server") / "stderr.log"
     try:
         with (
-            log.open("w", encoding="utf-8") as errlog,
-            open_session(target.command, environment | (settings or {}), errlog) as session,
+            _session_log(target, log) as (errlog, transfer),
+            open_session(
+                target.command,
+                environment | (settings or {}),
+                errlog,
+                owner=target.controller,
+                stderr_transfer=transfer,
+            ) as session,
         ):
             startup = _startup_requests(upstream)
             if not (unmatched := unmatched_requests(startup)):

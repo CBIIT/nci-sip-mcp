@@ -228,7 +228,9 @@ identity before constructing the real EVS client inside that run's policy. Exist
 validation precedes the authenticated atomic ledger commit; no transaction spans discovery.
 Display version and pinned path remain distinct. Repeat selection still spends discovery;
 conflicts close admission and retain the first selection. Missing/corrupt state fails closed
-without migration or reset. Furnished caller adoption remains #448.
+without migration or reset. The explicitly guarded single native node is described in the
+[acceptance guide](acceptance/README.md#bounded-serial-execution); other caller adoption
+remains #448/#449.
 
 ### Explicit shared request accounting
 

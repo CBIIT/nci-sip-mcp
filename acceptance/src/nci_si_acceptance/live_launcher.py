@@ -5,11 +5,17 @@ from pathlib import Path
 from urllib.request import OpenerDirector, ProxyHandler, build_opener
 
 import nci_si_acceptance
-from nci_si_mcp import http_client
-from nci_si_mcp.validation import NCIT_CODE_RE
+from nci_si_acceptance.request_native import native_policy
 
 
 def main() -> int:
+    with native_policy():
+        return _run()
+
+
+def _run() -> int:
+    from nci_si_mcp import http_client  # noqa: PLC0415 - authenticated bootstrap first.
+
     root = Path(__file__).resolve().parents[3]
     expected = {
         Path(nci_si_acceptance.__file__): root / "acceptance/src/nci_si_acceptance/__init__.py",
@@ -35,6 +41,8 @@ def main() -> int:
 
 
 def _prepare(arguments: list[str]) -> bool:
+    from nci_si_mcp.validation import NCIT_CODE_RE  # noqa: PLC0415 - legacy prepare only.
+
     return (
         len(arguments) > 1
         and arguments[0] == "index-sample"

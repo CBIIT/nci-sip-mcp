@@ -1,7 +1,13 @@
 """An owned write-only local refusal endpoint; no upstream request is forwarded."""
 
+from __future__ import annotations
+
 from socketserver import BaseRequestHandler, TCPServer
 from threading import Event, Thread
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nci_si_acceptance.request_children import CleanupDeadline
 
 BODY = b"surface disabled by run policy"
 RESPONSE = (
@@ -68,10 +74,14 @@ class DeniedSurfaces:
         return f"http://127.0.0.1:{self._server.server_address[1]}"
 
     def __exit__(self, *_exception: object) -> None:
+        self.finish()
+
+    def finish(self, deadline: CleanupDeadline | None = None) -> None:
         self._stop.set()
         try:
             self._close()
         finally:
-            self.thread.join(JOIN_SECONDS)
+            if self.thread.ident is not None:
+                self.thread.join(JOIN_SECONDS if deadline is None else deadline.remaining())
         if self.thread.is_alive() or self._server.failed:
             raise RuntimeError("owned refusal listener did not finish cleanly")
