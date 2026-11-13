@@ -368,6 +368,10 @@ def test_held_stderr_sink_cannot_block_finish_scheduling_past_shared_deadline(
     assert failures, "unproved blocked cleanup cannot report settlement"
 
 
+def _has_live_callers(calls):
+    return any(call.thread.is_alive() for call in calls)
+
+
 @pytest.mark.parametrize("held_after_portal_exit", [False, True])
 def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
     tmp_path, monkeypatch, held_after_portal_exit
@@ -389,6 +393,7 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
         await anyio.sleep_forever()
 
     resource, timeout = None, None
+    before_cleanup = {}
     try:
         with (
             pytest.raises(BaseException) as outward,
@@ -409,20 +414,25 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
             resource.read_seconds = 0.05
             with pytest.raises(RequestPolicyError) as timeout:
                 resource.call(held_schedule) if held_after_portal_exit else session._call(pending)
-            assert entered.is_set() and timeout.value.reason == "deadline"
+            before_cleanup["deadline"] = (entered.is_set(), timeout.value.reason)
             calls = tuple(owner_ for owner_, _ in resource._calls._owners.values())
-            assert any(call.thread.is_alive() for call in calls)
-            assert owner.snapshot()["observationComplete"] is False
+            before_cleanup["callerAlive"] = _has_live_callers(calls)
+            before_cleanup["observationComplete"] = owner.snapshot()["observationComplete"]
             if held_after_portal_exit:
                 # Isolate the held caller after the SDK's two-second child-exit grace.
                 monkeypatch.setattr(request_children, "CLEANUP_SECONDS", 3.0)
         assert timeout is not None, failure_leaves(outward.value)
+        assert before_cleanup == {
+            "deadline": (True, "deadline"),
+            "callerAlive": True,
+            "observationComplete": False,
+        }
         assert timeout.value in failure_leaves(outward.value)
         assert owner.pending_owners == ((resource.name,) if held_after_portal_exit else ())
         assert owner.snapshot()["observationComplete"] is (not held_after_portal_exit)
         assert owner.snapshot()["state"] == "failed"
         assert not resource.thread.is_alive()
-        assert any(call.thread.is_alive() for call in calls) is held_after_portal_exit
+        assert _has_live_callers(calls) is held_after_portal_exit
         assert resource.waited and resource.closed == {"stdin", "stdout", "stderr"}
     finally:
         release.set()
