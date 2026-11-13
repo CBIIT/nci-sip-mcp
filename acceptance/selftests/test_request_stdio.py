@@ -160,6 +160,38 @@ def test_sealed_controller_refuses_the_actual_offer_and_returns_creator_custody(
         stream.close()
 
 
+def test_acquisition_and_endpoint_shutdown_failures_remain_distinct(tmp_path, monkeypatch):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    resource = StdioOwner(owner, [str(tmp_path / "missing")], {}, io.StringIO())
+    cleanup = LookupError("owned endpoint cleanup failure")
+
+    async def close_endpoints(_deadline):
+        raise cleanup
+
+    monkeypatch.setattr(resource, "_close_endpoints", close_endpoints)
+    try:
+        with pytest.raises(BaseExceptionGroup) as outward, owner:
+            owner.register_completion(resource, participant="stdio")
+            resource.thread.start()
+            resource.portal_ready.result(timeout=3)
+        assert not resource.thread.is_alive()
+        assert resource.process is None
+        assert owner.pending_owners == (resource.name,)
+        summary = json.loads((owner.run.directory / "summary.json").read_text())
+        assert (summary["state"], summary["observationComplete"]) == ("failed", False)
+        assert [
+            (s.open_send_streams, s.open_receive_streams)
+            for s in (resource.read.statistics(), resource.write.statistics())
+        ] == [(1, 1), (1, 1)]
+        leaves = failure_leaves(outward.value)
+        assert list(map(type, leaves)) == [FileNotFoundError, LookupError]
+        assert leaves[1] is cleanup
+    finally:
+        resource.thread.join(3)
+        assert not resource.thread.is_alive()
+        anyio.run(_reap_for_test, resource)
+
+
 def test_real_sdk_session_keeps_completion_pending_until_external_cleanup(tmp_path):
     replies = tmp_path / "replies.json"
     replies.write_text(
