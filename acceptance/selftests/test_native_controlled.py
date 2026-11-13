@@ -2,6 +2,7 @@
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import sysconfig
@@ -117,6 +118,7 @@ def run_native(tree, python, env, *arguments):
         text=True,
         timeout=30,
         check=False,
+        umask=0o022,
     )
 
 
@@ -191,6 +193,9 @@ def test_native_serial_node_shares_controller_release_and_budget(native_tree, lo
         assert "Controlled upstream request refused." in (failure.text or "")
     summaries = tuple((tree / "acceptance/tmp/native-run").glob("*/summary.json"))
     assert len(summaries) == 1
+    assert stat.S_IMODE(summaries[0].with_name("native.json").stat().st_mode) == (
+        stat.S_IRUSR | stat.S_IWUSR
+    )
     summary = json.loads(summaries[0].read_text())
     assert report["run"] == ONE_CASE | {"exit_status": expected_exit}
     assert summary["state"] == ("completed" if logical_limit is None else "failed")
@@ -199,24 +204,47 @@ def test_native_serial_node_shares_controller_release_and_budget(native_tree, lo
     assert summary["reservations"]["logical"] == len(expected)
 
 
-@pytest.mark.parametrize("late", [False, True])
-def test_native_publication_failure_keeps_an_incomplete_or_prior_report(native_tree, late):
+@pytest.mark.parametrize("phase", ["initial", "final", "pre-entry-final"])
+def test_native_publication_failure_keeps_an_incomplete_or_prior_report(native_tree, phase):
     tree, python, env = native_tree
+    late, before_entry = phase != "initial", phase == "pre-entry-final"
     plugin = tree / "acceptance/src/native_publication_probe.py"
     plugin.write_text(
-        f"late = {late!r}\n"
+        f"late, before_entry = {late!r}, {before_entry!r}\n"
         + """
+import json
 from pathlib import Path
 from nci_si_acceptance import report
+from nci_si_acceptance.request_native import NativeRun
 original, count = report._publish_native, 0
+original_complete = NativeRun.complete
+publication_error = OSError('owned native publication failure')
 def publish(path, text):
     global count
     count += 1
     if not late or count > 1:
-        raise OSError('owned native publication failure')
+        raise publication_error
     original(path, text)
     Path('tmp/initial-native-report.json').write_bytes(path.read_bytes())
 report._publish_native = publish
+def complete(self, *args, **kwargs):
+    first = self.errors[0] if len(self.errors) == 1 else None
+    try:
+        return original_complete(self, *args, **kwargs)
+    except BaseException as error:
+        if before_entry:
+            children = error.exceptions if isinstance(error, BaseExceptionGroup) else ()
+            Path('tmp/combined-native-failures.json').write_text(json.dumps({
+                'value_error': type(first) is ValueError,
+                'refusal': str(first) == (
+                    'controlled run requires the exact supported serial selection'),
+                'children': [{'collection': child is first,
+                              'publication': child is publication_error} for child in children]}))
+        raise
+NativeRun.complete = complete
+def pytest_collection_modifyitems(items):
+    if before_entry:
+        items.clear()
 """
     )
     directory = tree / "acceptance/tmp"
@@ -230,7 +258,7 @@ report._publish_native = publish
             ("GET", "/api/v1/metadata/terminologies", b""),
             ("GET", CONTENT, b""),
         ]
-        if late
+        if phase == "final"
         else []
     )
     with WireReceiver(_native_replies(tree)) as receiver:
@@ -259,11 +287,22 @@ report._publish_native = publish
         assert report["run"] is None
         assert report["tests"] == {}
         assert report["suite"] == expected_suite
-        cases = ElementTree.parse(  # noqa: S314 - owned pytest artifact, not external XML.
-            directory / "native-junit.xml"
-        ).findall(".//testcase")
-        assert len(cases) == 1
-        assert cases[0].find("failure") is None and cases[0].find("error") is None
+        if before_entry:
+            assert json.loads((directory / "combined-native-failures.json").read_text()) == {
+                "value_error": True,
+                "refusal": True,
+                "children": [
+                    {"collection": True, "publication": False},
+                    {"collection": False, "publication": True},
+                ],
+            }
+            assert not (directory / "native-run").exists()
+        else:
+            cases = ElementTree.parse(  # noqa: S314 - owned pytest artifact, not external XML.
+                directory / "native-junit.xml"
+            ).findall(".//testcase")
+            assert len(cases) == 1
+            assert cases[0].find("failure") is None and cases[0].find("error") is None
     else:
         assert destination.read_bytes() == prior
         assert not (directory / "native-run").exists()
