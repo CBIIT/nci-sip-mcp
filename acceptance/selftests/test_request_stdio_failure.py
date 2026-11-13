@@ -1,6 +1,7 @@
 """A pipe-close failure cannot erase the initiating event or certify completion."""
 
 import io
+import subprocess
 import sys
 import threading
 
@@ -15,7 +16,7 @@ from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import RequestPolicyError
 
 
-@pytest.mark.parametrize("after_close", [False, True])
+@pytest.mark.parametrize("after_close", [False, True, pytest.param(None, id="missing-stream")])
 def test_failed_pipe_close_preserves_initiating_and_cleanup_failures(
     tmp_path, monkeypatch, after_close
 ):
@@ -28,11 +29,25 @@ def test_failed_pipe_close_preserves_initiating_and_cleanup_failures(
     close, original_run = resource._close, anyio.run
     observed = {}
 
+    if after_close is None:
+        original_open = anyio.open_process
+
+        async def missing_stdin(*args, **options):
+            assert [options[name] for name in ("stdin", "stdout", "stderr")] == [
+                subprocess.PIPE,
+                subprocess.PIPE,
+                subprocess.PIPE,
+            ]
+            # Fault the acquisition postcondition with a real nullable Process handle.
+            return await original_open(*args, **(options | {"stdin": subprocess.DEVNULL}))
+
+        monkeypatch.setattr(anyio, "open_process", missing_stdin)
+
     async def fail_after_spawn(_portal):
         raise initiating
 
     async def failed_close(name):
-        if name == "stdin":
+        if name == "stdin" and after_close is not None:
             if after_close:
                 await close(name)
             raise OSError("owned close failure")
@@ -59,6 +74,7 @@ def test_failed_pipe_close_preserves_initiating_and_cleanup_failures(
             resource.portal_ready.result(timeout=3)
         leaves = failure_leaves(outward.value)
         assert leaves[0] is initiating
+        assert (resource.process.stdin is None) is (after_close is None)
         assert any(
             isinstance(error, RequestPolicyError) and error.reason == "accounting"
             for error in leaves
