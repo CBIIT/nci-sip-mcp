@@ -12,7 +12,7 @@ import anyio
 import pytest
 from test_request_supervision import authorization, failure_leaves
 
-from nci_si_acceptance import request_children
+from nci_si_acceptance import request_children, request_stdio
 from nci_si_acceptance.client import open_session
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_stdio import StdioOwner
@@ -296,12 +296,13 @@ def test_transferred_stderr_file_remains_open_until_actual_outside_cleanup(tmp_p
         with owner:
             observed = None
             try:
+                transfer = request_stdio.StderrTransfer(errlog)
                 with open_session(
-                    command, {}, errlog, owner=owner, timeout=3, own_errlog=True
+                    command, {}, errlog, owner=owner, timeout=3, stderr_transfer=transfer
                 ) as session:
                     assert not errlog.closed
                     observed = [tool.name for tool in session.list_tools().tools]
-            except TypeError as error:
+            except (AttributeError, TypeError) as error:
                 observed = {"entry_error": str(error)}
             assert observed == []
             assert not errlog.closed
