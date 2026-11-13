@@ -209,7 +209,8 @@ def test_real_sdk_session_keeps_completion_pending_until_external_cleanup(tmp_pa
     errors = io.StringIO()
     with owner:
         try:
-            with open_session(command, {}, errlog=errors, timeout=3, owner=owner) as session:
+            with open_session(command, {}, errlog=errors, owner=owner) as session:
+                session._resource.read_seconds = 3
                 observed = {
                     "lists": [[tool.name for tool in session.list_tools().tools] for _ in range(2)],
                     "call": session.call_tool("owned", {"value": "input"}).structured_content,
@@ -400,7 +401,6 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
                 ],
                 {},
                 errlog=io.StringIO(),
-                timeout=3,
                 owner=owner,
             ) as session,
         ):
@@ -453,8 +453,9 @@ def test_transferred_stderr_file_remains_open_until_actual_outside_cleanup(tmp_p
             try:
                 transfer = request_stdio.StderrTransfer(errlog)
                 with open_session(
-                    command, {}, errlog, owner=owner, timeout=3, stderr_transfer=transfer
+                    command, {}, errlog, owner=owner, stderr_transfer=transfer
                 ) as session:
+                    session._resource.read_seconds = 3
                     assert not errlog.closed
                     observed = [tool.name for tool in session.list_tools().tools]
             except (AttributeError, TypeError) as error:
