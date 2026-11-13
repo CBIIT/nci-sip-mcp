@@ -697,6 +697,7 @@ def write_report(config: pytest.Config, mode: str, *, atomic: bool = False) -> N
 def _publish_native(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
+    failures: list[BaseException] = []
     try:
         with tempfile.NamedTemporaryFile(
             "w", encoding="utf-8", dir=path.parent, delete=False
@@ -706,9 +707,19 @@ def _publish_native(path: Path, text: str) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        temporary = None
+    except BaseException as error:  # noqa: BLE001 - retain initiating and cleanup errors separately.
+        failures.append(error)
     finally:
         if temporary is not None:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink(missing_ok=True)
+            except BaseException as error:  # noqa: BLE001 - do not replace the initiating failure.
+                failures.append(error)
+    if len(failures) == 1:
+        raise failures[0]
+    if failures:
+        raise BaseExceptionGroup("Native report publication failed.", failures)
 
 
 def withheld(value: Any) -> Any:
