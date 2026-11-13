@@ -2,10 +2,12 @@
 
 import json
 from collections import Counter
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from nci_si_acceptance import report as report_module
 from nci_si_acceptance.report import (
     ATTRIBUTION,
     COLLECTOR,
@@ -586,6 +588,47 @@ def test_a_worker_writes_no_report_for_the_controller_to_overwrite(tmp_path):
     write_report(config, "fixture")
 
     assert not (tmp_path / "report.json").exists()
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_atomic_report_preserves_prior_file_and_each_publication_failure(
+    tmp_path, monkeypatch, cleanup_fails
+):
+    destination = tmp_path / "report.json"
+    prior = b'{"prior":true}\n'
+    destination.write_bytes(prior)
+    stash = pytest.Stash()
+    stash[COLLECTOR], stash[SUITE_KEY] = Collector(), SUITE
+    config = SimpleNamespace(getoption=lambda name: str(destination), stash=stash)
+    initiating, cleanup = OSError("owned replace failure"), LookupError("owned unlink failure")
+    original_unlink, owned_temporaries = Path.unlink, set()
+
+    def refuse_replace(*_args):
+        raise initiating
+
+    def unlink(path, *args, **kwargs):
+        if path.parent == tmp_path and path != destination:
+            owned_temporaries.add(path)
+            if cleanup_fails:
+                raise cleanup
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(report_module.os, "replace", refuse_replace)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    try:
+        with pytest.raises((OSError, LookupError, BaseExceptionGroup)) as observed:
+            write_report(config, "fixture", atomic=True)
+        assert destination.read_bytes() == prior
+        if cleanup_fails:
+            assert isinstance(observed.value, BaseExceptionGroup)
+            assert observed.value.exceptions == (initiating, cleanup)
+        else:
+            assert observed.value is initiating
+            assert list(tmp_path.iterdir()) == [destination]
+    finally:
+        # Only temporaries observed from this writer are ours; keep the prior report.
+        for path in owned_temporaries:
+            original_unlink(path, missing_ok=True)
 
 
 def test_what_a_worker_noted_of_the_server_reaches_the_controller_once():
