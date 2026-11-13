@@ -106,7 +106,7 @@ def local_policy(tree, receiver):
     path.write_text(yaml.safe_dump(policy))
 
 
-@pytest.mark.parametrize("logical_limit", [None, 2])
+@pytest.mark.parametrize("logical_limit", [None, 3])
 def test_native_serial_node_shares_controller_release_and_budget(native_tree, logical_limit):
     tree, python, env = native_tree
     if logical_limit is not None:
@@ -114,8 +114,12 @@ def test_native_serial_node_shares_controller_release_and_budget(native_tree, lo
         source = tree / "acceptance/src/nci_si_acceptance/request_authorization.py"
         original = source.read_text()
         assert original.count("DEFAULT_LOGICAL = 256") == 1
-        source.write_text(original.replace("DEFAULT_LOGICAL = 256", "DEFAULT_LOGICAL = 2"))
-    expected = [("GET", DISCOVERY, b""), ("GET", DISCOVERY, b"")]
+        source.write_text(original.replace("DEFAULT_LOGICAL = 256", "DEFAULT_LOGICAL = 3"))
+    expected = [
+        ("GET", DISCOVERY, b""),
+        ("GET", DISCOVERY, b""),
+        ("GET", "/api/v1/metadata/terminologies", b""),
+    ]
     if logical_limit is None:
         expected.append(("GET", CONTENT, b""))
     row = {
@@ -128,7 +132,9 @@ def test_native_serial_node_shares_controller_release_and_budget(native_tree, lo
     concept = json.loads(
         (tree / "acceptance/fixtures/recorded/evs/concepts/C4817.json").read_text()
     )["response"]["body"]
-    with WireReceiver([response([row]), response([row]), response(concept)]) as receiver:
+    with WireReceiver(
+        [response([row]), response([row]), response([row]), response(concept)]
+    ) as receiver:
         local_policy(tree, receiver)
         outcome = run_native(tree, python, env, NODE, "-q", "-n", "0")
         expected_exit = 0 if logical_limit is None else 1
