@@ -71,6 +71,23 @@ def test_failure_before_process_acquisition_closes_actual_endpoints(tmp_path, mo
         anyio.run(_reap_for_test, resource)
 
 
+def test_missing_executable_is_reported_once_by_the_public_controlled_session(tmp_path):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    missing = tmp_path / "nonexistent-owned-executable"
+    assert not missing.exists()
+    with (
+        pytest.raises(BaseException) as outward,
+        owner,
+        open_session([str(missing)], {}, io.StringIO(), timeout=0.2, owner=owner),
+    ):
+        raise AssertionError("a nonexistent executable yielded a session")
+    summary = json.loads((owner.run.directory / "summary.json").read_text())
+    assert summary["state"] == "failed"
+    assert summary["observationComplete"] is True
+    assert owner.pending_owners == ()
+    assert list(map(type, failure_leaves(outward.value))) == [FileNotFoundError]
+
+
 def test_real_sdk_session_keeps_completion_pending_until_external_cleanup(tmp_path):
     replies = tmp_path / "replies.json"
     replies.write_text(
