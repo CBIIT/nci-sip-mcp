@@ -1,5 +1,6 @@
 """A pipe-close failure cannot erase the initiating event or certify completion."""
 
+import asyncio
 import io
 import subprocess
 import sys
@@ -15,6 +16,95 @@ from nci_si_acceptance.client import open_session
 from nci_si_acceptance.request_stdio import StderrTransfer, StdioOwner
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import RequestPolicyError
+
+
+async def cancel_owned_read(*_args):
+    task = asyncio.current_task()
+    assert task is not None
+    task.cancel()
+    await anyio.lowlevel.checkpoint()
+    raise AssertionError("owned read task did not cancel")
+
+
+@pytest.mark.parametrize(
+    "fault", ["stdin", "stdout", "stderr", "utf8", "broken-stdin", "cancel-read"]
+)
+def test_real_pipe_failures_preserve_the_original_error_and_actual_custody(
+    tmp_path, monkeypatch, fault
+):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    marker = tmp_path / "stdin-closed"
+    script = {
+        "utf8": (
+            "import sys;sys.stdout.buffer.write(b'\\xff\\n');"
+            "sys.stdout.buffer.flush();sys.stdin.buffer.read()"
+        ),
+        "broken-stdin": (
+            "import os,sys,time;from pathlib import Path;os.close(0);"
+            "Path(sys.argv[1]).touch();time.sleep(30)"
+        ),
+    }.get(fault, "import sys;sys.stdin.buffer.read()")
+    resource = StdioOwner(
+        owner, [sys.executable, "-c", script, str(marker)], {}, io.StringIO(), read_seconds=0.2
+    )
+    original_open = anyio.open_process
+    missing = fault in ("stdin", "stdout", "stderr")
+    initiated, original_initiate = threading.Event(), resource._initiate
+
+    def initiate(error):
+        original_initiate(error)
+        initiated.set()
+
+    async def open_process(*args, **options):
+        assert [options[name] for name in ("stdin", "stdout", "stderr")] == [subprocess.PIPE] * 3
+        if missing:
+            options[fault] = subprocess.DEVNULL  # Real nullable handle; faulted PIPE postcondition.
+        process = await original_open(*args, **options)
+        if fault == "broken-stdin":
+            with anyio.fail_after(2):
+                while not marker.exists():  # noqa: ASYNC110 - actual child filesystem readiness.
+                    await anyio.sleep(0.01)
+        elif fault == "cancel-read":
+            monkeypatch.setattr(process.stdout, "receive", cancel_owned_read)
+        return process
+
+    monkeypatch.setattr(anyio, "open_process", open_process)
+    monkeypatch.setattr(resource, "_initiate", initiate)
+    try:
+        with (
+            pytest.raises(
+                (RequestPolicyError, UnicodeDecodeError, asyncio.CancelledError, BaseExceptionGroup)
+            ) as outward,
+            owner,
+        ):
+            owner.register_completion(resource, participant="stdio")
+            resource.thread.start()
+            assert initiated.wait(2), "actual pipe failure was not recorded"
+            if fault not in ("broken-stdin", "cancel-read"):
+                resource.thread.join(5)
+                assert not resource.thread.is_alive()
+        assert failure_leaves(outward.value)[0] is resource.initiating
+        expected_type = {"utf8": UnicodeDecodeError, "cancel-read": asyncio.CancelledError}.get(
+            fault, RequestPolicyError
+        )
+        assert isinstance(resource.initiating, expected_type)
+        if isinstance(resource.initiating, RequestPolicyError):
+            assert resource.initiating.reason == ("accounting" if missing else "transport")
+        assert owner.pending_owners == ((resource.name,) if missing else ())
+        assert owner.snapshot()["state"] == "failed"
+        assert owner.snapshot()["observationComplete"] is (not missing)
+        assert type(resource.process.returncode) is int
+        assert resource.waited
+        assert resource.process_closed
+        assert [
+            (s.open_send_streams, s.open_receive_streams)
+            for s in (resource.read.statistics(), resource.write.statistics())
+        ] == [(0, 0), (0, 0)]
+    finally:
+        resource._stop.set()
+        resource.thread.join(5)
+        assert not resource.thread.is_alive()
+        anyio.run(_reap_for_test, resource)
 
 
 def test_accepted_thread_start_failure_retains_each_resource_until_fallback(tmp_path, monkeypatch):
