@@ -125,7 +125,7 @@ class TestReportWorkflowTest(unittest.TestCase):
                             "COVERAGE_PROCESS_START": "${{ github.workspace }}/tmp/mutation-config/.coveragerc",
                             "UNIT_SHARD": "${{ matrix.shard }}",
                         },
-                        "run": 'pdm run test --unit-shard "$UNIT_SHARD" -n 0 -p scripts.validation.mutation_probe --cov-config=tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= --junitxml=tmp/test-results/unit.xml',
+                        "run": 'pdm run test --unit-shard "$UNIT_SHARD" -n 0 -p scripts.validation.mutation_probe --cov-config=tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= --junitxml=tmp/test-results/unit.xml -vv --durations=20 -o faulthandler_timeout=60',
                     },
                     {
                         "name": "Summarize test results",
