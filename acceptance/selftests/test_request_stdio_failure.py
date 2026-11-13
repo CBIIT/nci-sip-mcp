@@ -83,13 +83,16 @@ def test_real_pipe_failures_preserve_the_original_error_and_actual_custody(
             if fault not in ("broken-stdin", "cancel-read"):
                 resource.thread.join(5)
                 assert not resource.thread.is_alive()
-        assert failure_leaves(outward.value)[0] is resource.initiating
+        leaves = failure_leaves(outward.value)
         expected_type = {"utf8": UnicodeDecodeError, "cancel-read": asyncio.CancelledError}.get(
             fault, RequestPolicyError
         )
-        assert isinstance(resource.initiating, expected_type)
-        if isinstance(resource.initiating, RequestPolicyError):
-            assert resource.initiating.reason == ("accounting" if missing else "transport")
+        # Missing handles fail both the initial pipe contract and the actual close attempt.
+        assert list(map(type, leaves)) == [expected_type] * (2 if missing else 1)
+        if expected_type is RequestPolicyError:
+            assert [error.reason for error in leaves] == (
+                ["accounting", "accounting"] if missing else ["transport"]
+            )
         assert owner.pending_owners == ((resource.name,) if missing else ())
         assert owner.snapshot()["state"] == "failed"
         assert owner.snapshot()["observationComplete"] is (not missing)
