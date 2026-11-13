@@ -1,4 +1,4 @@
-FROM public.ecr.aws/amazonlinux/amazonlinux@sha256:3f09d02367148ef8086b8dc7ce098d16b21da58bbfe1e1167da25a17df8f0e51 AS base
+FROM public.ecr.aws/amazonlinux/amazonlinux@sha256:5c6ed3b38335b2aa424a045f1e564c8c508409ead0ff3f8bf5e62c31b94082cb AS base
 RUN dnf -y upgrade --refresh
 RUN dnf -y install python3.14 libgomp
 RUN dnf clean all
