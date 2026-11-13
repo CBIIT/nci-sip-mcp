@@ -283,8 +283,9 @@ class SupervisedRun:
         errors.extend(self._collect([self._seal_registry]))
         self._stop.set()
         resources = self._collect([self._join])
+        known: list[BaseException] = []
         if terminal:
-            known = self._collect([self._terminal_failure])
+            known = self._collect([lambda: self._terminal_failure(errors)])
             errors[:0] = [error for error in known if not self._contains(errors, error)]
         actions: list[Callable[[], None]] = [
             lambda child=child: self._finish_child(child) for child in self._children
@@ -294,7 +295,7 @@ class SupervisedRun:
             resources.extend(self._settle_completions())
             self._resources_complete = not resources
         errors.extend(resources)
-        errors.extend(self._observed_failures(errors))
+        errors.extend(self._observed_failures(errors, observe_terminal=not known))
 
     def _settle_completions(self) -> list[BaseException]:
         deadline = self.cleanup_deadline()
@@ -328,23 +329,25 @@ class SupervisedRun:
         except BaseException as error:  # noqa: BLE001 - outside owner re-raises thread failures.
             errors.append(error)
 
-    def _observed_failures(self, errors: list[BaseException]) -> list[BaseException]:
+    def _observed_failures(
+        self, errors: list[BaseException], *, observe_terminal: bool
+    ) -> list[BaseException]:
         observed: list[BaseException] = list(self._child_errors.values())
         if self._observer_error is not None:
             observed.append(self._observer_error)
         observed.extend(self._recording_errors)
-        if self._controlled_cleanup:
-            observed.extend(self._collect([self._terminal_failure]))
+        if self._controlled_cleanup and observe_terminal:
+            observed.extend(self._collect([lambda: self._terminal_failure(errors)]))
         return [error for error in observed if not self._contains(errors, error)]
 
     def _seal_registry(self) -> None:
         self._registrations.append(None)
         self._completions.seal()
 
-    def _terminal_failure(self) -> None:
+    def _terminal_failure(self, errors: list[BaseException]) -> None:
         self.run.snapshot()  # Validate private identity and counters before selecting the event.
         failure, event = self.run._failure_record()
-        if failure is not None:
+        if failure is not None and (event is None or not self._contains(errors, event)):
             raise event or RequestPolicyError(failure)
 
     @staticmethod
