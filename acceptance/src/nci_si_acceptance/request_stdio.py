@@ -248,8 +248,7 @@ class StdioOwner:
             await anyio.sleep(STOP_POLL_SECONDS)
 
     def _process(self) -> Process:
-        if self.process is None:
-            raise RequestPolicyError("accounting")
+        assert self.process is not None  # noqa: S101 - pumps/cleanup follow successful acquisition.
         return self.process
 
     async def _pump(self, name: str, action: Callable[[], Awaitable[None]]) -> None:

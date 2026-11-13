@@ -69,8 +69,7 @@ def _selection(config: pytest.Config, target: Target) -> Environment:
     )
     if not all(valid):
         raise ValueError(REFUSAL)
-    if target.environment is None:
-        raise ValueError(REFUSAL)
+    assert target.environment is not None  # noqa: S101 - frozen Target.from_env validates live state.
     return target.environment
 
 
