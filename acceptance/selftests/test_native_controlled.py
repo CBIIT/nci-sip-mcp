@@ -17,7 +17,7 @@ from nci_si_acceptance import environments
 
 NODE = "tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance"
 DISCOVERY = "/api/v1/metadata/terminologies?terminology=ncit&latest=true&tag=monthly"
-CONTENT = "/api/v1/concept/ncit_26.09d/C4817?include=full"
+CONTENT = "/api/v1/concept/ncit_26.09d/C4817?include=minimal"
 
 
 @pytest.fixture
