@@ -5,15 +5,16 @@ import sys
 import threading
 from contextlib import contextmanager
 
-from test_request_supervision import authorization
+from test_request_supervision import authorization, failure_leaves
 
 from nci_si_acceptance import request_children, request_supervision
 from nci_si_acceptance.request_stdio import _PortalCall
 from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_si_mcp.errors import RequestPolicyError
 
 
 @contextmanager
-def held_pipe_child(release, closing):
+def held_pipe_child(release, closing, *, failure=None):
     child = subprocess.Popen(
         [sys.executable, "-c", "pass"],
         stdin=subprocess.PIPE,
@@ -23,10 +24,16 @@ def held_pipe_child(release, closing):
     stream = child.stdout
 
     class HeldPipe:
+        @property
+        def closed(self):
+            return stream.closed
+
         def close(self):
             closing.set()
             release.wait()
             stream.close()
+            if failure is not None:
+                raise failure
 
     try:
         assert child.wait(timeout=3) == 0
@@ -39,6 +46,40 @@ def held_pipe_child(release, closing):
             pipe.close()
         assert child.wait(timeout=3) == 0
         assert all(pipe.closed for pipe in (child.stdin, child.stdout, child.stderr))
+
+
+def test_failed_child_close_preserves_initiating_failure_and_pending_custody(tmp_path):
+    release, closing = threading.Event(), threading.Event()
+    release.set()
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    call = _PortalCall(lambda: "settled")
+    initiating = LookupError("owned initiating event")
+    with held_pipe_child(release, closing, failure=OSError("owned close failure")) as child:
+        outward = None
+        try:
+            with owner:
+                owner.register_child(child, participant="worker", role="worker")
+                owner.register_completion(call, participant="caller")
+                call.start()
+                raise initiating
+        except Exception as error:  # noqa: BLE001 - compare the distinct original outcomes below.
+            outward = error
+        try:
+            errors = failure_leaves(outward)
+            assert errors[0] is initiating
+            assert list(map(type, errors)) == [LookupError, RequestPolicyError]
+            assert errors[1].reason == "accounting"
+            assert owner.pending_owners == ("controlled-child-close-worker",)
+            assert (owner.snapshot()["state"], owner.snapshot()["observationComplete"]) == (
+                "failed",
+                False,
+            )
+            assert child.returncode == 0
+            assert all(pipe.closed for pipe in (child.stdin, child.stdout, child.stderr))
+        finally:
+            if call.thread.ident is not None:
+                call.thread.join(2)
+            assert not call.thread.is_alive()
 
 
 def test_mixed_owners_retain_the_original_deadline_and_actual_pending_custody(
