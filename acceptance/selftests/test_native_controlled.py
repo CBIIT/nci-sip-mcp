@@ -495,10 +495,17 @@ def _measured_native(tree, root, packages, environment, node):
         return
     if not parent.get_option("run:branch"):
         raise ValueError("native measurement requires branch coverage")
+    sources = parent.get_option("run:source")
+    if not sources:
+        raise ValueError("native measurement requires explicit source scope")
+    sources = [
+        str(tree / Path(source).relative_to(root)) if Path(source).is_absolute() else source
+        for source in sources
+    ]
     config = tree / ".native-coverage.ini"
     config.write_text(
         "[run]\nbranch = True\nparallel = True\ncore = ctrace\npatch = subprocess\n"
-        f"source =\n    {tree / 'src'}\n    {tree / 'acceptance/src'}\n"
+        "source =\n    " + "\n    ".join(sources) + "\n"
         f"data_file = {tree / '.native-coverage-data'}\ncontext = ${{NATIVE_COVERAGE_CONTEXT?}}\n"
     )
     (packages / "z-native-coverage.pth").write_text("import coverage; coverage.process_startup()\n")
