@@ -590,9 +590,10 @@ def test_a_worker_writes_no_report_for_the_controller_to_overwrite(tmp_path):
     assert not (tmp_path / "report.json").exists()
 
 
+@pytest.mark.parametrize("fault", ["fsync", "replace"])
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_atomic_report_preserves_prior_file_and_each_publication_failure(
-    tmp_path, monkeypatch, cleanup_fails
+    tmp_path, monkeypatch, cleanup_fails, fault
 ):
     destination = tmp_path / "report.json"
     prior = b'{"prior":true}\n'
@@ -600,10 +601,10 @@ def test_atomic_report_preserves_prior_file_and_each_publication_failure(
     stash = pytest.Stash()
     stash[COLLECTOR], stash[SUITE_KEY] = Collector(), SUITE
     config = SimpleNamespace(getoption=lambda name: str(destination), stash=stash)
-    initiating, cleanup = OSError("owned replace failure"), LookupError("owned unlink failure")
+    initiating, cleanup = OSError("owned publication failure"), LookupError("owned unlink failure")
     original_unlink, owned_temporaries = Path.unlink, set()
 
-    def refuse_replace(*_args):
+    def refuse_publication(*_args):
         raise initiating
 
     def unlink(path, *args, **kwargs):
@@ -613,7 +614,7 @@ def test_atomic_report_preserves_prior_file_and_each_publication_failure(
                 raise cleanup
         return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(report_module.os, "replace", refuse_replace)
+    monkeypatch.setattr(report_module.os, fault, refuse_publication)
     monkeypatch.setattr(Path, "unlink", unlink)
     try:
         with pytest.raises((OSError, LookupError, BaseExceptionGroup)) as observed:
