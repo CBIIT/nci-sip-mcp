@@ -198,6 +198,88 @@ def test_native_serial_node_shares_controller_release_and_budget(native_tree, lo
     assert summary["reservations"]["logical"] == len(expected)
 
 
+@pytest.mark.parametrize("late", [False, True])
+def test_native_publication_failure_keeps_an_incomplete_or_prior_report(native_tree, late):
+    tree, python, env = native_tree
+    plugin = tree / "acceptance/src/native_publication_probe.py"
+    plugin.write_text(
+        f"late = {late!r}\n"
+        + """
+from pathlib import Path
+from nci_si_acceptance import report
+original, count = report._publish_native, 0
+def publish(path, text):
+    global count
+    count += 1
+    if not late or count > 1:
+        raise OSError('owned native publication failure')
+    original(path, text)
+    Path('tmp/initial-native-report.json').write_bytes(path.read_bytes())
+report._publish_native = publish
+"""
+    )
+    directory = tree / "acceptance/tmp"
+    directory.mkdir()
+    destination, prior = directory / "native-report.json", b'{"prior":true}\n'
+    destination.write_bytes(prior)
+    row = {
+        "terminology": "ncit",
+        "latest": True,
+        "tags": {"monthly": "true"},
+        "version": "26.09d",
+        "terminologyVersion": "ncit_26.09d",
+    }
+    concept = json.loads(
+        (tree / "acceptance/fixtures/recorded/evs/concepts/C4817.json").read_text()
+    )["response"]["body"]
+    expected = (
+        [
+            ("GET", DISCOVERY, b""),
+            ("GET", DISCOVERY, b""),
+            ("GET", "/api/v1/metadata/terminologies", b""),
+            ("GET", CONTENT, b""),
+        ]
+        if late
+        else []
+    )
+    with WireReceiver(
+        [response([row]), response([row]), response([row]), response(concept)]
+    ) as receiver:
+        local_policy(tree, receiver)
+        expected_suite = identity(tree)
+        outcome = run_native(
+            tree,
+            python,
+            env,
+            NODE,
+            "-p",
+            "native_publication_probe",
+            "-n",
+            "0",
+            "--junitxml=tmp/native-junit.xml",
+        )
+        assert outcome.returncode != 0
+        assert "owned native publication failure" in outcome.stdout + outcome.stderr
+        assert [
+            (method, path, body) for method, path, _headers, body in receiver.requests
+        ] == expected
+        assert receiver.contacts == len(expected)
+    if late:
+        assert destination.read_bytes() == (directory / "initial-native-report.json").read_bytes()
+        report = json.loads(destination.read_text())
+        assert report["run"] is None
+        assert report["tests"] == {}
+        assert report["suite"] == expected_suite
+        cases = ElementTree.parse(  # noqa: S314 - owned pytest artifact, not external XML.
+            directory / "native-junit.xml"
+        ).findall(".//testcase")
+        assert len(cases) == 1
+        assert cases[0].find("failure") is None and cases[0].find("error") is None
+    else:
+        assert destination.read_bytes() == prior
+        assert not (directory / "native-run").exists()
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
@@ -315,3 +397,81 @@ print('authenticated attachment and four pre-import refusals')
         assert outcome.returncode == 0, outcome.stdout + outcome.stderr
         assert receiver.contacts == 0
     assert outcome.stdout.strip() == "authenticated attachment and four pre-import refusals"
+
+
+def test_native_postspawn_failure_reaps_child_and_closes_transferred_stderr(native_tree):
+    tree, python, env = native_tree
+    (tree / "acceptance/src/native_postspawn_probe.py").write_text("""
+import json
+from pathlib import Path
+from nci_si_acceptance.request_stdio import StdioOwner, StderrTransfer
+from nci_si_mcp.errors import RequestPolicyError
+original_finish, original_stderr = StdioOwner.finish, StderrTransfer.finish
+async def fail_after_handle(self, portal):
+    assert self.process is not None
+    raise LookupError('native postspawn failure')
+def finish(self, deadline):
+    try:
+        return original_finish(self, deadline)
+    finally:
+        try:
+            self.controller.run.authorize_participant('too-late')
+            admission = 'admitted'
+        except RequestPolicyError as error:
+            admission = error.reason
+        states = (self.read.statistics(), self.write.statistics())
+        Path('tmp/native-postspawn.json').write_text(json.dumps({
+            'returncode': None if self.process is None else self.process.returncode,
+            'waited': self.waited, 'process_closed': self.process_closed,
+            'thread_alive': self.thread.is_alive(), 'admission': admission,
+            'endpoints': [[s.open_send_streams, s.open_receive_streams] for s in states]}))
+def stderr_finish(self, deadline):
+    original_stderr(self, deadline)
+    Path('tmp/native-stderr-closed.json').write_text(json.dumps(self.stream.closed))
+StdioOwner._io_scope, StdioOwner.finish = fail_after_handle, finish
+StderrTransfer.finish = stderr_finish
+""")
+    row = {
+        "terminology": "ncit",
+        "latest": True,
+        "tags": {"monthly": "true"},
+        "version": "26.09d",
+        "terminologyVersion": "ncit_26.09d",
+    }
+    with WireReceiver([response([row])]) as receiver:
+        local_policy(tree, receiver)
+        expected_suite = identity(tree)
+        outcome = run_native(tree, python, env, NODE, "-p", "native_postspawn_probe", "-n", "0")
+        assert outcome.returncode != 0
+        assert "native postspawn failure" in outcome.stdout + outcome.stderr
+        assert [(method, path, body) for method, path, _headers, body in receiver.requests] == [
+            ("GET", DISCOVERY, b"")
+        ]
+        assert receiver.contacts == 1
+    directory = tree / "acceptance/tmp"
+    receipt = json.loads((directory / "native-postspawn.json").read_text())
+    assert type(receipt.pop("returncode")) is int
+    assert receipt == {
+        "waited": True,
+        "process_closed": True,
+        "thread_alive": False,
+        "admission": "closed",
+        "endpoints": [[0, 0], [0, 0]],
+    }
+    assert json.loads((directory / "native-stderr-closed.json").read_text()) is True
+    report = json.loads((directory / "native-report.json").read_text())
+    assert report["suite"] == expected_suite
+    assert report["tests"] == {
+        NODE: {"tool": "get_concept", "gate": False, "outcome": "failed", "unmatched": []}
+    }
+    assert report["run"] == {
+        "exit_status": 1,
+        "selected": 1,
+        "finished": 1,
+        "worker_crashes": 0,
+    }
+    summaries = tuple((directory / "native-run").glob("*/summary.json"))
+    assert len(summaries) == 1
+    summary = json.loads(summaries[0].read_text())
+    assert summary["state"] == "failed"
+    assert summary["observationComplete"] is True
