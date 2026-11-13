@@ -11,7 +11,7 @@ import pytest
 from test_request_stdio import _reap_for_test
 from test_request_supervision import authorization, failure_leaves
 
-from nci_si_acceptance import request_children
+from nci_si_acceptance import request_children, request_stdio
 from nci_si_acceptance.client import open_session
 from nci_si_acceptance.request_stdio import StderrTransfer, StdioOwner
 from nci_si_acceptance.request_supervision import SupervisedRun
@@ -305,6 +305,92 @@ def test_failed_pipe_close_preserves_initiating_and_cleanup_failures(
         resource._stop.set()
         resource.thread.join(5)
         assert not resource.thread.is_alive()
+
+
+@pytest.fixture
+def cleanup_case(tmp_path, monkeypatch, fault):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    resource = StdioOwner(
+        owner, [sys.executable, "-c", "import time;time.sleep(30)"], {}, io.StringIO()
+    )
+    initiating, cleanup = LookupError("owned initiating event"), LookupError("owned cleanup event")
+    opened, closed, admission = anyio.open_process, resource._close, owner._close_admission
+    attempted = set()
+
+    async def open_process(*args, **options):
+        process = await opened(*args, **options)
+        wait = process.wait
+
+        async def failed_wait():
+            if "wait" not in attempted:
+                attempted.add("wait")
+                raise cleanup
+            return await wait()
+
+        def failed_signal():
+            raise OSError("owned signal failure")
+
+        if fault == "wait":
+            monkeypatch.setattr(process, "wait", failed_wait)
+        if fault == "signal":
+            monkeypatch.setattr(process, "terminate", failed_signal)
+        return process
+
+    async def fail_after_spawn(_portal):
+        raise initiating
+
+    async def close(name):
+        await closed(name)
+        if fault == "close" and name == "stdin":
+            raise cleanup
+
+    def close_admission():
+        admission()
+        if fault == "admission" and "admission" not in attempted:
+            attempted.add("admission")
+            raise cleanup
+
+    monkeypatch.setattr(request_stdio, "EXIT_SECONDS", 0.02)
+    monkeypatch.setattr(anyio, "open_process", open_process)
+    monkeypatch.setattr(resource, "_io_scope", fail_after_spawn)
+    monkeypatch.setattr(resource, "_close", close)
+    monkeypatch.setattr(owner, "_close_admission", close_admission)
+    try:
+        yield owner, resource, initiating, cleanup
+    finally:
+        resource._stop.set()
+        resource.thread.join(5)
+        assert not resource.thread.is_alive()
+        anyio.run(_reap_for_test, resource)
+
+
+@pytest.mark.parametrize("fault", ["close", "wait", "signal", "admission"])
+def test_cleanup_operation_failures_preserve_their_actual_result(cleanup_case, fault):
+    owner, resource, initiating, cleanup = cleanup_case
+    with pytest.raises(BaseExceptionGroup) as outward, owner:
+        owner.register_completion(resource, participant="stdio")
+        resource.thread.start()
+        resource.portal_ready.result(timeout=3)
+    assert not resource.thread.is_alive()
+    assert type(resource.process.returncode) is int
+    assert resource.waited and resource.process_closed
+    assert resource.closed == {"stdin", "stdout", "stderr"}
+    assert [
+        (s.open_send_streams, s.open_receive_streams)
+        for s in (resource.read.statistics(), resource.write.statistics())
+    ] == [(0, 0), (0, 0)]
+    assert owner.pending_owners == (resource.name,)
+    assert (owner.snapshot()["state"], owner.snapshot()["observationComplete"]) == ("failed", False)
+    leaves = failure_leaves(outward.value)
+    assert list(map(type, leaves)) == [
+        LookupError,
+        RequestPolicyError if fault == "signal" else LookupError,
+    ]
+    assert leaves[0] is initiating
+    if fault == "signal":
+        assert leaves[1].reason == "accounting"
+    else:
+        assert leaves[1] is cleanup
 
 
 def test_actual_stdout_backpressure_cannot_extend_the_shared_cleanup_deadline(
