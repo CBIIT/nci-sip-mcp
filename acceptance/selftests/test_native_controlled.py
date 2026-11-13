@@ -564,3 +564,38 @@ def test_native_measurement_attests_source_and_context(
         assert mutation_run.selection(mapping, "a.py", 1, 1) == {
             "selftest": [node] if context.endswith("|run") else []
         }
+
+
+@pytest.mark.parametrize("scope", ["harness", "mutation", "missing", "foreign"])
+def test_native_measurement_preserves_the_parent_source_scope(tmp_path, monkeypatch, scope):
+    root, tree, packages = (tmp_path / name for name in ("root", "copy", "packages"))
+    for folder in (root, tree, packages):
+        folder.mkdir()
+    sources = {
+        "harness": ["nci_si_acceptance"],
+        "mutation": [str(root / name) for name in ("src", "scripts", "acceptance/src")],
+        "missing": None,
+        "foreign": [str(tmp_path / "another-checkout/src")],
+    }[scope]
+    parent = Coverage(
+        branch=True, source=sources, config_file=False, data_file=str(tmp_path / "parent-coverage")
+    )
+    monkeypatch.setattr(Coverage, "current", lambda: parent)
+    environment = {}
+    if scope in {"missing", "foreign"}:
+        with (
+            pytest.raises(ValueError),
+            _measured_native(tree, root, packages, environment, "owner"),
+        ):
+            raise AssertionError("unsupported source scope admitted")
+        assert environment == {} and list(tree.iterdir()) == []
+        return
+    with _measured_native(tree, root, packages, environment, "owner"):
+        monkeypatch.setenv("NATIVE_COVERAGE_CONTEXT", "owner|setup")
+        child = Coverage(config_file=environment["COVERAGE_PROCESS_START"])
+        assert child.get_option("run:source") == (
+            ["nci_si_acceptance"]
+            if scope == "harness"
+            else [str(tree / name) for name in ("src", "scripts", "acceptance/src")]
+        )
+        assert parent.get_option("run:source") == sources
