@@ -7,6 +7,7 @@ import sys
 import sysconfig
 import venv
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 import yaml
@@ -18,6 +19,7 @@ from nci_si_acceptance import environments
 NODE = "tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance"
 DISCOVERY = "/api/v1/metadata/terminologies?terminology=ncit&latest=true&tag=monthly"
 CONTENT = "/api/v1/concept/ncit_26.09d/C4817?include=minimal"
+SHA256_LENGTH = 64
 
 
 @pytest.fixture
@@ -109,6 +111,12 @@ def local_policy(tree, receiver):
 @pytest.mark.parametrize("logical_limit", [None, 3])
 def test_native_serial_node_shares_controller_release_and_budget(native_tree, logical_limit):
     tree, python, env = native_tree
+    env["NCI_SI_EVS_LICENSE_KEY"] = "native-synthetic-key"
+    (tree / "acceptance/src/native_credentials_probe.py").write_text(
+        "import os\n"
+        "def pytest_sessionstart(session):\n"
+        "    os.environ['NCI_SI_EVS_LICENSE_KEY'] = 'later-synthetic-key'\n"
+    )
     if logical_limit is not None:
         # Only this owned copy changes; controller and isolated child compile the same limit.
         source = tree / "acceptance/src/nci_si_acceptance/request_authorization.py"
@@ -136,14 +144,45 @@ def test_native_serial_node_shares_controller_release_and_budget(native_tree, lo
         [response([row]), response([row]), response([row]), response(concept)]
     ) as receiver:
         local_policy(tree, receiver)
-        outcome = run_native(tree, python, env, NODE, "-q", "-n", "0")
+        outcome = run_native(
+            tree,
+            python,
+            env,
+            NODE,
+            "-q",
+            "-n",
+            "0",
+            "--junitxml=tmp/native-junit.xml",
+            "-p",
+            "native_credentials_probe",
+        )
         expected_exit = 0 if logical_limit is None else 1
         assert outcome.returncode == expected_exit, outcome.stdout + outcome.stderr
         assert [
             (method, path, body) for method, path, _headers, body in receiver.requests
         ] == expected
         assert receiver.contacts == len(receiver.requests)
+        assert [
+            {key.lower(): value for key, value in headers}["x-evsrestapi-license-key"]
+            for _method, _path, headers, _body in receiver.requests
+        ] == ["native-synthetic-key"] * len(expected)
     report = json.loads((tree / "acceptance/tmp/native-report.json").read_text())
+    assert "synthetic-key" not in json.dumps(report)
+    assert report["tests"] == {
+        NODE: {
+            "tool": "get_concept",
+            "gate": False,
+            "outcome": "passed" if logical_limit is None else "failed",
+            "unmatched": [],
+        }
+    }
+    if logical_limit is not None:
+        failure = ElementTree.parse(  # noqa: S314 - owned pytest artifact, not external XML.
+            tree / "acceptance/tmp/native-junit.xml"
+        ).find(".//testcase/failure")
+        assert failure is not None
+        assert "assert not result.is_error, result.content" in (failure.text or "")
+        assert "Controlled upstream request refused." in (failure.text or "")
     summaries = tuple((tree / "acceptance/tmp/native-run").glob("*/summary.json"))
     assert len(summaries) == 1
     summary = json.loads(summaries[0].read_text())
@@ -181,3 +220,97 @@ def test_unsupported_controlled_selections_have_no_resources_or_contacts(native_
         assert not (tree / "acceptance/tmp/native-report.json").exists()
         assert receiver.contacts == 0
         assert "controlled run requires the exact supported serial selection" in outcome.stderr
+
+
+@pytest.mark.parametrize("before_collection", [False, True])
+def test_native_startup_or_effective_collection_failure_acquires_nothing(
+    native_tree, before_collection
+):
+    tree, python, env = native_tree
+    plugin = tree / "acceptance/src/native_boundary_probe.py"
+    plugin.write_text(
+        "def pytest_sessionstart(session):\n    raise RuntimeError('owned startup stop')\n"
+        if before_collection
+        else "def pytest_collection_modifyitems(items):\n    items.clear()\n"
+    )
+    with WireReceiver() as receiver:
+        local_policy(tree, receiver)
+        outcome = run_native(tree, python, env, NODE, "-p", "native_boundary_probe", "-n", "0")
+        assert outcome.returncode != 0, outcome.stdout + outcome.stderr
+        assert receiver.contacts == 0
+        assert not (tree / "acceptance/tmp/native-run").exists()
+    report = json.loads((tree / "acceptance/tmp/native-report.json").read_text())
+    assert report["tests"] == {}
+    assert len(report["suite"]["digest"]) == SHA256_LENGTH
+    assert report["environment"]["name"] == "evs-only"
+    if before_collection:
+        assert report["run"] is None
+    else:
+        assert report["run"] == {
+            "exit_status": 4,
+            "selected": 0,
+            "finished": 0,
+            "worker_crashes": 0,
+        }
+
+
+def test_native_handoff_refuses_before_operational_imports(native_tree):
+    tree, python, env = native_tree
+    script = """
+import json, os, sys
+from pathlib import Path
+from nci_si_acceptance.environments import selection
+from nci_si_acceptance.request_catalogue import compile_policy
+from nci_si_acceptance.request_budget import ControlledRun
+from nci_si_acceptance.request_native import _handoff_run, native_policy
+from nci_si_mcp.errors import RequestPolicyError
+blocked = {'nci_si_mcp.http_client', 'nci_si_mcp.evs', 'nci_si_mcp.registry',
+           'nci_si_acceptance.request_transport', 'nci_si_acceptance.client'}
+class Guard:
+    def find_spec(self, fullname, path=None, target=None):
+        assert fullname not in blocked, fullname
+sys.meta_path.insert(0, Guard())
+assert not blocked.intersection(sys.modules)
+environment = selection('live')
+assert environment is not None
+run = ControlledRun.create(compile_policy(environment).authorization, Path('tmp/bootstrap-run'))
+try:
+    run.open()
+    run.authorize_participant('native-serial')
+    path = run.directory / 'handoff.json'
+    record = {'environment': environment.to_record(), 'run': run.descriptor.to_record(),
+              'participant': 'native-serial'}
+    path.write_text(json.dumps(record))
+    assert _handoff_run(str(path)).participant == 'native-serial'
+    os.environ['NCI_SI_ACCEPTANCE_RUN_HANDOFF'] = str(path)
+    for defect in ('shape', 'environment', 'participant', 'descriptor'):
+        candidate = json.loads(json.dumps(record))
+        if defect == 'shape': candidate = {}
+        elif defect == 'environment': candidate['environment']['policy_sha256'] = '0' * 64
+        elif defect == 'participant': candidate['participant'] = 'foreign'
+        else: candidate['run'] = {}
+        path.write_text(json.dumps(candidate))
+        try:
+            with native_policy():
+                raise AssertionError('invalid handoff admitted')
+        except RequestPolicyError as error:
+            assert error.reason == 'authorization'
+        assert not blocked.intersection(sys.modules)
+finally:
+    run.close()
+print('authenticated attachment and four pre-import refusals')
+"""
+    with WireReceiver() as receiver:
+        local_policy(tree, receiver)
+        outcome = subprocess.run(  # noqa: S603 - owned furnished isolated interpreter.
+            [str(python), "-I", "-c", script],
+            cwd=tree,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert outcome.returncode == 0, outcome.stdout + outcome.stderr
+        assert receiver.contacts == 0
+    assert outcome.stdout.strip() == "authenticated attachment and four pre-import refusals"
