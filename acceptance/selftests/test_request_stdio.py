@@ -38,6 +38,38 @@ async def _reap_for_test(resource):
         await stream.aclose()
 
 
+def test_failure_before_process_acquisition_closes_actual_endpoints(tmp_path, monkeypatch):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    resource = StdioOwner(owner, [sys.executable, "-c", "pass"], {}, io.StringIO())
+    initiating = FileNotFoundError("owned acquisition failure")
+
+    async def refuse_acquisition(*_args, **_kwargs):
+        raise initiating
+
+    monkeypatch.setattr(anyio, "open_process", refuse_acquisition)
+    try:
+        with pytest.raises((RequestPolicyError, BaseExceptionGroup)), owner:
+            owner.register_completion(resource, participant="stdio")
+            resource.thread.start()
+            resource.thread.join(2)
+            assert not resource.thread.is_alive()
+        assert failure_leaves(resource.initiating) == [initiating]
+        assert resource.process is None
+        assert resource.waited is False
+        assert resource.process_closed is False
+        assert [
+            (state.open_send_streams, state.open_receive_streams)
+            for state in (resource.read.statistics(), resource.write.statistics())
+        ] == [(0, 0), (0, 0)]
+        summary = json.loads((owner.run.directory / "summary.json").read_text())
+        assert summary["state"] == "failed"
+        assert summary["observationComplete"] is True
+    finally:
+        resource.thread.join(2)
+        assert not resource.thread.is_alive()
+        anyio.run(_reap_for_test, resource)
+
+
 def test_real_sdk_session_keeps_completion_pending_until_external_cleanup(tmp_path):
     replies = tmp_path / "replies.json"
     replies.write_text(
