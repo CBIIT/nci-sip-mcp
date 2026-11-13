@@ -48,7 +48,7 @@ def test_failure_before_process_acquisition_closes_actual_endpoints(tmp_path, mo
 
     monkeypatch.setattr(anyio, "open_process", refuse_acquisition)
     try:
-        with pytest.raises((RequestPolicyError, BaseExceptionGroup)), owner:
+        with pytest.raises((RequestPolicyError, BaseExceptionGroup)) as outward, owner:
             owner.register_completion(resource, participant="stdio")
             resource.thread.start()
             resource.thread.join(2)
@@ -64,6 +64,7 @@ def test_failure_before_process_acquisition_closes_actual_endpoints(tmp_path, mo
         summary = json.loads((owner.run.directory / "summary.json").read_text())
         assert summary["state"] == "failed"
         assert summary["observationComplete"] is True
+        assert list(map(type, failure_leaves(outward.value))) == [RequestPolicyError]
     finally:
         resource.thread.join(2)
         assert not resource.thread.is_alive()
