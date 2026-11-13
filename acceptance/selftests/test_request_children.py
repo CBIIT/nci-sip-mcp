@@ -1,6 +1,8 @@
 """Receipts have run-local authority and require actual outside-thread settlement."""
 
 import json
+import subprocess
+import sys
 import threading
 import time
 from contextlib import nullcontext
@@ -96,6 +98,57 @@ def test_foreign_or_changed_receipt_cannot_clear_an_owner(calls, corruption):
             object.__setattr__(token, field, value)
     registry.settle(token, CleanupDeadline())
     assert registry.pending == () and call.result.result() == "completed"
+
+
+def test_completion_cleanup_sees_closed_admission(tmp_path):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    admitted = []
+
+    class Completion:
+        name = "admission-witness"
+
+        def finish(self, _deadline):
+            try:
+                with owner.run.logical(authorization().grants[0]):
+                    admitted.append(True)
+            except RequestPolicyError:
+                admitted.append(False)
+
+    try:
+        with owner:
+            owner.register_completion(Completion(), participant="witness")
+    except RequestPolicyError:
+        pass  # The real refused admission is terminal, even during cleanup.
+    assert admitted == [False]
+    assert owner.run.snapshot().logical == 0
+    assert owner.pending_owners == ()
+
+
+def test_successful_controlled_child_releases_actual_custody(tmp_path, calls):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    call = calls(lambda: "settled")
+    with subprocess.Popen(
+        [sys.executable, "-I", "-c", "pass"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+        failure = None
+        try:
+            with owner:
+                assert child.wait(timeout=3) == 0
+                owner.register_child(child, participant="worker", role="worker")
+                owner.register_completion(call, participant="caller")
+                call.start()
+        except RequestPolicyError as error:
+            failure = error.reason
+        assert failure is None
+        assert child.returncode == 0
+        assert all(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
+        assert not call.thread.is_alive() and call.result.result() == "settled"
+        assert owner.pending_owners == ()
+        summary = json.loads((owner.run.directory / "summary.json").read_text())
+        assert summary["state"] == "completed" and summary["observationComplete"] is True
 
 
 def test_sealed_receipt_is_one_use_and_callbacks_do_not_hold_registry_lock(calls):

@@ -332,14 +332,29 @@ def test_native_startup_or_effective_collection_failure_acquires_nothing(
         }
 
 
-def test_native_handoff_refuses_before_operational_imports(native_tree):
+@pytest.mark.parametrize("origin", ["furnished", "interpreter", "module", "compiled"])
+def test_native_handoff_refuses_before_operational_imports(native_tree, origin):
     tree, python, env = native_tree
+    catalogue = tree / "acceptance/src/nci_si_acceptance/request_catalogue.py"
+    catalogue.with_name("foreign_catalogue.py").write_bytes(catalogue.read_bytes())
+    (tree / "acceptance/src/foreign_wrapper.py").write_text(
+        "from functools import wraps\n"
+        "def decorate(function):\n"
+        "    @wraps(function)\n"
+        "    def wrapped(*args, **kwargs):\n"
+        "        return function(*args, **kwargs)\n"
+        "    return wrapped\n"
+    )
     script = """
-import json, os, sys
+import importlib.util, inspect, json, os, sys
 from pathlib import Path
+root = Path.cwd()
+if sys.argv[1] == 'interpreter':
+    sys.path[:0] = [str(root / 'src'), str(root / 'acceptance/src')]
 from nci_si_acceptance.environments import selection
 from nci_si_acceptance.request_catalogue import compile_policy
 from nci_si_acceptance.request_budget import ControlledRun
+from nci_si_acceptance import request_native as native
 from nci_si_acceptance.request_native import _handoff_run, native_policy
 from nci_si_mcp.errors import RequestPolicyError
 blocked = {'nci_si_mcp.http_client', 'nci_si_mcp.evs', 'nci_si_mcp.registry',
@@ -359,8 +374,33 @@ try:
     record = {'environment': environment.to_record(), 'run': run.descriptor.to_record(),
               'participant': 'native-serial'}
     path.write_text(json.dumps(record))
-    assert _handoff_run(str(path)).participant == 'native-serial'
     os.environ['NCI_SI_ACCEPTANCE_RUN_HANDOFF'] = str(path)
+    origin = sys.argv[1]
+    if origin == 'module':
+        spec = importlib.util.spec_from_file_location(compile_policy.__module__,
+            root / 'acceptance/src/nci_si_acceptance/foreign_catalogue.py')
+        foreign = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(foreign)
+        sys.modules[compile_policy.__module__] = foreign
+    elif origin == 'compiled':
+        from foreign_wrapper import decorate
+        native.compile_policy = decorate(native.compile_policy)
+    expected = root / 'acceptance/src/nci_si_acceptance/request_catalogue.py'
+    origins = [Path(sys.prefix).resolve() == (root / '.venv').resolve(),
+        Path(inspect.getmodule(native.compile_policy).__file__).resolve() == expected,
+        Path(inspect.getfile(native.compile_policy)).resolve() == expected]
+    if origin != 'furnished':
+        refused = False
+        try:
+            with native_policy():
+                raise AssertionError('foreign origin admitted')
+        except RequestPolicyError as error:
+            refused = error.reason == 'authorization'
+        assert not blocked.intersection(sys.modules)
+        print(json.dumps({'origins': origins, 'refused': refused}))
+        sys.exit(0)
+    assert origins == [True, True, True]
+    assert _handoff_run(str(path)).participant == 'native-serial'
     for defect in ('shape', 'environment', 'participant', 'descriptor'):
         candidate = json.loads(json.dumps(record))
         if defect == 'shape': candidate = {}
@@ -381,7 +421,13 @@ print('authenticated attachment and four pre-import refusals')
     with WireReceiver() as receiver:
         local_policy(tree, receiver)
         outcome = subprocess.run(  # noqa: S603 - owned furnished isolated interpreter.
-            [str(python), "-I", "-c", script],
+            [
+                sys.executable if origin == "interpreter" else str(python),
+                "-I",
+                "-c",
+                script,
+                origin,
+            ],
             cwd=tree,
             env=env,
             capture_output=True,
@@ -391,7 +437,11 @@ print('authenticated attachment and four pre-import refusals')
         )
         assert outcome.returncode == 0, outcome.stdout + outcome.stderr
         assert receiver.contacts == 0
-    assert outcome.stdout.strip() == "authenticated attachment and four pre-import refusals"
+    if origin == "furnished":
+        assert outcome.stdout.strip() == "authenticated attachment and four pre-import refusals"
+    else:
+        expected = [name != origin for name in ("interpreter", "module", "compiled")]
+        assert json.loads(outcome.stdout) == {"origins": expected, "refused": True}
 
 
 def test_native_postspawn_failure_reaps_child_and_closes_transferred_stderr(native_tree):
