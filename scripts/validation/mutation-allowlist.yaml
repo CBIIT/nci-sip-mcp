@@ -899,15 +899,6 @@
   original: "bde3404e22ab03e7c3e09a160afb45252885b50b61b361ed8abeacfb99fab71c"
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result381. Production callers validate nonempty composed items through unchanged reference/mapping boundaries and require complete nonempty reference/registered-ID membership. Wrong outer scalar/mapping shapes refuse there; empty shapes fail required membership. Keep the outer-kind guard; this does not exempt the distinct nested-row guard."
-# Approved: #478 comment 6811510028; full native24ec result382 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_catalogue.py"
-  qualname: "CompiledPolicy"
-  operator: "boolean:literal"
-  site: "/decorator_list/0/keywords/1/value/0"
-  context: "37b8009c97f9a83479e1f2e0e9ef76126e328a5c82b31e755c6e86208a48d424"
-  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
-  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
-  reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result382. Dropping only slots changes allocation layout; declared supported fields, validation, frozen assignment, equality/hash and explicit authorization/binding remain unchanged. No supported layout reflection or dynamic-field consumer exists. Retain production slots."
 # Approved: #478 comment 6812961428; exact native03bfe686 focused native-1 SURVIVED.
 - file: "acceptance/src/nci_si_acceptance/request_authorization.py"
   qualname: "ConceptRequestFamily"
