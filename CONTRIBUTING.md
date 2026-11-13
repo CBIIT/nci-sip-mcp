@@ -270,12 +270,16 @@ Existing explicitly unmanaged accounting callers retain their current behavior.
 an actual owned direct-child handle. Keep the child behind its start barrier until registration
 succeeds; rejection leaves custody with the caller. Never register an arbitrary PID.
 Zero-exit workers need resolved leases; failed workers and unexpected service exits fail the run.
-Shutdown closes admission first, joins the observer within two seconds, then owns child cleanup
-and stream closure. Each worker gets up to ten seconds to exit, followed if necessary by the
-existing ten-second TERM/wait/KILL/wait leaf; service cleanup uses that leaf directly.
-Resource waits are bounded by `2 + 30N` seconds for N registered children, plus ledger operations
-and filesystem/OS scheduling, not a hard real-time guarantee. Intentional termination is not
-reported as successful worker completion. Initiating and cleanup failures remain distinct.
+Shutdown closes admission first, then joins the observer and owns child cleanup and stream
+closure. With no completion owners, the observer join gets up to two seconds, each worker gets
+up to ten seconds to exit followed if necessary by the existing ten-second TERM/wait/KILL/wait
+leaf, and service cleanup uses that leaf directly. This path's resource waits are bounded by
+`2 + 30N` seconds for N registered children. Runs that register any completion owner instead
+share one 20-second `CleanupDeadline` across resource waits, including when N is zero; see
+[bounded serial execution](acceptance/README.md#bounded-serial-execution). Both allowances
+exclude ledger operations and filesystem/OS scheduling; neither is a hard real-time guarantee.
+Intentional termination is not reported as successful worker completion. Initiating and cleanup
+failures remain distinct.
 Even a terminal ledger refusal caught inside the context produces one outer `RequestPolicyError` with the
 ledger's original reason. Observer notification does not duplicate that failure. An initiating
 caller exception remains first when additional cleanup failures require a `BaseExceptionGroup`.
