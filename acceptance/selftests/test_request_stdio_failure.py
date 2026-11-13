@@ -47,7 +47,7 @@ def test_real_pipe_failures_preserve_the_original_error_and_actual_custody(
     resource = StdioOwner(
         owner, [sys.executable, "-c", script, str(marker)], {}, io.StringIO(), read_seconds=0.2
     )
-    original_open = anyio.open_process
+    original_open, spontaneous_exit = anyio.open_process, True
     missing = fault in ("stdin", "stdout", "stderr")
     initiated, original_initiate = threading.Event(), resource._initiate
 
@@ -79,20 +79,10 @@ def test_real_pipe_failures_preserve_the_original_error_and_actual_custody(
         ):
             owner.register_completion(resource, participant="stdio")
             resource.thread.start()
-            assert initiated.wait(2), "actual pipe failure was not recorded"
+            initiated.wait(2)  # Synchronize only; assert the actual outward contract below.
             if fault not in ("broken-stdin", "cancel-read"):
                 resource.thread.join(5)
-                assert not resource.thread.is_alive()
-        leaves = failure_leaves(outward.value)
-        expected_type = {"utf8": UnicodeDecodeError, "cancel-read": asyncio.CancelledError}.get(
-            fault, RequestPolicyError
-        )
-        # Missing handles fail both the initial pipe contract and the actual close attempt.
-        assert list(map(type, leaves)) == [expected_type] * (2 if missing else 1)
-        if expected_type is RequestPolicyError:
-            assert [error.reason for error in leaves] == (
-                ["accounting", "accounting"] if missing else ["transport"]
-            )
+                spontaneous_exit = not resource.thread.is_alive()
         assert owner.pending_owners == ((resource.name,) if missing else ())
         assert owner.snapshot()["state"] == "failed"
         assert owner.snapshot()["observationComplete"] is (not missing)
@@ -103,6 +93,17 @@ def test_real_pipe_failures_preserve_the_original_error_and_actual_custody(
             (s.open_send_streams, s.open_receive_streams)
             for s in (resource.read.statistics(), resource.write.statistics())
         ] == [(0, 0), (0, 0)]
+        assert spontaneous_exit, "unexpected pipe failure left its actual transport thread alive"
+        leaves = failure_leaves(outward.value)
+        expected_type = {"utf8": UnicodeDecodeError, "cancel-read": asyncio.CancelledError}.get(
+            fault, RequestPolicyError
+        )
+        # Missing handles fail both the initial pipe contract and the actual close attempt.
+        assert list(map(type, leaves)) == [expected_type] * (2 if missing else 1)
+        if expected_type is RequestPolicyError:
+            assert [error.reason for error in leaves] == (
+                ["accounting", "accounting"] if missing else ["transport"]
+            )
     finally:
         resource._stop.set()
         resource.thread.join(5)
