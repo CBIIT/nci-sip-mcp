@@ -132,6 +132,35 @@ def test_nonfinite_cleanup_time_refuses_accounting(monkeypatch, end, now):
     assert refused.value.reason == "accounting"
 
 
+def test_owned_call_start_failure_preserves_its_cleanup_receipt(calls, monkeypatch):
+    call = calls(lambda: "unused")
+    initiating = RuntimeError("owned thread start failure")
+
+    def refuse_start():
+        raise initiating
+
+    monkeypatch.setattr(call.thread, "start", refuse_start)
+    observed = []
+    for operation in (call.start, lambda: call.finish(CleanupDeadline(time.monotonic() + 0.05))):
+        try:
+            operation()
+        except Exception as error:  # noqa: BLE001 - compare both actual operation outcomes below.
+            observed.append(error)
+    assert observed == [initiating, initiating]
+    assert call.started.exception(timeout=0) is initiating
+    assert call.thread.ident is None
+
+
+def test_completion_registration_before_entry_refuses_without_custody(tmp_path, calls):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    call = calls(lambda: "unused")
+    with pytest.raises(RequestPolicyError) as refused:
+        owner.register_completion(call, participant="early")
+    assert refused.value.reason == "authorization"
+    assert owner.pending_owners == ()
+    assert call.thread.ident is None
+
+
 def test_successful_controlled_child_releases_actual_custody(tmp_path, calls):
     owner = SupervisedRun.create(authorization(), tmp_path / "run")
     call = calls(lambda: "settled")

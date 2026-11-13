@@ -11,9 +11,75 @@ from test_request_stdio import _reap_for_test
 from test_request_supervision import authorization, failure_leaves
 
 from nci_si_acceptance import request_children
-from nci_si_acceptance.request_stdio import StdioOwner
+from nci_si_acceptance.client import open_session
+from nci_si_acceptance.request_stdio import StderrTransfer, StdioOwner
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import RequestPolicyError
+
+
+def test_accepted_thread_start_failure_retains_each_resource_until_fallback(tmp_path, monkeypatch):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    initiating = RuntimeError("owned stdio thread start failure")
+    original_register, resources = owner.register_completion, []
+    marker = tmp_path / "child-started"
+    stream = (tmp_path / "stderr.log").open("w")
+    transfer = StderrTransfer(stream)
+
+    def refuse_start():
+        raise initiating
+
+    def register(resource, **options):
+        token = original_register(resource, **options)
+        if isinstance(resource, StdioOwner):
+            resources.append(resource)
+            monkeypatch.setattr(resource.thread, "start", refuse_start)
+        return token
+
+    monkeypatch.setattr(owner, "register_completion", register)
+    outward = None
+    try:
+        try:
+            with (
+                owner,
+                open_session(
+                    [
+                        sys.executable,
+                        "-c",
+                        "from pathlib import Path;Path(__import__('sys').argv[1]).touch()",
+                        str(marker),
+                    ],
+                    {},
+                    stream,
+                    timeout=1,
+                    owner=owner,
+                    stderr_transfer=transfer,
+                ),
+            ):
+                raise AssertionError("failed thread yielded a session")
+        except Exception as error:  # noqa: BLE001 - preserve initiating and cleanup outcomes.
+            outward = error
+        resource = resources[0]
+        leaves = failure_leaves(outward)
+        assert leaves[0] is initiating
+        assert list(map(type, leaves)) == [RuntimeError, RequestPolicyError, RequestPolicyError]
+        assert [error.reason for error in leaves[1:]] == ["accounting", "accounting"]
+        assert owner.pending_owners == (resource.name, transfer.name)
+        assert resource.process is None
+        assert resource.thread.ident is None
+        assert not marker.exists()
+        assert [
+            (s.open_send_streams, s.open_receive_streams)
+            for s in (resource.read.statistics(), resource.write.statistics())
+        ] == [(1, 1), (1, 1)]
+        assert transfer.accepted
+        assert not transfer.closed
+        assert not stream.closed
+        assert owner.snapshot()["state"] == "failed"
+        assert owner.snapshot()["observationComplete"] is False
+    finally:
+        for resource in resources:
+            anyio.run(_reap_for_test, resource)
+        stream.close()
 
 
 @pytest.mark.parametrize("after_close", [False, True, pytest.param(None, id="missing-stream")])
