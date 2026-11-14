@@ -339,6 +339,77 @@ report._publish_native = publish
     assert not (directory / "native-run").exists()
 
 
+def test_framework_cleanup_settles_native_resources_when_sessionfinish_is_bypassed(native_tree):
+    tree, python, env = native_tree
+    (tree / "acceptance/src/framework_fallback_probe.py").write_text("""
+from pathlib import Path
+from types import SimpleNamespace
+import _pytest.main as main
+import pytest
+from nci_si_acceptance.request_native import NativeRun
+
+actual_start = NativeRun.start
+native = None
+
+def start(self, session):
+    global native
+    target = actual_start(self, session)
+    native = self
+    actual_chdir = main.os.chdir
+    first = True
+    def chdir(path):
+        nonlocal first
+        if first:
+            first = False
+            raise OSError('owned return-to-start-directory failure')
+        return actual_chdir(path)
+    main.os = SimpleNamespace(**(vars(main.os) | {'chdir': chdir}))
+    return target
+
+NativeRun.start = start
+
+def observe_then_release():
+    assert native is not None
+    listener, owner = native.listener, native.controller
+    assert listener is not None and owner is not None
+    try:
+        facts = (listener.thread.is_alive(), listener._server.fileno(),
+                 owner._observer.is_alive(), owner.pending_owners)
+        Path('tmp/framework-settlement.txt').write_text('|'.join(map(str, facts)))
+    finally:
+        owner._stop.set()
+        listener.finish()
+        owner._observer.join(3)
+        assert not owner._observer.is_alive()
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config):
+    # LIFO cleanup: observe after the subsequently registered native fallback.
+    config.add_cleanup(observe_then_release)
+
+def pytest_runtestloop(session):
+    pytest.exit('owned interruption before item fixtures')
+
+def pytest_sessionfinish(session):
+    Path('tmp/sessionfinish-was-called.txt').write_text('called')
+""")
+    expected_requests = [("GET", DISCOVERY, b"")]
+    with WireReceiver(_native_replies(tree)) as receiver:
+        local_policy(tree, receiver)
+        outcome = run_native(tree, python, env, NODE, "-p", "framework_fallback_probe", "-n", "0")
+        assert [
+            (method, path, body) for method, path, _headers, body in receiver.requests
+        ] == expected_requests
+        assert receiver.contacts == len(expected_requests)
+    directory = tree / "acceptance/tmp"
+    assert (directory / "framework-settlement.txt").read_text() == "False|-1|False|()"
+    assert not (directory / "sessionfinish-was-called.txt").exists()
+    assert outcome.returncode != 0
+    assert "owned return-to-start-directory failure" in outcome.stdout + outcome.stderr
+    report = json.loads((directory / "native-report.json").read_text())
+    assert report["tests"] == {}
+
+
 def test_native_cleanup_failure_marks_a_passing_case_failed(native_tree):
     tree, python, env = native_tree
     (tree / "acceptance/src/native_cleanup_only_probe.py").write_text("""
