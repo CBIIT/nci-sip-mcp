@@ -14,7 +14,7 @@ from mcp.shared.exceptions import MCPError
 from test_request_stdio import _reap_for_test, _stop_child_for_test
 from test_request_supervision import authorization, failure_leaves
 
-from nci_si_acceptance import request_stdio
+from nci_si_acceptance import request_children, request_stdio
 from nci_si_acceptance.client import open_session
 from nci_si_acceptance.request_stdio import StdioOwner
 from nci_si_acceptance.request_supervision import SupervisedRun
@@ -490,3 +490,65 @@ def test_sdk_exit_failure_after_ready_preserves_original_event(terminal_case, mo
     assert exit_seen
     assert outward is not None
     assert any(error is original for error in failure_leaves(outward))
+
+
+def test_closed_handles_do_not_release_a_live_transport_thread(terminal_case, monkeypatch):
+    owner, resources, waited, closed = terminal_case
+    original = LookupError("Owned SDK exit ends the actual transport event loop")
+    loop_exited, release = threading.Event(), threading.Event()
+    clock = [time.monotonic()]
+    actual_run, actual_exit = anyio.run, request_stdio.Client.__aexit__
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def exit_client(self, *exception):
+        await actual_exit(self, *exception)
+        raise original
+
+    def run(function, *args, **kwargs):
+        try:
+            return actual_run(function, *args, **kwargs)
+        finally:
+            if isinstance(getattr(function, "__self__", None), StdioOwner):
+                # The event loop/tasks really ended; only the owning OS thread is held.
+                loop_exited.set()
+                release.wait(8)
+
+    monkeypatch.setattr(request_stdio.Client, "__aexit__", exit_client)
+    monkeypatch.setattr(anyio, "run", run)
+    unlisted = object()
+    listing, seen, outward, deadline = unlisted, False, None, None
+    try:
+        try:
+            with owner:
+                deadline = owner.cleanup_deadline()
+                with open_session(
+                    [sys.executable, "-c", CHILD, "0"], {}, io.StringIO(), timeout=3, owner=owner
+                ) as session:
+                    listing = session.list_tools()
+                seen = loop_exited.wait(5)
+                clock[0] += request_children.CLEANUP_SECONDS + 1
+        except BaseException as error:  # noqa: BLE001 - assert live-thread custody outside capture.
+            outward = error
+        assert (seen, getattr(listing, "tools", unlisted)) == (True, [])
+        assert len(resources) == 1
+        resource = resources[0]
+        assert resource.process is not None
+        assert (resource.process.returncode, resource.thread.is_alive()) == (0, True)
+        assert (set(waited), closed) == ({0}, {"stdin", "stdout", "stderr"})
+        assert [
+            (state.open_send_streams, state.open_receive_streams)
+            for state in (resource.read.statistics(), resource.write.statistics())
+        ] == [(0, 0), (0, 0)]
+        assert owner.pending_owners == (resource.name,)
+        summary = owner.snapshot()
+        assert (summary["state"], summary["observationComplete"]) == ("failed", False)
+        assert owner.cleanup_deadline() is deadline
+        assert deadline.remaining() == 0
+        assert outward is not None
+        assert any(error is original for error in failure_leaves(outward))
+    finally:
+        # Release only after the actual alive-thread/pending-token observations.
+        release.set()
+        if owner._observer.ident is not None:
+            owner._observer.join(3)
+        assert not owner._observer.is_alive()
