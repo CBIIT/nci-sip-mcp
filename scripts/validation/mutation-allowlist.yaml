@@ -1,3 +1,12 @@
+# Approved: #479 comment 6869389232; exact raw SURVIVED in stopped 050cb04 shard1, source-based callee proof only.
+- file: "acceptance/src/nci_si_acceptance/request_native.py"
+  qualname: "NativeRun._finish_controller"
+  operator: "comparison:negate"
+  site: "/body/3/value/0/args/0/elts/0/body/0/args/0/test/0"
+  context: "66d2914b24f079a4085909909c636651696d3f8400f0afb5c2519c6a8a61c74d"
+  original: "bbd16564a251afee878733b559fe68103600a58edc22dd528ccfa96ff73da443"
+  mutated: "7ee5990dcdaabf7f382d70aaccda0437609864164321ca52a1e6f7af768f325c"
+  reason: "The actual NativeRun controller is SupervisedRun. This condition changes only its __exit__ kind argument; the identical initiating error and traceback argument still reach the callee. SupervisedRun.__exit__ ignores kind and traceback and calls _finish(error), so completion, errors and custody are unchanged. Type/identity evaluation has no side effect here. Reviewed from the retained exact raw survivor and actual call chain, without a new kind-argument spy or replay. Reassess if the callee consumes kind or another supported owner implementation is introduced."
 # Approved: #479 comment 6864302547; official SURVIVED at 6bf6bbc, independently confirmed with real-process controls.
 - file: "acceptance/src/nci_si_acceptance/request_stdio.py"
   qualname: "StdioOwner._wait"
