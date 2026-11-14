@@ -5,11 +5,10 @@ import io
 import subprocess
 import sys
 import threading
-from contextlib import suppress
 
 import anyio
 import pytest
-from test_request_stdio import _reap_for_test
+from test_request_stdio import _reap_for_test, _stop_child_for_test
 from test_request_supervision import authorization, failure_leaves
 
 from nci_si_acceptance import request_children, request_stdio
@@ -48,8 +47,11 @@ def test_real_pipe_failures_preserve_the_original_error_and_actual_custody(
     resource = StdioOwner(
         owner, [sys.executable, "-c", script, str(marker)], {}, io.StringIO(), read_seconds=0.2
     )
-    original_open, spontaneous_exit = anyio.open_process, True
-    missing = fault in ("stdin", "stdout", "stderr")
+    original_open, spontaneous_exit, missing = (
+        anyio.open_process,
+        True,
+        fault in ("stdin", "stdout", "stderr"),
+    )
     initiated, original_initiate = threading.Event(), resource._initiate
 
     def initiate(error):
@@ -107,6 +109,7 @@ def test_real_pipe_failures_preserve_the_original_error_and_actual_custody(
             )
     finally:
         resource._stop.set()
+        _stop_child_for_test(resource)
         resource.thread.join(5)
         assert not resource.thread.is_alive()
         anyio.run(_reap_for_test, resource)
@@ -160,6 +163,7 @@ def test_late_decode_failure_is_preserved_beside_the_callers_error(
             assert leaves[0] is initiating
     finally:
         resource._stop.set()
+        _stop_child_for_test(resource)
         resource.thread.join(5)
         assert not resource.thread.is_alive()
         anyio.run(_reap_for_test, resource)
@@ -304,6 +308,7 @@ def test_failed_pipe_close_preserves_initiating_and_cleanup_failures(
         assert not sink.closed
     finally:
         resource._stop.set()
+        _stop_child_for_test(resource)
         resource.thread.join(5)
         assert not resource.thread.is_alive()
 
@@ -360,10 +365,7 @@ def cleanup_case(tmp_path, monkeypatch, fault):
         yield owner, resource, initiating, cleanup
     finally:
         resource._stop.set()
-        process = resource.process
-        if process is not None and process.returncode is None:
-            with suppress(ProcessLookupError):
-                process.kill()
+        _stop_child_for_test(resource)
         resource.thread.join(5)
         assert not resource.thread.is_alive()
         anyio.run(_reap_for_test, resource)
@@ -401,8 +403,10 @@ def test_cleanup_operation_failures_preserve_their_actual_result(cleanup_case, f
 def test_actual_stdout_backpressure_cannot_extend_the_shared_cleanup_deadline(
     tmp_path, monkeypatch
 ):
-    owner = SupervisedRun.create(authorization(), tmp_path / "run")
-    marker = tmp_path / "all-output-written"
+    owner, marker = (
+        SupervisedRun.create(authorization(), tmp_path / "run"),
+        tmp_path / "all-output-written",
+    )
     script = (
         "import sys;from pathlib import Path;"
         'sys.stdout.buffer.write(b\'{"jsonrpc":"2.0","id":7,"result":{}}\\n\'*100000);'
@@ -466,6 +470,8 @@ def test_actual_stdout_backpressure_cannot_extend_the_shared_cleanup_deadline(
         assert owner.cleanup_deadline().remaining() == 0
     finally:
         resource._stop.set()
+        # Deadline/refusal observations above precede this independent child stop.
+        _stop_child_for_test(resource)
         resource.thread.join(5)
         assert not resource.thread.is_alive()
         assert resource.process.returncode is not None

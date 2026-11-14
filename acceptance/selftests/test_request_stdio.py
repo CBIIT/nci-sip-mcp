@@ -20,14 +20,20 @@ from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import RequestPolicyError
 
 
+def _stop_child_for_test(resource):
+    """End only the acquired child; never certify production completion."""
+    process = resource.process
+    if process is not None and process.returncode is None:
+        with suppress(ProcessLookupError):
+            process.kill()
+
+
 async def _reap_for_test(resource):
     """After production returns, independently prevent an orphan without repairing its proof."""
+    _stop_child_for_test(resource)
     process = resource.process
     if process is not None:
-        if process.returncode is None:
-            # Actual-parent wait below supplies the receipt even if the signal races exit.
-            with suppress(ProcessLookupError):
-                process.kill()
+        # Actual-parent wait supplies the receipt even if the stop raced natural exit.
         with anyio.fail_after(3):
             await process.wait()
             for stream in (process.stdin, process.stdout, process.stderr):
@@ -254,6 +260,8 @@ def test_cancel_immediately_after_spawn_settles_before_independent_fallback(tmp_
                     with anyio.CancelScope(shield=True):
                         process = resource.process
                         if process is not None:
+                            # Before this loop's reap; returncode=0 below still requires
+                            # cooperative exit, not the outer fallback's forced kill.
                             observed.update(
                                 returncode=process.returncode,
                                 waited=resource.waited,
@@ -282,6 +290,7 @@ def test_cancel_immediately_after_spawn_settles_before_independent_fallback(tmp_
     except BaseException as error:  # noqa: BLE001 - assert the exact initiating event below.
         outward = error
     finally:
+        _stop_child_for_test(resource)
         resource.thread.join(25)
         assert not resource.thread.is_alive()
     assert observed == {
@@ -359,6 +368,8 @@ def test_held_stderr_sink_cannot_block_finish_scheduling_past_shared_deadline(
                 blocked_stack = "".join(traceback.format_stack(frame))
     finally:
         release.set()
+        # returned/blocked_stack were observed before this independent test cleanup.
+        _stop_child_for_test(resource)
         if finisher.ident is not None:
             finisher.join(5)
         resource.thread.join(5)
@@ -437,6 +448,7 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
     finally:
         release.set()
         if resource is not None:
+            _stop_child_for_test(resource)
             for call, _ in resource._calls._owners.values():
                 if call.thread.ident is not None:
                     call.thread.join(5)
@@ -445,6 +457,7 @@ def test_rpc_timeout_retains_actual_caller_until_outside_cleanup(
             resource._client_stop.set()
             resource.thread.join(5)
             assert not resource.thread.is_alive()
+            anyio.run(_reap_for_test, resource)
 
 
 def test_transferred_stderr_file_remains_open_until_actual_outside_cleanup(tmp_path):
