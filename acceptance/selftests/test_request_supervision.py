@@ -1627,6 +1627,37 @@ def test_terminal_validation_precedes_failure_selection(tmp_path, monkeypatch, c
     assert not owner._observer.is_alive()
 
 
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError], ids=["os", "runtime"])
+def test_new_terminal_lookup_errors_are_normalized(tmp_path, monkeypatch, error_type):
+    owner = supervisor(tmp_path)
+    actual_join, actual_snapshot = owner._join, owner.run.snapshot
+    lookup_error = error_type("owned fresh terminal snapshot lookup failure")
+
+    def failed_lookup():
+        raise lookup_error
+
+    def join_then_fail_lookup():
+        actual_join()
+        monkeypatch.setattr(owner.run, "snapshot", failed_lookup)
+
+    monkeypatch.setattr(owner, "_join", join_then_fail_lookup)
+    failure = None
+    try:
+        with owner:
+            pass
+    except BaseException as error:  # noqa: BLE001 - inspect actual outward errors outside capture.
+        failure = error
+    assert failure is not None
+    leaves = failure_leaves(failure)
+    assert len(leaves) == OBSERVED_FAILURE_COUNT
+    assert all(
+        type(error) is RequestPolicyError and error.reason == "accounting" for error in leaves
+    )
+    assert all(error is not lookup_error for error in leaves)
+    assert not owner._observer.is_alive()
+    assert actual_snapshot().state == "closed"
+
+
 def test_unrelated_body_group_keeps_observed_child_failure(tmp_path):
     owner = supervisor(tmp_path)
     original = KeyError("synthetic initiating failure")
