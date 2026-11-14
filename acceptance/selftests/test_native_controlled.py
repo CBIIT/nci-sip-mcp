@@ -308,6 +308,68 @@ def pytest_collection_modifyitems(items):
         assert not (directory / "native-run").exists()
 
 
+def test_native_cleanup_failure_marks_a_passing_case_failed(native_tree):
+    tree, python, env = native_tree
+    (tree / "acceptance/src/native_cleanup_only_probe.py").write_text("""
+from pathlib import Path
+import pytest
+from nci_si_acceptance.request_native import NativeRun
+
+actual_start = NativeRun.start
+cleanup_failure = LookupError('owned native listener cleanup failure')
+
+def start(self, session):
+    result = actual_start(self, session)
+    listener = self.listener
+    assert listener is not None
+    actual_finish = listener.finish
+    def finish(deadline):
+        actual_finish(deadline)
+        raise cleanup_failure
+    listener.finish = finish
+    return result
+
+NativeRun.start = start
+
+def contains_cleanup(error):
+    if error is cleanup_failure:
+        return True
+    return isinstance(error, BaseExceptionGroup) and any(
+        contains_cleanup(child) for child in error.exceptions)
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_sessionfinish(session):
+    try:
+        result = yield
+    except BaseException as error:
+        Path('tmp/cleanup-visible.txt').write_text(
+            'visible' if contains_cleanup(error) else 'missing')
+        raise
+    Path('tmp/cleanup-visible.txt').write_text('no-outward-error')
+    return result
+""")
+    expected_requests = [
+        ("GET", DISCOVERY, b""),
+        ("GET", DISCOVERY, b""),
+        ("GET", "/api/v1/metadata/terminologies", b""),
+        ("GET", CONTENT, b""),
+    ]
+    with WireReceiver(_native_replies(tree)) as receiver:
+        local_policy(tree, receiver)
+        expected_suite = identity(tree)
+        outcome = run_native(tree, python, env, NODE, "-p", "native_cleanup_only_probe", "-n", "0")
+        assert [
+            (method, path, body) for method, path, _headers, body in receiver.requests
+        ] == expected_requests
+        assert receiver.contacts == len(expected_requests)
+    report = json.loads((tree / "acceptance/tmp/native-report.json").read_text())
+    assert report["tests"] == {NODE: EXPECTED_CASE | {"outcome": "passed"}}
+    assert report["run"] == ONE_CASE | {"exit_status": 1}
+    assert report["suite"] == expected_suite
+    assert outcome.returncode != 0, outcome.stdout + outcome.stderr
+    assert (tree / "acceptance/tmp/cleanup-visible.txt").read_text() == "visible"
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
