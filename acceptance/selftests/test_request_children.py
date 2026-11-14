@@ -488,3 +488,72 @@ def test_shutdown_refuses_an_already_authorized_completion_offer(tmp_path, monke
         if actor.ident is not None:
             actor.join(3)
         assert not actor.is_alive()
+
+
+def test_settled_tokens_do_not_complete_an_unjoined_observer(tmp_path, monkeypatch, calls):
+    ended, release = threading.Event(), threading.Event()
+    clock, intermediate = [time.monotonic()], []
+    actual_observe = SupervisedRun._observe
+
+    def observe(self):
+        try:
+            actual_observe(self)
+        finally:
+            ended.set()
+            release.wait(8)
+
+    monkeypatch.setattr(SupervisedRun, "_observe", observe)
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    resource = calls(lambda: b"owned producer finished")
+    actual_join, actual_settle = owner._join, owner._completions.settle
+    observer_seen, produced, failure = False, None, None
+
+    def join():
+        nonlocal observer_seen
+        observer_seen = ended.wait(3)
+        clock[0] += request_children.CLEANUP_SECONDS + 1
+        actual_join()
+
+    def settle(token, deadline):
+        actual_settle(token, deadline)
+        intermediate.append(
+            (
+                owner.snapshot()["observationComplete"],
+                owner.pending_owners,
+                owner._observer.is_alive(),
+            )
+        )
+
+    monkeypatch.setattr(owner, "_join", join)
+    monkeypatch.setattr(owner._completions, "settle", settle)
+    try:
+        try:
+            with owner:
+                owner.register_completion(resource, participant="observer-proof")
+                resource.start()
+                produced = resource.result.result(timeout=2)
+                resource.thread.join(2)
+        except BaseException as error:  # noqa: BLE001 - inspect actual completion outside capture.
+            failure = error
+        assert (
+            observer_seen,
+            produced,
+            resource.thread.is_alive(),
+            owner._observer.is_alive(),
+            owner.pending_owners,
+        ) == (True, b"owned producer finished", False, True, ())
+        summary = owner.snapshot()
+        assert summary["observationComplete"] is False
+        assert intermediate == [(False, (), True)]
+        assert (type(failure), getattr(failure, "reason", None)) == (
+            RequestPolicyError,
+            "accounting",
+        )
+        assert owner.cleanup_deadline().remaining() == 0
+    finally:
+        # All public snapshot/custody observations precede releasing the real observer thread.
+        release.set()
+        if owner._observer.ident is not None:
+            owner._observer.join(3)
+        assert not owner._observer.is_alive()
