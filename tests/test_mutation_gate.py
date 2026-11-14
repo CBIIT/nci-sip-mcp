@@ -174,6 +174,19 @@ class MutationOperatorsTest(unittest.TestCase):
                             '--shard "$SHARD" -n 2 --coverage-dir tmp/mutation-coverage'
                         ),
                     },
+                    {
+                        "name": "Retain raw mutation results",
+                        "if": "always()",
+                        "uses": (
+                            "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+                        ),
+                        "with": {
+                            "name": "mutation-results-${{ github.sha }}-${{ matrix.shard }}",
+                            "path": "tmp/mutation-runs/",
+                            "if-no-files-found": "warn",
+                            "retention-days": 30,
+                        },
+                    },
                 ],
             },
         )
