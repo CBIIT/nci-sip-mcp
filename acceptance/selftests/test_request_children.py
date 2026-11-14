@@ -1,6 +1,7 @@
 """Receipts have run-local authority and require actual outside-thread settlement."""
 
 import json
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -12,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 from http_receiver import WireReceiver
-from test_request_supervision import authorization, failure_leaves
+from test_request_supervision import authorization, failure_leaves, supervisor
 
 from nci_si_acceptance import request_children
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
@@ -38,6 +39,74 @@ def calls():
         if call.thread.ident is not None:
             call.thread.join(2)
         assert not call.thread.is_alive()
+
+
+def test_recovered_terminal_read_still_publishes_final_failure_summary(
+    tmp_path, monkeypatch, calls
+):
+    owner = supervisor(tmp_path / "run")
+    resource = calls(lambda: b"owned completion finished")
+    close_failure = RequestPolicyError("accounting")
+    lock = sqlite3.connect(owner.run.directory / "ledger.sqlite")
+    summary = owner.run.directory / "summary.json"
+    actual_close, actual_finish, actual_snapshot = (
+        owner.run.close,
+        resource.finish,
+        owner.run.snapshot,
+    )
+    facts = {}
+
+    def close():
+        actual_close()
+        raise close_failure
+
+    def snapshot():
+        try:
+            return actual_snapshot()
+        except RequestPolicyError as error:
+            facts["storage_refusal"] = error
+            lock.rollback()
+            raise
+
+    def finish(deadline):
+        actual_finish(deadline)
+        facts["completion"] = (resource.thread.is_alive(), resource.result.result(timeout=0))
+        lock.execute("BEGIN IMMEDIATE")
+        facts["locked"] = lock.in_transaction
+        monkeypatch.setattr(owner.run, "snapshot", snapshot)
+
+    monkeypatch.setattr(owner.run, "close", close)
+    monkeypatch.setattr(resource, "finish", finish)
+    outward, initial = None, None
+    try:
+        try:
+            with owner:
+                owner.register_completion(resource, participant="transient-summary")
+                resource.start()
+                initial = summary.read_bytes()
+        except BaseException as error:  # noqa: BLE001 - assert real causes and metadata outside capture.
+            outward = error
+        assert initial is not None
+        assert facts.get("completion") == (False, b"owned completion finished")
+        assert (
+            resource.thread.ident is not None,
+            resource.thread.is_alive(),
+            owner._observer.is_alive(),
+            owner.pending_owners,
+        ) == (True, False, False, ())
+        refusal = facts.get("storage_refusal")
+        assert isinstance(refusal, RequestPolicyError) and refusal.reason == "accounting"
+        assert (facts.get("locked"), lock.in_transaction) == (True, False)
+        assert outward is not None
+        leaves = failure_leaves(outward)
+        assert any(error is close_failure for error in leaves)
+        assert any(error is refusal for error in leaves)
+        report = json.loads(summary.read_text())
+        assert report["state"] == "failed"
+        assert report["observationComplete"] is True
+    finally:
+        lock.rollback()
+        lock.close()
 
 
 @pytest.mark.parametrize("release_before_cleanup", [False, True])
