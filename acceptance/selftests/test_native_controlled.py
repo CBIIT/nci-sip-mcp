@@ -468,6 +468,58 @@ def pytest_runtestloop(session):
     assert report["tests"] == {}
 
 
+def test_failed_native_controller_entry_preserves_each_failure_once(native_tree):
+    tree, python, env = native_tree
+    (tree / "acceptance/src/failed_native_entry_probe.py").write_text("""
+import json
+from pathlib import Path
+import pytest
+from nci_si_acceptance import request_supervision
+
+summary_failure = OSError('owned initial controller summary failure')
+close_failure = LookupError('owned persistent admission-close failure')
+actual_close = request_supervision.SupervisedRun._close_admission
+
+def publish(destination, summary):
+    raise summary_failure
+
+def close(self):
+    actual_close(self)
+    raise close_failure
+
+request_supervision.publish = publish
+request_supervision.SupervisedRun._close_admission = close
+
+def leaf_flags(error):
+    if isinstance(error, BaseExceptionGroup):
+        return [leaf for child in error.exceptions for leaf in leaf_flags(child)]
+    return [{'summary': error is summary_failure, 'close': error is close_failure}]
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_sessionfinish(session):
+    try:
+        result = yield
+    except BaseException as error:
+        Path('tmp/failed-entry-leaves.json').write_text(json.dumps(leaf_flags(error)))
+        raise
+    Path('tmp/failed-entry-leaves.json').write_text('[]')
+    return result
+""")
+    with WireReceiver({}) as receiver:
+        local_policy(tree, receiver)
+        outcome = run_native(tree, python, env, NODE, "-p", "failed_native_entry_probe", "-n", "0")
+        assert receiver.requests == [] and receiver.contacts == 0
+    directory = tree / "acceptance/tmp"
+    assert json.loads((directory / "failed-entry-leaves.json").read_text()) == [
+        {"summary": True, "close": False},
+        {"summary": False, "close": True},
+    ]
+    assert outcome.returncode != 0
+    assert "owned initial controller summary failure" in outcome.stdout + outcome.stderr
+    report = json.loads((directory / "native-report.json").read_text())
+    assert report["tests"] == {}
+
+
 def test_native_cleanup_failure_marks_a_passing_case_failed(native_tree):
     tree, python, env = native_tree
     (tree / "acceptance/src/native_cleanup_only_probe.py").write_text("""
