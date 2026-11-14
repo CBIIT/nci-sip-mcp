@@ -53,12 +53,16 @@ def test_failure_before_process_acquisition_closes_actual_endpoints(tmp_path, mo
         raise initiating
 
     monkeypatch.setattr(anyio, "open_process", refuse_acquisition)
+    outward = None
     try:
-        with pytest.raises((RequestPolicyError, BaseExceptionGroup)) as outward, owner:
-            owner.register_completion(resource, participant="stdio")
-            resource.thread.start()
-            resource.thread.join(2)
-            assert not resource.thread.is_alive()
+        try:
+            with owner:
+                owner.register_completion(resource, participant="stdio")
+                resource.thread.start()
+                resource.thread.join(2)
+        except BaseException as error:  # noqa: BLE001 - assert exact original cause outside capture.
+            outward = error
+        assert not resource.thread.is_alive()
         assert failure_leaves(resource.initiating) == [initiating]
         assert resource.process is None
         assert resource.waited is False
@@ -70,7 +74,9 @@ def test_failure_before_process_acquisition_closes_actual_endpoints(tmp_path, mo
         summary = json.loads((owner.run.directory / "summary.json").read_text())
         assert summary["state"] == "failed"
         assert summary["observationComplete"] is True
-        assert list(map(type, failure_leaves(outward.value))) == [RequestPolicyError]
+        assert outward is not None
+        leaves = failure_leaves(outward)
+        assert len(leaves) == 1 and leaves[0] is initiating
     finally:
         resource.thread.join(2)
         assert not resource.thread.is_alive()
