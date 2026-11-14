@@ -493,6 +493,64 @@ def test_sdk_exit_failure_after_ready_preserves_original_event(terminal_case, mo
     assert any(error is original for error in failure_leaves(outward))
 
 
+def test_sdk_exit_error_during_owner_cleanup_preserves_original_event(terminal_case, monkeypatch):
+    owner, _, _, _ = terminal_case
+    original = LookupError("Owned SDK exit failed during owner cleanup")
+    wait_entered, sdk_ready = threading.Event(), threading.Event()
+    real_open, actual_exit = anyio.open_process, request_stdio.Client.__aexit__
+    delegated_exits, returned_statuses = [], []
+
+    async def open_process(*args, **kwargs):
+        process = await real_open(*args, **kwargs)
+        actual_wait = process.wait
+
+        async def wait():
+            wait_entered.set()
+            code = await actual_wait()
+            if not await anyio.to_thread.run_sync(sdk_ready.wait, 5):
+                raise TimeoutError("Owned SDK-exit barrier was not released")
+            returned_statuses.append(code)
+            return code
+
+        monkeypatch.setattr(process, "wait", wait)
+        return process
+
+    async def exit_client(self, *exception):
+        await actual_exit(self, *exception)
+        delegated_exits.append(True)
+        if not await anyio.to_thread.run_sync(wait_entered.wait, 3):
+            raise TimeoutError("Actual process wait did not begin during cleanup")
+        sdk_ready.set()
+        raise original
+
+    monkeypatch.setattr(anyio, "open_process", open_process)
+    monkeypatch.setattr(request_stdio.Client, "__aexit__", exit_client)
+    unlisted = object()
+    listing, outward = unlisted, None
+    try:
+        try:
+            with (
+                owner,
+                open_session(
+                    [sys.executable, "-c", CHILD, "7"], {}, io.StringIO(), timeout=3, owner=owner
+                ) as session,
+            ):
+                listing = session.list_tools()
+        except BaseException as error:  # noqa: BLE001 - compare actual error leaves outside capture.
+            outward = error
+        _assert_failed_terminal_resources_settled(terminal_case, 7)
+        assert getattr(listing, "tools", unlisted) == []
+        assert delegated_exits == [True]
+        assert wait_entered.is_set() and sdk_ready.is_set()
+        expected_status = 7
+        assert returned_statuses and set(returned_statuses) == {expected_status}
+        assert outward is not None
+        assert any(error is original for error in failure_leaves(outward))
+    finally:
+        # Release only the test-owned wait barrier; actual resource fallback belongs to the fixture.
+        sdk_ready.set()
+
+
 def test_closed_handles_do_not_release_a_live_transport_thread(terminal_case, monkeypatch):
     owner, resources, waited, closed = terminal_case
     original = LookupError("Owned SDK exit ends the actual transport event loop")
