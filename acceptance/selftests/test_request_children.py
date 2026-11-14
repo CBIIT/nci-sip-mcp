@@ -109,6 +109,63 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
         lock.close()
 
 
+def test_observer_failure_is_not_repeated_after_recovered_terminal_lookup(
+    tmp_path, monkeypatch, calls
+):
+    owner = supervisor(tmp_path / "run")
+    resource = calls(lambda: b"owned completion finished")
+    lock = sqlite3.connect(owner.run.directory / "ledger.sqlite")
+    actual_heartbeat, actual_finish = owner.run.heartbeat, resource.finish
+    facts = {}
+
+    def heartbeat():
+        actual_heartbeat()
+        raise OSError("Owned heartbeat inspection failed")
+
+    def finish(deadline):
+        actual_finish(deadline)
+        facts["completion"] = (resource.thread.is_alive(), resource.result.result(timeout=0))
+        lock.rollback()
+
+    monkeypatch.setattr(owner.run, "heartbeat", heartbeat)
+    monkeypatch.setattr(resource, "finish", finish)
+    outward, recorded_state = None, None
+    try:
+        try:
+            with owner:
+                owner.register_completion(resource, participant="observer-failure")
+                resource.start()
+                owner._observer.join(3)
+                if owner._observer.is_alive():
+                    raise TimeoutError("Actual observer did not finish its failure notification")
+                recorded_state = owner.run.snapshot().state
+                lock.execute("BEGIN IMMEDIATE")
+                facts["locked"] = lock.in_transaction
+        except BaseException as error:  # noqa: BLE001 - assert real failure identity outside capture.
+            outward = error
+        assert recorded_state == "failed"
+        assert facts.get("completion") == (False, b"owned completion finished")
+        assert (
+            resource.thread.is_alive(),
+            owner._observer.is_alive(),
+            owner.pending_owners,
+            facts.get("locked"),
+            lock.in_transaction,
+        ) == (False, False, (), True, False)
+        report = owner.snapshot()
+        assert (report["state"], report["observationComplete"]) == ("failed", True)
+        assert outward is not None
+        leaves = failure_leaves(outward)
+        assert all(
+            isinstance(error, RequestPolicyError) and error.reason == "accounting"
+            for error in leaves
+        )
+        assert len({id(error) for error in leaves}) == len(leaves)
+    finally:
+        lock.rollback()
+        lock.close()
+
+
 @pytest.mark.parametrize("release_before_cleanup", [False, True])
 def test_zero_http_leases_do_not_settle_an_owned_thread(
     tmp_path, monkeypatch, calls, release_before_cleanup
