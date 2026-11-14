@@ -410,6 +410,64 @@ def pytest_sessionfinish(session):
     assert report["tests"] == {}
 
 
+def test_interrupted_native_closes_admission_before_framework_finalizers(native_tree):
+    tree, python, env = native_tree
+    (tree / "acceptance/src/native_admission_probe.py").write_text("""
+from pathlib import Path
+import pytest
+from nci_si_acceptance.request_native import NativeRun
+from nci_si_acceptance.request_transport import ControlledHttpPolicy
+from nci_si_mcp.http_client import HttpClient, RequestPolicyError
+
+actual_start = NativeRun.start
+native = None
+
+def start(self, session):
+    global native
+    target = actual_start(self, session)
+    native = self
+    return target
+
+NativeRun.start = start
+
+def attempt_during_teardown():
+    assert native is not None and native.controller is not None
+    client = HttpClient(native.environment.origins['evs'], label='EVS',
+        timeout_seconds=2, max_attempts=1, retry_backoff_seconds=0,
+        max_response_bytes=1048576, size_bound='owned-finalizer',
+        request_policy=ControlledHttpPolicy(native.controller.run))
+    try:
+        client.get_json('/api/v1/metadata/terminologies',
+            {'terminology':'ncit','latest':'true','tag':'monthly'})
+    except RequestPolicyError as error:
+        observed = error.reason
+    except BaseException as error:
+        observed = 'unexpected:' + type(error).__name__
+    else:
+        observed = 'admitted'
+    Path('tmp/finalizer-admission.txt').write_text(observed)
+
+def pytest_runtestloop(session):
+    session._setupstate.setup(session)
+    session._setupstate.addfinalizer(attempt_during_teardown, session)
+    pytest.exit('owned interruption with residual session finalizer')
+""")
+    expected_requests = [("GET", DISCOVERY, b"")]
+    with WireReceiver(_native_replies(tree)) as receiver:
+        local_policy(tree, receiver)
+        outcome = run_native(tree, python, env, NODE, "-p", "native_admission_probe", "-n", "0")
+        directory = tree / "acceptance/tmp"
+        assert (directory / "finalizer-admission.txt").read_text() == "closed"
+        assert [
+            (method, path, body) for method, path, _headers, body in receiver.requests
+        ] == expected_requests
+        assert receiver.contacts == len(expected_requests)
+    assert outcome.returncode != 0
+    assert "owned interruption with residual session finalizer" in outcome.stdout + outcome.stderr
+    report = json.loads((directory / "native-report.json").read_text())
+    assert report["tests"] == {}
+
+
 def test_native_cleanup_failure_marks_a_passing_case_failed(native_tree):
     tree, python, env = native_tree
     (tree / "acceptance/src/native_cleanup_only_probe.py").write_text("""
