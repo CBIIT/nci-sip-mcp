@@ -4,12 +4,16 @@ import io
 import json
 import signal
 import sys
+import threading
+import time
+from types import SimpleNamespace
 
 import anyio
 import pytest
 from test_request_stdio import _reap_for_test, _stop_child_for_test
 from test_request_supervision import authorization, failure_leaves
 
+from nci_si_acceptance import request_stdio
 from nci_si_acceptance.client import open_session
 from nci_si_acceptance.request_stdio import StdioOwner
 from nci_si_acceptance.request_supervision import SupervisedRun
@@ -130,3 +134,115 @@ def test_child_exit_status_preserves_terminal_outcome(terminal_case, mode):
         )
     else:
         assert outward is None
+
+
+@pytest.fixture
+def expired_startup(terminal_case, monkeypatch):
+    owner, _, _, _ = terminal_case
+    acquired, release = threading.Event(), threading.Event()
+    now = [time.monotonic()]
+    real_open, real_register = anyio.open_process, owner.register_completion
+
+    async def held_open(*args, **kwargs):
+        acquired.set()
+        # The synchronous caller owns release; wait on its actual cross-thread event.
+        assert await anyio.to_thread.run_sync(release.wait, 5)
+        return await real_open(*args, **kwargs)
+
+    def register(resource, **kwargs):
+        token = real_register(resource, **kwargs)
+        if isinstance(resource, StdioOwner):
+            actual_start = resource.thread.start
+
+            def start():
+                actual_start()
+                assert acquired.wait(3), "Actual process acquisition barrier was not reached"
+                now[0] += 4  # Model expiration of startup's three-second budget only.
+
+            monkeypatch.setattr(resource.thread, "start", start)
+        return token
+
+    # Do not replace the shared time module or the SDK/read-timeout clock.
+    monkeypatch.setattr(request_stdio, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(anyio, "open_process", held_open)
+    monkeypatch.setattr(owner, "register_completion", register)
+    try:
+        yield release
+    finally:
+        release.set()
+
+
+def test_caught_startup_wait_expiration_terminally_fails_owner(terminal_case, expired_startup):
+    owner, resources, waited, closed = terminal_case
+    outward, caught, admission = None, None, None
+    try:
+        with owner:
+            with (
+                pytest.raises((TimeoutError, RequestPolicyError)) as caught,
+                open_session(
+                    [sys.executable, "-c", CHILD, "0"], {}, io.StringIO(), timeout=3, owner=owner
+                ),
+            ):
+                pytest.fail("Expired startup yielded a usable session")
+            expired_startup.set()
+            assert resources[0].client_ready.result(timeout=3) is not None
+            admission = owner.run.snapshot()
+    except BaseException as error:  # noqa: BLE001 - assert terminal failure after physical proof.
+        outward = error
+    assert len(resources) == 1
+    resource = resources[0]
+    assert resource.process is not None and resource.process.returncode == 0
+    assert waited and all(code == 0 for code in waited)
+    assert closed == {"stdin", "stdout", "stderr"}
+    assert not resource.thread.is_alive()
+    assert [
+        (state.open_send_streams, state.open_receive_streams)
+        for state in (resource.read.statistics(), resource.write.statistics())
+    ] == [(0, 0), (0, 0)]
+    summary = json.loads((owner.run.directory / "summary.json").read_text())
+    assert owner.pending_owners == ()
+    assert summary["observationComplete"] is True
+    assert summary["state"] == "failed"
+    assert admission is not None and admission.state == "failed" and admission.failure == "deadline"
+    assert caught is not None
+    assert isinstance(caught.value, RequestPolicyError) and caught.value.reason == "deadline"
+    assert outward is not None
+    assert any(error is caught.value for error in failure_leaves(outward))
+
+
+def test_startup_operation_timeout_preserves_original_event(terminal_case, monkeypatch):
+    owner, resources, waited, closed = terminal_case
+    original = TimeoutError("Owned acquisition operation timed out")
+
+    async def refuse_acquisition(*_args, **_kwargs):
+        raise original
+
+    monkeypatch.setattr(anyio, "open_process", refuse_acquisition)
+    outward = None
+    try:
+        with owner:
+            with (
+                pytest.raises(TimeoutError) as caught,
+                open_session(
+                    [sys.executable, "-c", CHILD, "0"], {}, io.StringIO(), timeout=3, owner=owner
+                ),
+            ):
+                pytest.fail("Failed acquisition yielded a usable session")
+            assert caught.value is original
+    except BaseException as error:  # noqa: BLE001 - preserve the exact operation error below.
+        outward = error
+    assert len(resources) == 1
+    resource = resources[0]
+    assert resource.process is None
+    assert waited == [] and closed == set()
+    assert not resource.thread.is_alive()
+    assert [
+        (state.open_send_streams, state.open_receive_streams)
+        for state in (resource.read.statistics(), resource.write.statistics())
+    ] == [(0, 0), (0, 0)]
+    summary = json.loads((owner.run.directory / "summary.json").read_text())
+    assert summary["state"] == "failed" and summary["observationComplete"] is True
+    assert owner.pending_owners == ()
+    assert owner.run.snapshot().failure == "transport"
+    assert outward is not None
+    assert any(error is original for error in failure_leaves(outward))
