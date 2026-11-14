@@ -25,15 +25,6 @@
   original: "dd863ea504e8543d2fb185a820aa7e2cf2d0ceddec9c835185a3510fc2ab463d"
   mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
   reason: "The sole tracked supported caller of this private return is _stdout, which consumes it as discard = not await self._deliver(line). False and None select the same drain/discard branch; the successful True path, parsing and error delivery remain. Independent actual-pipe backpressure/closed-consumer controls pass on original, exact mutant and restored source. Reassess if a caller inspects identity/type instead of truthiness."
-# Approved: #479 comment 6846499522; official sampled SURVIVED at b841e29, independently verified at 2942dd9.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
-  qualname: "StdioOwner._settled"
-  operator: "boolean:drop:2"
-  site: "/body/1/value/0"
-  context: "74e8358a5d8918de4d6e77fe8141e60037a3a2a8c00da17911602c0d85c9d44e"
-  original: "88ce26b88b61c29a4354e8188c4e7c5833827e156d3762a1991276cb1ad9466c"
-  mutated: "647c5b429a06c935b9e37d17a4eb92de6bc81f0be0ff8e8fae65d520052f1acf"
-  reason: "Current cleanup records every unsuccessful pipe/process-close step, and final wait timeout exhausts the shared deadline before checkpointing pipe closes retain accounting errors. finish rejects retained errors or a live thread before this redundant conjunct. Real cancellation, before/after-close failure and false-wait backpressure controls preserve actual cleanup/custody on original, exact mutant and restored source; no owner flags were fabricated. Retain the defensive guard and reassess if lifecycle or pinned asyncio backend assumptions change."
 # Approved: #288 comments 6552697326 and 6552816917; fresh SURVIVED at 53ab0e8.
 - file: "src/nci_si_mcp/bounds.py"
   qualname: "Deadline"

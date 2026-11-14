@@ -165,14 +165,13 @@ class StdioOwner:
             controller.run.descriptor.run_id, controller.run.descriptor.policy_sha256
         )
         self.closed: set[str] = set()
-        self.pumps: set[str] = set()
-        self.waited = self.pumps_settled = self.process_closed = self.endpoints_closed = False
+        self.waited = self.process_closed = self.endpoints_closed = False
         self._read_send, self.read = anyio.create_memory_object_stream[SessionMessage | Exception](
             0
         )
         self.write, self._write_receive = anyio.create_memory_object_stream[SessionMessage](0)
         self._stop, self._client_stop = threading.Event(), threading.Event()
-        self._cleanup_started = self._pumps_started = False
+        self._cleanup_started = False
         self.thread = threading.Thread(target=self._thread_main, name=self.name)
 
     def _thread_main(self) -> None:
@@ -218,28 +217,21 @@ class StdioOwner:
             except BaseException as error:  # noqa: BLE001 - preserve cleanup beside acquisition failure.
                 self.errors.append(error)
             finally:
-                if not self._pumps_started:
-                    self.pumps_settled = True  # No pump task was created before this failure.
                 await portal.stop(cancel_remaining=True)
 
     async def _io_scope(self, portal: BlockingPortal) -> None:
-        try:
-            async with anyio.create_task_group() as tasks:
-                self._pumps_started = True
-                tasks.start_soon(self._pump, "stdout", self._stdout)
-                tasks.start_soon(self._pump, "stdin", self._stdin)
-                tasks.start_soon(self._pump, "stderr", self._stderr)
-                tasks.start_soon(self._client, self.read_seconds)
-                self.portal_ready.set_result(portal)
-                try:
-                    await self._wait_signal(self._stop)
-                finally:
-                    with anyio.CancelScope(shield=True):
-                        await self._cleanup_process()
-                    tasks.cancel_scope.cancel()
-        finally:
-            # TaskGroup exit and the outside thread join additionally prove actual settlement.
-            self.pumps_settled = self.pumps == {"stdin", "stdout", "stderr"}
+        async with anyio.create_task_group() as tasks:
+            tasks.start_soon(self._pump, self._stdout)
+            tasks.start_soon(self._pump, self._stdin)
+            tasks.start_soon(self._pump, self._stderr)
+            tasks.start_soon(self._client, self.read_seconds)
+            self.portal_ready.set_result(portal)
+            try:
+                await self._wait_signal(self._stop)
+            finally:
+                with anyio.CancelScope(shield=True):
+                    await self._cleanup_process()
+                tasks.cancel_scope.cancel()
 
     @staticmethod
     async def _wait_signal(event: threading.Event) -> None:
@@ -251,7 +243,7 @@ class StdioOwner:
         assert self.process is not None  # noqa: S101 - pumps/cleanup follow successful acquisition.
         return self.process
 
-    async def _pump(self, name: str, action: Callable[[], Awaitable[None]]) -> None:
+    async def _pump(self, action: Callable[[], Awaitable[None]]) -> None:
         try:
             await action()
         except anyio.ClosedResourceError, anyio.BrokenResourceError:
@@ -261,8 +253,6 @@ class StdioOwner:
             if not (self._stop.is_set() and isinstance(error, anyio.get_cancelled_exc_class())):
                 self._initiate(error)
             raise
-        finally:
-            self.pumps.add(name)
 
     async def _stdout(self) -> None:
         stream = self._process().stdout
@@ -427,6 +417,8 @@ class StdioOwner:
             raise RequestPolicyError("accounting")
         if self.errors:
             raise BaseExceptionGroup("Controlled stdio cleanup failed.", self.errors)
+        # For a started thread, the outside join confirms its structured tasks ended.
+        # Handle receipts remain necessary even when the thread never started.
         if not self._settled():
             raise RequestPolicyError("accounting")
 
@@ -434,7 +426,7 @@ class StdioOwner:
         process_settled = self.process is None or all(
             (self.waited, self.process_closed, self.closed == {"stdin", "stdout", "stderr"})
         )
-        return self.pumps_settled and self.endpoints_closed and process_settled
+        return self.endpoints_closed and process_settled
 
 
 @contextmanager
