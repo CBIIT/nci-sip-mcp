@@ -5,6 +5,7 @@ import io
 import subprocess
 import sys
 import threading
+from contextlib import suppress
 
 import anyio
 import pytest
@@ -359,6 +360,10 @@ def cleanup_case(tmp_path, monkeypatch, fault):
         yield owner, resource, initiating, cleanup
     finally:
         resource._stop.set()
+        process = resource.process
+        if process is not None and process.returncode is None:
+            with suppress(ProcessLookupError):
+                process.kill()
         resource.thread.join(5)
         assert not resource.thread.is_alive()
         anyio.run(_reap_for_test, resource)
