@@ -5,6 +5,9 @@ import io
 import subprocess
 import sys
 import threading
+import time
+from contextlib import suppress
+from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -24,6 +27,66 @@ async def cancel_owned_read(*_args):
     task.cancel()
     await anyio.lowlevel.checkpoint()
     raise AssertionError("owned read task did not cancel")
+
+
+def test_cleanup_during_pending_acquisition_retains_policy_failure_and_custody(
+    tmp_path, monkeypatch
+):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    resource = StdioOwner(
+        owner, [sys.executable, "-c", "import sys;sys.stdin.buffer.read()"], {}, io.StringIO()
+    )
+    entered, release, acquired = threading.Event(), threading.Event(), threading.Event()
+    clock, processes = [time.monotonic()], []
+    real_open = anyio.open_process
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def held_open(*args, **kwargs):
+        entered.set()
+        if not await anyio.to_thread.run_sync(release.wait, 5):
+            raise TimeoutError("Owned acquisition barrier was not released")
+        process = await real_open(*args, **kwargs)
+        processes.append(process)
+        acquired.set()
+        return process
+
+    monkeypatch.setattr(anyio, "open_process", held_open)
+    failure, deadline, original_end, reached = None, None, None, False
+    try:
+        try:
+            with owner:
+                owner.register_completion(resource, participant="stdio")
+                deadline = owner.cleanup_deadline()
+                original_end = deadline.end
+                resource.thread.start()
+                reached = entered.wait(2)
+                clock[0] += request_children.CLEANUP_SECONDS + 1
+        except BaseException as error:  # noqa: BLE001 - assert real owner failure outside capture.
+            failure = error
+        assert reached
+        assert (resource.process, resource.thread.is_alive()) == (None, True)
+        assert owner.pending_owners == (resource.name,)
+        summary = owner.snapshot()
+        assert (summary["state"], summary["observationComplete"]) == ("failed", False)
+        assert failure is not None
+        leaves = failure_leaves(failure)
+        assert {type(error) for error in leaves} == {RequestPolicyError}
+        assert {error.reason for error in leaves} == {"accounting"}
+        assert owner.cleanup_deadline() is deadline
+        assert (deadline.end, deadline.remaining()) == (original_end, 0)
+    finally:
+        # All incomplete-custody observations precede this independent acquisition/reap.
+        release.set()
+        if resource.thread.ident is not None:
+            assert acquired.wait(3), "Released acquisition did not provide its owned process"
+            with suppress(ProcessLookupError):
+                processes[0].kill()
+            resource.thread.join(5)
+            assert not resource.thread.is_alive()
+        anyio.run(_reap_for_test, resource)
+        if owner._observer.ident is not None:
+            owner._observer.join(3)
+        assert not owner._observer.is_alive()
 
 
 @pytest.mark.parametrize(
