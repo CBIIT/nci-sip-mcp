@@ -83,11 +83,13 @@ class TransferCase:
 
 @pytest.fixture
 def transfer_case(tmp_path, monkeypatch, fault):
-    release, entered, finished = (threading.Event() for _ in range(3))
+    release, entered, finished = threading.Event(), threading.Event(), threading.Event()
     stream = (tmp_path / "stderr.log").open("w")
     actual_close = stream.close
-    transfer = StderrTransfer(stream)
-    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    transfer, owner = (
+        StderrTransfer(stream),
+        SupervisedRun.create(authorization(), tmp_path / "run"),
+    )
     initiating = LookupError("owned initiating failure")
     writer = threading.Thread(target=release.wait if fault == "writer" else lambda: None)
 
@@ -127,9 +129,12 @@ def transfer_case(tmp_path, monkeypatch, fault):
         release.set()
         owner._stop.set()
         closer = transfer._closer
-        threads = [finisher, writer, owner._observer] + (
-            [closer.thread] if closer is not None else []
-        )
+        if closer is not None and closer.thread.ident is not None:
+            closer.thread.join(3)
+            assert not closer.thread.is_alive()
+            # Only a joined producer can no longer publish its owned result.
+            closer.result.cancel()
+        threads = [finisher, writer, owner._observer]
         for thread in threads:
             if thread.ident is not None:
                 thread.join(3)
