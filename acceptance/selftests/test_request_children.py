@@ -7,16 +7,21 @@ import threading
 import time
 from contextlib import nullcontext
 from dataclasses import FrozenInstanceError
+from http.client import HTTPResponse
 from types import SimpleNamespace
 
 import pytest
+from http_receiver import WireReceiver
 from test_request_supervision import authorization, failure_leaves
 
 from nci_si_acceptance import request_children
+from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_children import CleanupDeadline, Completions, CompletionToken
 from nci_si_acceptance.request_stdio import _PortalCall
 from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_si_acceptance.request_transport import ControlledHttpPolicy
 from nci_si_mcp.errors import RequestPolicyError
+from nci_si_mcp.http_client import HttpClient
 
 
 @pytest.fixture
@@ -557,3 +562,97 @@ def test_settled_tokens_do_not_complete_an_unjoined_observer(tmp_path, monkeypat
         if owner._observer.ident is not None:
             owner._observer.join(3)
         assert not owner._observer.is_alive()
+
+
+def test_settled_resources_do_not_hide_an_outstanding_http_lease(tmp_path, monkeypatch, calls):
+    reading, release = threading.Event(), threading.Event()
+    payload, actual_read = b'{"ok":true}', HTTPResponse.read1
+
+    def read(self, *args, **kwargs):
+        reading.set()
+        return actual_read(self, *args, **kwargs)
+
+    def reply(handler):
+        handler.wfile.write(
+            (
+                "HTTP/1.1 200 OK\r\n"
+                f"Content-Length: {len(payload)}\r\n"
+                "Content-Type: application/json\r\n\r\n"
+            ).encode()
+        )
+        release.wait(8)
+        handler.wfile.write(payload)
+
+    monkeypatch.setattr(HTTPResponse, "read1", read)
+    resource = calls(lambda: b"owned producer finished")
+    results, errors, produced, read_seen, failure = [], [], None, False, None
+    with WireReceiver([reply]) as receiver:
+        grant = RequestGrant("GET", receiver.origin + "/lease", (("accept", "application/json"),))
+        auth = Authorization((grant,), Limits(response_bytes=8192, total_bytes=16384), "a" * 64)
+        owner = SupervisedRun.create(auth, tmp_path / "run")
+        client = HttpClient(
+            receiver.origin,
+            label="EVS",
+            timeout_seconds=5,
+            max_attempts=1,
+            retry_backoff_seconds=0,
+            max_response_bytes=32,
+            size_bound="owned-lease-observation",
+            request_policy=ControlledHttpPolicy(owner.run),
+        )
+
+        def fetch():
+            try:
+                results.append(client.get_json("/lease"))
+            except BaseException as error:  # noqa: BLE001 - retain caller errors outside thread capture.
+                errors.append(error)
+
+        actor = threading.Thread(target=fetch, name="owned-pending-http-receipt")
+        try:
+            try:
+                with owner:
+                    owner.register_completion(resource, participant="settled-resource")
+                    resource.start()
+                    produced = resource.result.result(timeout=2)
+                    resource.thread.join(2)
+                    actor.start()
+                    read_seen = reading.wait(3)
+            except BaseException as error:  # noqa: BLE001 - assert real owner state outside capture.
+                failure = error
+            assert (read_seen, produced, actor.is_alive(), release.is_set()) == (
+                True,
+                b"owned producer finished",
+                True,
+                False,
+            )
+            raw = owner.run.snapshot()
+            assert (
+                raw.active,
+                raw.pending_receipts,
+                raw.observation_complete,
+                resource.thread.is_alive(),
+                owner._observer.is_alive(),
+                owner.pending_owners,
+            ) == (1, 1, False, False, False, ())
+            summary = owner.snapshot()
+            assert summary["observationComplete"] is False
+            assert (type(failure), getattr(failure, "reason", None)) == (
+                RequestPolicyError,
+                "accounting",
+            )
+            assert (
+                receiver.contacts,
+                [(method, path, body) for method, path, _headers, body in receiver.requests],
+            ) == (1, [("GET", "/lease", b"")])
+        finally:
+            # Retire the real HTTP receipt only after capturing incomplete observation.
+            release.set()
+            if actor.ident is not None:
+                actor.join(6)
+            assert not actor.is_alive()
+        assert (len(errors), results) == (1, [])
+        assert [
+            (type(error), getattr(error, "reason", None)) for error in failure_leaves(errors[0])
+        ] == [(RequestPolicyError, "closed")]
+        after = owner.run.snapshot()
+        assert (after.active, after.pending_receipts) == (0, 0)
