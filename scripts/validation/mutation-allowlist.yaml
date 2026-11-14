@@ -7,15 +7,6 @@
   original: "bbd16564a251afee878733b559fe68103600a58edc22dd528ccfa96ff73da443"
   mutated: "7ee5990dcdaabf7f382d70aaccda0437609864164321ca52a1e6f7af768f325c"
   reason: "The actual NativeRun controller is SupervisedRun. This condition changes only its __exit__ kind argument; the identical initiating error and traceback argument still reach the callee. SupervisedRun.__exit__ ignores kind and traceback and calls _finish(error), so completion, errors and custody are unchanged. Type/identity evaluation has no side effect here. Reviewed from the retained exact raw survivor and actual call chain, without a new kind-argument spy or replay. Reassess if the callee consumes kind or another supported owner implementation is introduced."
-# Approved: #479 comment 6864302547; official SURVIVED at 6bf6bbc, independently confirmed with real-process controls.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
-  qualname: "StdioOwner._wait"
-  operator: "return:True"
-  site: "/body/0/body/1"
-  context: "4f47465e0635d547718aacf31dd973188a76a2f27c3f47be7f3bf309177e14a1"
-  original: "922989227bd89a35925276b40e10c6a0536db7a085aecff7ccb8da3da323fbc2"
-  mutated: "4d40361fc85c2c1588359b7bbefb67ffbd5ed15730fe3cec6085464279212055"
-  reason: "The fixed anyio.run asyncio acquisition uses the locked AnyIO process: wait awaits exit, asserts the underlying returncode is non-None and returns that same value exposed by its property. The process is not replaced; the real await, timeout and exception paths remain. Independent real SDK, startup/closure and backpressure controls pass on original, exact mutant and restored source. A mismatched fake wait/property pair is outside this collaborator contract. Reassess on backend/API/acquisition changes."
 # Approved: #479 comment 6864302547; official SURVIVED at 6bf6bbc, independently confirmed with closed-consumer controls.
 - file: "acceptance/src/nci_si_acceptance/request_stdio.py"
   qualname: "StdioOwner._deliver"

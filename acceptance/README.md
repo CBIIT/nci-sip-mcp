@@ -81,6 +81,8 @@ transferred stderr files share one cleanup deadline. Completion requires actual 
 process reaping; an unjoined owner remains pending and cannot produce successful completion.
 A startup failure still fails the run. Resource observation can nevertheless be complete
 when all resources actually acquired have settled; tasks never created need no receipt.
+A natural nonzero child exit fails the run even after successful reaping. Only an exit
+status matching an actually sent owner TERM/KILL signal is treated as expected cleanup.
 Report publication failures propagate rather than leaving a successful command result.
 The creator retains responsibility for private run directories and evidence cleanup.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 import subprocess
 import threading
 import time
@@ -165,6 +166,7 @@ class StdioOwner:
             controller.run.descriptor.run_id, controller.run.descriptor.policy_sha256
         )
         self.closed: set[str] = set()
+        self._sent_signals: set[int] = set()
         self.waited = self.process_closed = self.endpoints_closed = False
         self._read_send, self.read = anyio.create_memory_object_stream[SessionMessage | Exception](
             0
@@ -365,6 +367,10 @@ class StdioOwner:
         try:
             with anyio.fail_after(min(seconds, deadline.remaining())):
                 code = await self._process().wait()
+            # Reaping proves settlement, not execution success. Only the exact
+            # negative status of a successfully sent owner signal is explained.
+            if code != 0 and -code not in self._sent_signals:
+                self._initiate(RequestPolicyError("transport"))
             return code == self._process().returncode
         except TimeoutError:
             return False
@@ -398,6 +404,7 @@ class StdioOwner:
         if process is not None and process.returncode is None:
             try:
                 process.kill() if kill else process.terminate()
+                self._sent_signals.add(signal.SIGKILL if kill else signal.SIGTERM)
             except OSError:
                 self.errors.append(RequestPolicyError("accounting"))
 
