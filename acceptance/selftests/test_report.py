@@ -1,6 +1,7 @@
 """The per-tool report: outcomes from the final test outcomes, over both run modes, rendered."""
 
 import json
+import os
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
@@ -630,6 +631,31 @@ def test_atomic_report_preserves_prior_file_and_each_publication_failure(
         # Only temporaries observed from this writer are ours; keep the prior report.
         for path in owned_temporaries:
             original_unlink(path, missing_ok=True)
+
+
+def test_atomic_writer_creates_nested_path_and_syncs_complete_bytes(tmp_path, monkeypatch):
+    destination = tmp_path / "fresh" / "nested" / "report.json"
+    payload = '{"run": {"exit_status": 0}, "tests": {}}\n'
+    expected = payload.encode("utf-8")
+    synchronized = []
+    actual_sync = report_module.os.fsync
+
+    def sync(fd):
+        # Observe OS bytes before the existing synchronization, not flush invocations.
+        synchronized.append(os.pread(fd, len(expected) + 1, 0))
+        actual_sync(fd)
+
+    monkeypatch.setattr(report_module.os, "fsync", sync)
+    assert not destination.parent.exists()
+    failure = None
+    try:
+        report_module._publish_native(destination, payload)
+    except OSError as error:
+        failure = error
+    assert failure is None
+    assert destination.read_bytes() == expected
+    assert synchronized and all(data == expected for data in synchronized)
+    assert list(destination.parent.iterdir()) == [destination]
 
 
 def test_what_a_worker_noted_of_the_server_reaches_the_controller_once():
