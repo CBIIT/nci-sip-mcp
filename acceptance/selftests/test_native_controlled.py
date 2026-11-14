@@ -308,6 +308,37 @@ def pytest_collection_modifyitems(items):
         assert not (directory / "native-run").exists()
 
 
+def test_initial_publication_failure_cannot_be_retried_by_framework_cleanup(native_tree):
+    tree, python, env = native_tree
+    (tree / "acceptance/src/initial_publication_probe.py").write_text("""
+from nci_si_acceptance import report
+
+actual_publish = report._publish_native
+first_publication = True
+
+def publish(destination, text):
+    global first_publication
+    if first_publication:
+        first_publication = False
+        raise OSError('owned one-shot initial publication failure')
+    return actual_publish(destination, text)
+
+report._publish_native = publish
+""")
+    directory = tree / "acceptance/tmp"
+    directory.mkdir()
+    destination, prior = directory / "native-report.json", b'{"prior":true}\n'
+    destination.write_bytes(prior)
+    with WireReceiver({}) as receiver:
+        local_policy(tree, receiver)
+        outcome = run_native(tree, python, env, NODE, "-p", "initial_publication_probe", "-n", "0")
+        assert receiver.requests == [] and receiver.contacts == 0
+    assert destination.read_bytes() == prior
+    assert outcome.returncode != 0
+    assert "owned one-shot initial publication failure" in outcome.stdout + outcome.stderr
+    assert not (directory / "native-run").exists()
+
+
 def test_native_cleanup_failure_marks_a_passing_case_failed(native_tree):
     tree, python, env = native_tree
     (tree / "acceptance/src/native_cleanup_only_probe.py").write_text("""
