@@ -337,3 +337,103 @@ def test_clock_failure_still_closes_admission_and_never_restarts_cleanup_time(
         owner._stop.set()
         owner._observer.join(2)
         assert not owner._observer.is_alive()
+
+
+def test_overlapping_settlement_cannot_reuse_token(calls):
+    registry = Completions("b" * 32, "a" * 64)
+    entered, release, finishing = threading.Event(), threading.Event(), threading.Event()
+
+    def operation():
+        entered.set()
+        release.wait()
+        return "settled"
+
+    call = calls(operation)
+    token = registry.register(call, "participant")
+    original_finish = call.finish
+
+    def finish(deadline):
+        finishing.set()
+        original_finish(deadline)
+
+    call.finish = finish
+    deadline = CleanupDeadline(time.monotonic() + 5)
+    errors = []
+
+    def settle():
+        try:
+            registry.settle(token, deadline)
+        except BaseException as error:  # noqa: BLE001 - retain actor errors for caller assertions.
+            errors.append(error)
+
+    actor = threading.Thread(target=settle, name="owned-first-settlement")
+    try:
+        call.start()
+        assert entered.wait(1)
+        actor.start()
+        assert finishing.wait(1)
+        refused = None
+        try:
+            registry.settle(token, deadline)
+        except BaseException as error:  # noqa: BLE001 - require the exact refusal below.
+            refused = error
+        assert isinstance(refused, RequestPolicyError) and refused.reason == "authorization"
+        assert registry.pending == (call.name,)
+        release.set()
+        actor.join(2)
+        assert not actor.is_alive() and errors == []
+        assert registry.pending == ()
+        assert call.result.result() == "settled"
+    finally:
+        release.set()
+        if actor.ident is not None:
+            actor.join(6)
+        assert not actor.is_alive()
+
+
+def test_failed_settlement_can_retry_without_rearming_deadline(calls):
+    registry = Completions("b" * 32, "a" * 64)
+    entered, release = threading.Event(), threading.Event()
+
+    def operation():
+        entered.set()
+        release.wait()
+        return "settled"
+
+    call = calls(operation)
+    token = registry.register(call, "participant")
+    deadline = CleanupDeadline(time.monotonic())
+    original_end = deadline.end
+    try:
+        call.start()
+        assert entered.wait(1)
+        assert deadline.remaining() == 0
+        with pytest.raises(BaseExceptionGroup) as failure:
+            registry.settle(token, deadline)
+        assert any(
+            isinstance(error, RequestPolicyError) and error.reason == "accounting"
+            for error in failure_leaves(failure.value)
+        )
+        assert registry.pending == (call.name,)
+        release.set()
+        call.thread.join(2)
+        assert not call.thread.is_alive() and call.result.result() == "settled"
+        retry_error = None
+        try:
+            registry.settle(token, deadline)
+        except BaseException as error:  # noqa: BLE001 - require successful real settlement below.
+            retry_error = error
+        assert retry_error is None
+        assert registry.pending == ()
+        assert deadline.end == original_end and deadline.remaining() == 0
+    finally:
+        release.set()
+
+
+def test_cleanup_deadline_rejects_reassignment():
+    deadline = CleanupDeadline(time.monotonic())
+    original_end = deadline.end
+    assert deadline.remaining() == 0
+    with pytest.raises(FrozenInstanceError):
+        deadline.end = time.monotonic() + 10
+    assert deadline.end == original_end and deadline.remaining() == 0
