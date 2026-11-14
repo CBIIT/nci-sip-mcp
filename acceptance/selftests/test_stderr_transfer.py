@@ -3,6 +3,7 @@
 import io
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from typing import TextIO
 
@@ -11,6 +12,7 @@ from test_request_supervision import authorization, failure_leaves
 
 from nci_si_acceptance import request_children
 from nci_si_acceptance.client import open_session
+from nci_si_acceptance.request_children import CleanupDeadline
 from nci_si_acceptance.request_stdio import StderrTransfer
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import RequestPolicyError
@@ -79,6 +81,51 @@ class TransferCase:
     finished: threading.Event
     failures: list[BaseException]
     initiating: LookupError
+
+
+def test_duplicate_handoff_preserves_the_original_writer_custody(tmp_path):
+    stream = (tmp_path / "stderr.log").open("w")
+    transfer = StderrTransfer(stream)
+    entered, release = threading.Event(), threading.Event()
+    errors = []
+
+    def write():
+        entered.set()
+        release.wait()
+        try:
+            stream.write("owned first writer\n")
+        except BaseException as error:  # noqa: BLE001 - retain actual writer failure for assertions.
+            errors.append(error)
+
+    writer = threading.Thread(target=write, name="owned-original-stderr-writer")
+    try:
+        writer.start()
+        assert entered.wait(1)
+        transfer.accept(writer)
+        with pytest.raises(RequestPolicyError) as refused:
+            transfer.accept(threading.Thread(name="unaccepted-stderr-writer"))
+        assert refused.value.reason == "authorization"
+        with pytest.raises(RequestPolicyError) as unsettled:
+            transfer.finish(CleanupDeadline(time.monotonic()))
+        assert unsettled.value.reason == "accounting"
+        assert writer.is_alive() and not stream.closed
+        release.set()
+        writer.join(2)
+        assert not writer.is_alive() and errors == []
+        transfer.finish(CleanupDeadline(time.monotonic() + 3))
+        assert stream.closed
+        assert (tmp_path / "stderr.log").read_bytes() == b"owned first writer\n"
+    finally:
+        release.set()
+        if writer.ident is not None:
+            writer.join(3)
+        assert not writer.is_alive()
+        closer = transfer._closer
+        if closer is not None and closer.thread.ident is not None:
+            closer.thread.join(3)
+            assert not closer.thread.is_alive()
+            closer.result.cancel()
+        stream.close()
 
 
 @pytest.fixture
