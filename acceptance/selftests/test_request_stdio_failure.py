@@ -476,3 +476,106 @@ def test_actual_stdout_backpressure_cannot_extend_the_shared_cleanup_deadline(
         assert not resource.thread.is_alive()
         assert resource.process.returncode is not None
     assert observed["process_close_returned"] is True
+
+
+@pytest.fixture
+def partial_enrollment_case(tmp_path, monkeypatch):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    resource = StdioOwner(
+        owner, [sys.executable, "-c", "import sys;sys.stdin.buffer.read()"], {}, io.StringIO()
+    )
+    allocation_error = MemoryError("owned simulated task allocation refusal")
+    created, waited, closed = set(), [], set()
+    real_open, real_factory, original_io = (
+        anyio.open_process,
+        anyio.create_task_group,
+        resource._io_scope,
+    )
+
+    async def open_process(*args, **kwargs):
+        process = await real_open(*args, **kwargs)
+        actual_wait = process.wait
+
+        async def wait():
+            code = await actual_wait()
+            waited.append(code)
+            return code
+
+        try:
+            monkeypatch.setattr(process, "wait", wait)
+            for name in ("stdin", "stdout", "stderr"):
+                stream = getattr(process, name)
+                assert stream is not None
+                actual_close = stream.aclose
+
+                async def close(operation=actual_close, stream_name=name):
+                    await operation()
+                    closed.add(stream_name)
+
+                monkeypatch.setattr(stream, "aclose", close)
+        except BaseException:
+            # The observer owns this handle until it returns it to production.
+            with anyio.CancelScope(shield=True):
+                await process.aclose()
+            raise
+        return process
+
+    def create_group():
+        group = real_factory()
+        actual_start = group.start_soon
+
+        def start(function, *args, **kwargs):
+            if created:
+                raise allocation_error
+            before = asyncio.all_tasks()
+            result = actual_start(function, *args, **kwargs)
+            created.update(asyncio.all_tasks() - before)
+            return result
+
+        monkeypatch.setattr(group, "start_soon", start)
+        return group
+
+    async def io_scope(portal):
+        with monkeypatch.context() as scoped:
+            scoped.setattr(anyio, "create_task_group", create_group)
+            await original_io(portal)
+
+    monkeypatch.setattr(anyio, "open_process", open_process)
+    monkeypatch.setattr(resource, "_io_scope", io_scope)
+    try:
+        yield owner, resource, allocation_error, created, waited, closed
+    finally:
+        _stop_child_for_test(resource)
+        if resource.thread.ident is not None:
+            resource.thread.join(5)
+        assert not resource.thread.is_alive()
+        anyio.run(_reap_for_test, resource)
+
+
+def test_partial_task_enrollment_failure_releases_actually_settled_custody(
+    partial_enrollment_case,
+):
+    owner, resource, allocation_error, created, waited, closed = partial_enrollment_case
+    with pytest.raises(BaseExceptionGroup) as outward, owner:
+        owner.register_completion(resource, participant="stdio")
+        resource.thread.start()
+        resource.portal_ready.result(timeout=3)
+    assert any(error is allocation_error for error in failure_leaves(outward.value))
+    assert created
+    assert all(task.done() for task in created)
+    assert not resource.thread.is_alive()
+    process = resource.process
+    assert process is not None
+    assert type(process.returncode) is int
+    assert waited
+    assert all(code == process.returncode for code in waited)
+    assert closed == {"stdin", "stdout", "stderr"}
+    states = (resource.read.statistics(), resource.write.statistics())
+    assert [(state.open_send_streams, state.open_receive_streams) for state in states] == [
+        (0, 0),
+        (0, 0),
+    ]
+    summary = owner.snapshot()
+    assert summary["state"] == "failed"
+    assert owner.pending_owners == ()
+    assert summary["observationComplete"] is True
