@@ -8,6 +8,7 @@ import importlib
 import importlib.util
 import inspect
 import json
+import os
 import signal
 import sqlite3
 import subprocess
@@ -17,12 +18,13 @@ import threading
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import nci_si_acceptance
 import nci_si_mcp
-from nci_si_acceptance import request_budget
+from nci_si_acceptance import request_budget, request_children
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_mcp.http_client import RequestPolicyError
 
@@ -86,6 +88,75 @@ def supervisor(directory):
     name = "nci_si_acceptance.request_supervision"
     assert importlib.util.find_spec(name) is not None, "An owned caller needs SupervisedRun"
     return importlib.import_module(name).SupervisedRun.create(authorization(), directory)
+
+
+@pytest.mark.skipif(not hasattr(os, "waitpid"), reason="Owns the POSIX nonterminal wait receipt")
+def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    clock, polling = [time.monotonic()], threading.local()
+    actual_waitpid = os.waitpid
+    polls = []
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    command = [sys.executable, "-I", "-c", "import sys;sys.stdin.buffer.read()"]
+    with (
+        subprocess.Popen(  # noqa: S603 - fixed owned interpreter and synthetic stdin-only worker.
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ) as first,
+        subprocess.Popen(  # noqa: S603 - same fixed program, distinct owned worker.
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ) as second,
+    ):
+        first_wait, second_wait = first.wait, second.wait
+
+        def finish_first(*args, **kwargs):
+            code = first_wait(*args, **kwargs)
+            if code == 0:
+                clock[0] += request_children.CLEANUP_SECONDS + 1
+            return code
+
+        def wait_second(*args, **kwargs):
+            polling.second = True
+            try:
+                return second_wait(*args, **kwargs)
+            finally:
+                polling.second = False
+
+        def waitpid(pid, options):
+            receipt = actual_waitpid(pid, options)
+            if pid == second.pid and getattr(polling, "second", False) and receipt[0] == 0:
+                polls.append(receipt)
+                second.stdin.close()
+            return receipt
+
+        monkeypatch.setattr(first, "wait", finish_first)
+        monkeypatch.setattr(second, "wait", wait_second)
+        monkeypatch.setattr(os, "waitpid", waitpid)
+        failure = None
+        try:
+            try:
+                with owner:
+                    owner.register_child(first, participant="first-worker", role="worker")
+                    owner.register_child(second, participant="second-worker", role="worker")
+                    first.stdin.close()
+            except BaseException as error:  # noqa: BLE001 - assert caller outcome outside capture.
+                failure = error
+            assert polls and all(pid == 0 for pid, _status in polls)
+            assert failure is None
+            assert (first.returncode, second.returncode) == (0, 0)
+            assert all(
+                stream.closed
+                for child in (first, second)
+                for stream in (child.stdin, child.stdout, child.stderr)
+            )
+            summary = owner.snapshot()
+            assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+            assert owner.cleanup_deadline().remaining() == 0
+        finally:
+            # Independent bounded reaping owns only these two actual children.
+            for child, wait in ((first, first_wait), (second, second_wait)):
+                if child.poll() is None:
+                    child.kill()
+                wait(timeout=3)
 
 
 def test_initial_summary_precedes_admission(tmp_path):
