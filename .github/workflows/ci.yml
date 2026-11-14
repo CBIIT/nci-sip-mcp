@@ -50,6 +50,15 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
           SHARD: ${{ matrix.shard }}/3
         run: pdm run mutation-gate --base "$BASE_SHA" --head "$HEAD_SHA" --shard "$SHARD" -n 2 --coverage-dir tmp/mutation-coverage
+      - name: Retain raw mutation results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: mutation-results-${{ github.sha }}-${{ matrix.shard }}
+          path: tmp/mutation-runs/
+          # An EMPTY shard never starts a scheduler; nonempty evidence is checked before clearance.
+          if-no-files-found: warn
+          retention-days: 30
 
   changes:
     name: image selection

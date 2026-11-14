@@ -432,6 +432,10 @@ Missing results receive explicit `INFRA` rows; corrupt JSON remains byte-for-byt
 original file, with its synthesized row in `result-N.infra.json`. Corruption fails the command
 even after scheduler exit zero; file permission failures remain diagnostic. An incomplete row
 never counts as a kill or verified scratch restoration. Retained runs are never resumed automatically.
+The PR mutation job uploads this directory on success or failure as
+`mutation-results-<merge-tree-sha>-<shard>` for 30 days. An `EMPTY` shard creates no scheduler
+directory; missing or incomplete raw evidence for a nonempty shard blocks review clearance,
+regardless of the workflow's displayed status. The raw results do not contain every runner phase.
 
 ## Coverage badges
 
