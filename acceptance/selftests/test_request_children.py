@@ -437,3 +437,54 @@ def test_cleanup_deadline_rejects_reassignment():
     with pytest.raises(FrozenInstanceError):
         deadline.end = time.monotonic() + 10
     assert deadline.end == original_end and deadline.remaining() == 0
+
+
+def test_shutdown_refuses_an_already_authorized_completion_offer(tmp_path, monkeypatch, calls):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    marker = tmp_path / "late-task-started"
+    resource = calls(lambda: marker.write_bytes(b"owned late task\n"))
+    authorized, release = threading.Event(), threading.Event()
+    tokens, errors = [], []
+    actual_authorize, actual_join = owner.run.authorize_participant, owner._join
+
+    def authorize(participant):
+        actual_authorize(participant)
+        authorized.set()
+        if not release.wait(5):
+            raise TimeoutError("Owned authorization handoff was not released")
+
+    def offer():
+        try:
+            tokens.append(owner.register_completion(resource, participant="shutdown-offer"))
+            resource.start()
+        except BaseException as error:  # noqa: BLE001 - compare actual caller refusal outside capture.
+            errors.append(error)
+
+    actor = threading.Thread(target=offer, name="owned-authorized-completion-offer")
+
+    def join_then_offer():
+        actual_join()
+        release.set()
+        actor.join(3)
+
+    monkeypatch.setattr(owner.run, "authorize_participant", authorize)
+    monkeypatch.setattr(owner, "_join", join_then_offer)
+    authorization_seen = False
+    try:
+        with owner:
+            actor.start()
+            authorization_seen = authorized.wait(2)
+        assert authorization_seen
+        assert not actor.is_alive()
+        assert tokens == []
+        assert len(errors) == 1
+        assert type(errors[0]) is RequestPolicyError and errors[0].reason == "authorization"
+        assert not marker.exists() and resource.thread.ident is None
+        assert owner.pending_owners == ()
+        summary = owner.snapshot()
+        assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+    finally:
+        release.set()
+        if actor.ident is not None:
+            actor.join(3)
+        assert not actor.is_alive()
