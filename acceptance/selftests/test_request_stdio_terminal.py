@@ -18,6 +18,7 @@ from nci_si_mcp.errors import RequestPolicyError
 CHILD = """import json,signal,sys
 mode=sys.argv[1]
 if mode=='owner-kill': signal.signal(signal.SIGTERM,signal.SIG_IGN)
+if mode=='owner-exit7': signal.signal(signal.SIGTERM,lambda *_:sys.exit(7))
 for line in sys.stdin:
     request=json.loads(line)
     if 'id' not in request: continue
@@ -84,7 +85,7 @@ def terminal_case(tmp_path, monkeypatch):
             anyio.run(_reap_for_test, resource)
 
 
-@pytest.mark.parametrize("mode", ["0", "7", "owner-term", "owner-kill"])
+@pytest.mark.parametrize("mode", ["0", "7", "owner-term", "owner-kill", "owner-exit7"])
 def test_child_exit_status_preserves_terminal_outcome(terminal_case, mode):
     owner, resources, waited, closed = terminal_case
     outward = None
@@ -102,9 +103,13 @@ def test_child_exit_status_preserves_terminal_outcome(terminal_case, mode):
     resource = resources[0]
     process = resource.process
     assert process is not None
-    expected_code = {"0": 0, "7": 7, "owner-term": -signal.SIGTERM, "owner-kill": -signal.SIGKILL}[
-        mode
-    ]
+    expected_code = {
+        "0": 0,
+        "7": 7,
+        "owner-term": -signal.SIGTERM,
+        "owner-kill": -signal.SIGKILL,
+        "owner-exit7": 7,
+    }[mode]
     assert process.returncode == expected_code
     assert waited and all(code == expected_code for code in waited)
     assert closed == {"stdin", "stdout", "stderr"}
@@ -116,8 +121,8 @@ def test_child_exit_status_preserves_terminal_outcome(terminal_case, mode):
     summary = json.loads((owner.run.directory / "summary.json").read_text())
     assert owner.pending_owners == ()
     assert summary["observationComplete"] is True
-    assert summary["state"] == ("failed" if mode == "7" else "completed")
-    if mode == "7":
+    assert summary["state"] == ("failed" if mode in ("7", "owner-exit7") else "completed")
+    if mode in ("7", "owner-exit7"):
         assert outward is not None
         assert any(
             isinstance(error, RequestPolicyError) and error.reason == "transport"
