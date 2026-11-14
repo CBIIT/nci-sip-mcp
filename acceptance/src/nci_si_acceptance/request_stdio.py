@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
-from concurrent.futures import Future
+from concurrent.futures import Future, wait
 from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import asynccontextmanager, contextmanager, nullcontext
 from contextvars import copy_context
@@ -329,6 +329,15 @@ class StdioOwner:
             self.controller._record_failure(error, "deadline")
             raise error from None
 
+    def _ready[T](self, future: Future[T], end: float) -> T:
+        completed, _ = wait((future,), timeout=max(0.0, end - time.monotonic()))
+        if future not in completed:
+            error = RequestPolicyError("deadline")
+            self.controller._record_failure(error, "deadline")
+            raise error
+        # A completed operation's exception is not expiration of this readiness wait.
+        return future.result()
+
     async def _step(
         self, action: Callable[[], Awaitable[object]], deadline: CleanupDeadline | None
     ) -> bool:
@@ -460,8 +469,8 @@ def controlled_session(
         raise
     end = time.monotonic() + seconds
     resource.thread.start()
-    portal = resource.portal_ready.result(timeout=max(0.0, end - time.monotonic()))
-    client = resource.client_ready.result(timeout=max(0.0, end - time.monotonic()))
+    portal = resource._ready(resource.portal_ready, end)
+    client = resource._ready(resource.client_ready, end)
     try:
         yield _OwnedSession(resource, portal, client)
     finally:

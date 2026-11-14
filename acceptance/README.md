@@ -83,6 +83,9 @@ A startup failure still fails the run. Resource observation can nevertheless be 
 when all resources actually acquired have settled; tasks never created need no receipt.
 A natural nonzero child exit fails the run even after successful reaping. Only an exit
 status matching an actually sent owner TERM/KILL signal is treated as expected cleanup.
+A startup readiness wait that expires terminally fails admission, even if the caller
+catches it and initialization later succeeds. Both readiness waits share one deadline;
+an exception from an already-completed startup operation retains its original cause.
 Report publication failures propagate rather than leaving a successful command result.
 The creator retains responsibility for private run directories and evidence cleanup.
 
