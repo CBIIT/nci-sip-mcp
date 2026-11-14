@@ -285,7 +285,7 @@ class SupervisedRun:
         resources = self._collect([self._join])
         known: list[BaseException] = []
         if terminal:
-            known = self._collect([lambda: self._terminal_failure(errors)])
+            known = self._terminal_failures(errors)
             errors[:0] = [error for error in known if not self._contains(errors, error)]
         actions: list[Callable[[], None]] = [
             lambda child=child: self._finish_child(child) for child in self._children
@@ -337,18 +337,25 @@ class SupervisedRun:
             observed.append(self._observer_error)
         observed.extend(self._recording_errors)
         if self._controlled_cleanup and observe_terminal:
-            observed.extend(self._collect([lambda: self._terminal_failure(errors)]))
+            observed.extend(self._terminal_failures(errors))
         return [error for error in observed if not self._contains(errors, error)]
 
     def _seal_registry(self) -> None:
         self._registrations.append(None)
         self._completions.seal()
 
-    def _terminal_failure(self, errors: list[BaseException]) -> None:
-        self.run.snapshot()  # Validate private identity and counters before selecting the event.
-        failure, event = self.run._failure_record()
-        if failure is not None and (event is None or not self._contains(errors, event)):
-            raise event or RequestPolicyError(failure)
+    def _terminal_failures(self, errors: list[BaseException]) -> list[BaseException]:
+        retained: list[BaseException] = []
+
+        def observe() -> None:
+            # Validate private identity and counters before selecting the event.
+            self.run.snapshot()
+            failure, event = self.run._failure_record()
+            if failure is not None and (event is None or not self._contains(errors, event)):
+                retained.append(event or RequestPolicyError(failure))
+
+        # Normalize new lookup failures, never the already-classified retained event.
+        return self._collect([observe]) + retained
 
     @staticmethod
     def _contains(

@@ -86,6 +86,8 @@ status matching an actually sent owner TERM/KILL signal is treated as expected c
 A startup readiness wait that expires terminally fails admission, even if the caller
 catches it and initialization later succeeds. Both readiness waits share one deadline;
 an exception from an already-completed startup operation retains its original cause.
+Owner completion replays that retained cause without reclassifying it as a new cleanup
+failure. Newly raised cleanup or terminal-record lookup errors still use cleanup error handling.
 Report publication failures propagate rather than leaving a successful command result.
 The creator retains responsibility for private run directories and evidence cleanup.
 
