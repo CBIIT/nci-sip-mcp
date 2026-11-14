@@ -308,6 +308,62 @@ def test_caught_sdk_startup_error_survives_later_child_failure(terminal_case):
     assert any(error is original for error in failure_leaves(outward))
 
 
+def test_caught_initialization_error_closes_peer_before_outer_owner_cleanup(
+    terminal_case, tmp_path, monkeypatch
+):
+    owner, _, _, _ = terminal_case
+    marker = tmp_path / "peer-eof"
+    child = STARTUP_ERROR_CHILD.replace(
+        "sys.exit(7)",
+        "with open(sys.argv[1], 'wb') as receipt: receipt.write(b'owned EOF\\n')\nsys.exit(7)",
+        1,
+    )
+    acknowledged = threading.Event()
+    real_open = anyio.open_process
+
+    async def open_process(*args, **kwargs):
+        process = await real_open(*args, **kwargs)
+        actual_wait = process.wait
+
+        async def wait():
+            code = await actual_wait()
+            acknowledged.set()
+            return code
+
+        monkeypatch.setattr(process, "wait", wait)
+        return process
+
+    monkeypatch.setattr(anyio, "open_process", open_process)
+    opened, caught, outward, before_outer, receipt_before_outer = False, None, None, False, None
+    try:
+        with owner:
+            try:
+                with open_session(
+                    [sys.executable, "-c", child, str(marker)],
+                    {},
+                    io.StringIO(),
+                    timeout=3,
+                    owner=owner,
+                ):
+                    opened = True
+            except BaseException as error:  # noqa: BLE001 - record, then assert outside capture.
+                caught = error
+            before_outer = acknowledged.wait(5)
+            if before_outer:
+                receipt_before_outer = marker.read_bytes()
+    except BaseException as error:  # noqa: BLE001 - observe outer failure without swallowing assertions.
+        outward = error
+    _assert_failed_terminal_resources_settled(terminal_case, 7)
+    assert opened is False
+    assert (before_outer, receipt_before_outer) == (True, b"owned EOF\n")
+    assert caught is not None and outward is not None
+    causes = [error for error in failure_leaves(caught) if isinstance(error, MCPError)]
+    assert len(causes) == 1
+    expected_code = -32603
+    assert (causes[0].code, causes[0].message) == (expected_code, "owned initialization refused")
+    assert any(error is causes[0] for error in failure_leaves(outward))
+
+
 @pytest.fixture
 def held_process_cleanup(terminal_case, monkeypatch):
     entered, release = threading.Event(), threading.Event()
