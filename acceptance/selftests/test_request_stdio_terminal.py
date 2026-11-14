@@ -37,6 +37,18 @@ if mode.startswith('owner-'): signal.pause()
 sys.exit(int(mode))
 """
 
+STARTUP_ERROR_CHILD = """import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    if 'id' not in request: continue
+    if request.get('method')=='initialize':
+        error={'code':-32603,'message':'owned initialization refused'}
+    else:
+        error={'code':-32601,'message':'Method not found'}
+    print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':error}),flush=True)
+sys.exit(7)
+"""
+
 
 @pytest.fixture
 def terminal_case(tmp_path, monkeypatch):
@@ -258,17 +270,7 @@ def test_startup_operation_timeout_preserves_original_event(terminal_case, monke
 def test_caught_sdk_startup_error_survives_later_child_failure(terminal_case):
     owner, resources, waited, closed = terminal_case
     expected_status = 7
-    child = """import json,sys
-for line in sys.stdin:
-    request=json.loads(line)
-    if 'id' not in request: continue
-    if request.get('method')=='initialize':
-        error={'code':-32603,'message':'owned initialization refused'}
-    else:
-        error={'code':-32601,'message':'Method not found'}
-    print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':error}),flush=True)
-sys.exit(7)
-"""
+    child = STARTUP_ERROR_CHILD
     opened, caught, outward = False, None, None
     try:
         with owner:
@@ -303,4 +305,132 @@ sys.exit(7)
     expected_error_code = -32603
     assert original.code == expected_error_code
     assert original.message == "owned initialization refused"
+    assert any(error is original for error in failure_leaves(outward))
+
+
+@pytest.fixture
+def held_process_cleanup(terminal_case, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    real_open = anyio.open_process
+
+    async def open_process(*args, **kwargs):
+        process = await real_open(*args, **kwargs)
+        actual_wait = process.wait
+
+        async def wait():
+            entered.set()
+            if not await anyio.to_thread.run_sync(release.wait, 8):
+                raise TimeoutError("Owned process-wait barrier was not released")
+            return await actual_wait()
+
+        monkeypatch.setattr(process, "wait", wait)
+        return process
+
+    monkeypatch.setattr(anyio, "open_process", open_process)
+    try:
+        yield entered, release
+    finally:
+        release.set()
+
+
+def _assert_failed_terminal_resources_settled(case, expected_status):
+    owner, resources, waited, closed = case
+    assert len(resources) == 1
+    resource = resources[0]
+    assert resource.process is not None and resource.process.returncode == expected_status
+    assert waited and all(code == expected_status for code in waited)
+    assert closed == {"stdin", "stdout", "stderr"}
+    assert not resource.thread.is_alive()
+    assert [
+        (state.open_send_streams, state.open_receive_streams)
+        for state in (resource.read.statistics(), resource.write.statistics())
+    ] == [(0, 0), (0, 0)]
+    assert owner.pending_owners == ()
+    summary = json.loads((owner.run.directory / "summary.json").read_text())
+    assert (summary["state"], summary["observationComplete"]) == ("failed", True)
+
+
+def test_sdk_startup_error_is_delivered_while_process_cleanup_is_held(
+    terminal_case, held_process_cleanup
+):
+    owner, resources, _, _ = terminal_case
+    entered, release = held_process_cleanup
+    finished = threading.Event()
+    opened, errors = [], []
+
+    def connect():
+        try:
+            with open_session(
+                [sys.executable, "-c", STARTUP_ERROR_CHILD],
+                {},
+                io.StringIO(),
+                timeout=3,
+                owner=owner,
+            ):
+                opened.append(True)
+        except BaseException as error:  # noqa: BLE001 - record actor errors; assert outside capture.
+            errors.append(error)
+        finally:
+            finished.set()
+
+    caller = threading.Thread(target=connect, name="owned-startup-error-caller")
+    cleanup_seen, delivered, held, producer_alive, outward = False, False, False, False, None
+    try:
+        try:
+            with owner:
+                caller.start()
+                cleanup_seen = entered.wait(2)
+                delivered = finished.wait(5)
+                held = not release.is_set()
+                producer_alive = resources[0].thread.is_alive()
+                release.set()
+                caller.join(3)
+        except BaseException as error:  # noqa: BLE001 - compare the actual owner failure below.
+            outward = error
+        _assert_failed_terminal_resources_settled(terminal_case, 7)
+        assert (cleanup_seen, delivered, held, producer_alive) == (True, True, True, True)
+        assert not caller.is_alive() and opened == []
+        assert len(errors) == 1 and outward is not None
+        causes = [error for error in failure_leaves(errors[0]) if isinstance(error, MCPError)]
+        assert len(causes) == 1
+        expected_code = -32603
+        assert (causes[0].code, causes[0].message) == (
+            expected_code,
+            "owned initialization refused",
+        )
+        assert any(error is causes[0] for error in failure_leaves(outward))
+    finally:
+        release.set()
+        if caller.ident is not None:
+            caller.join(6)
+        assert not caller.is_alive()
+
+
+def test_sdk_exit_failure_after_ready_preserves_original_event(terminal_case, monkeypatch):
+    owner, _, _, _ = terminal_case
+    original = LookupError("Owned SDK exit failed after readiness")
+    completed = threading.Event()
+    actual_exit = request_stdio.Client.__aexit__
+
+    async def exit_client(self, *exception):
+        await actual_exit(self, *exception)
+        completed.set()
+        raise original
+
+    monkeypatch.setattr(request_stdio.Client, "__aexit__", exit_client)
+    unlisted = object()
+    listing, exit_seen, outward = unlisted, False, None
+    try:
+        with owner:
+            with open_session(
+                [sys.executable, "-c", CHILD, "0"], {}, io.StringIO(), timeout=3, owner=owner
+            ) as session:
+                listing = session.list_tools()
+            exit_seen = completed.wait(3)
+    except BaseException as error:  # noqa: BLE001 - assert real SDK exit error after physical proof.
+        outward = error
+    _assert_failed_terminal_resources_settled(terminal_case, 0)
+    assert getattr(listing, "tools", unlisted) == []
+    assert exit_seen
+    assert outward is not None
     assert any(error is original for error in failure_leaves(outward))
