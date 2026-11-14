@@ -260,6 +260,7 @@ def test_accepted_child_startup_error_closes_the_transferred_file(tmp_path):
     stream = (tmp_path / "stderr.log").open("w")
     transfer = StderrTransfer(stream)
     owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    opened = False
     try:
         with (
             pytest.raises(BaseExceptionGroup),
@@ -273,7 +274,8 @@ def test_accepted_child_startup_error_closes_the_transferred_file(tmp_path):
                 stderr_transfer=transfer,
             ),
         ):
-            raise AssertionError("failed child yielded an initialized session")
+            opened = True
+        assert opened is False
         assert transfer.accepted and transfer.closed and stream.closed
         assert owner.pending_owners == () and owner.snapshot()["state"] == "failed"
     finally:
