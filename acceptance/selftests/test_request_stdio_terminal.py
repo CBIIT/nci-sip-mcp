@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import signal
 import sys
 import threading
@@ -552,3 +553,80 @@ def test_closed_handles_do_not_release_a_live_transport_thread(terminal_case, mo
         if owner._observer.ident is not None:
             owner._observer.join(3)
         assert not owner._observer.is_alive()
+
+
+@pytest.mark.skipif(
+    not all(hasattr(os, name) for name in ("waitid", "WNOWAIT", "CLD_KILLED")),
+    reason="Owns the POSIX non-consuming child termination receipt",
+)
+def test_outside_cleanup_kills_child_before_transport_loop_resumes(terminal_case, monkeypatch):
+    owner, resources, _, _ = terminal_case
+    held, release, terminated = threading.Event(), threading.Event(), threading.Event()
+    clock, receipts, errors = [time.monotonic()], [], []
+    actual_exit = request_stdio.Client.__aexit__
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def exit_client(self, *exception):
+        held.set()
+        release.wait(8)
+        await actual_exit(self, *exception)
+
+    def observe_exit():
+        try:
+            receipts.append(os.waitid(os.P_PID, resources[0].process.pid, os.WEXITED | os.WNOWAIT))
+        except BaseException as error:  # noqa: BLE001 - record OS witness failures for caller assertion.
+            errors.append(error)
+        finally:
+            terminated.set()
+
+    monkeypatch.setattr(request_stdio.Client, "__aexit__", exit_client)
+    witness = threading.Thread(target=observe_exit, name="owned-nonconsuming-child-exit-witness")
+    unlisted = object()
+    listing, hold_seen, killed_before_release, failure = unlisted, False, False, None
+    try:
+        try:
+            with owner:
+                owner.cleanup_deadline()
+                with open_session(
+                    [sys.executable, "-c", CHILD, "owner-kill"],
+                    {},
+                    io.StringIO(),
+                    timeout=3,
+                    owner=owner,
+                ) as session:
+                    listing = session.list_tools()
+                hold_seen = held.wait(3)
+                witness.start()
+                clock[0] += request_children.CLEANUP_SECONDS + 1
+        except BaseException as error:  # noqa: BLE001 - assert OS effect before independent fallback.
+            failure = error
+        killed_before_release = terminated.wait(2)
+        assert (hold_seen, getattr(listing, "tools", unlisted), release.is_set()) == (
+            True,
+            [],
+            False,
+        )
+        assert killed_before_release
+        assert errors == [] and len(receipts) == 1
+        assert [(receipt.si_pid, receipt.si_code, receipt.si_status) for receipt in receipts] == [
+            (resources[0].process.pid, os.CLD_KILLED, signal.SIGKILL)
+        ]
+        assert (resources[0].thread.is_alive(), owner.pending_owners) == (
+            True,
+            (resources[0].name,),
+        )
+        summary = owner.snapshot()
+        assert (summary["state"], summary["observationComplete"]) == ("failed", False)
+        assert failure is not None
+        assert any(
+            isinstance(error, RequestPolicyError) and error.reason == "accounting"
+            for error in failure_leaves(failure)
+        )
+    finally:
+        # A later fallback kill cannot repair the pre-release termination observation.
+        if resources:
+            _stop_child_for_test(resources[0])
+        release.set()
+        if witness.ident is not None:
+            witness.join(3)
+        assert not witness.is_alive()
