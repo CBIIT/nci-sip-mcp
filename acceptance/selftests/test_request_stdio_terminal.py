@@ -551,12 +551,12 @@ def test_sdk_exit_error_during_owner_cleanup_preserves_original_event(terminal_c
         sdk_ready.set()
 
 
-def test_closed_handles_do_not_release_a_live_transport_thread(terminal_case, monkeypatch):
+def test_exited_process_late_signal_does_not_poison_settled_retry(terminal_case, monkeypatch):
+    # Individual finish retry only, not public controller recovery or a token reset.
     owner, resources, waited, closed = terminal_case
     original = LookupError("Owned SDK exit ends the actual transport event loop")
     loop_exited, release = threading.Event(), threading.Event()
-    clock = [time.monotonic()]
-    actual_run, actual_exit = anyio.run, request_stdio.Client.__aexit__
+    clock, actual_run, actual_exit = [time.monotonic()], anyio.run, request_stdio.Client.__aexit__
     monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
     async def exit_client(self, *exception):
@@ -611,6 +611,25 @@ def test_closed_handles_do_not_release_a_live_transport_thread(terminal_case, mo
         if owner._observer.ident is not None:
             owner._observer.join(3)
         assert not owner._observer.is_alive()
+    _assert_same_deadline_component_retry(resource, deadline)
+
+
+def _assert_same_deadline_component_retry(resource, deadline):
+    """Assert individual owner settlement, without recovering controller custody or run status."""
+    resource.thread.join(3)
+    assert not resource.thread.is_alive()
+    retry_failure = None
+    try:
+        resource.finish(deadline)
+    except BaseException as error:  # noqa: BLE001 - compare the actual component retry below.
+        retry_failure = error
+    assert retry_failure is None
+    assert resource.process.returncode == 0
+    assert not resource.thread.is_alive()
+    assert (
+        resource.read.statistics().open_send_streams,
+        resource.read.statistics().open_receive_streams,
+    ) == (0, 0)
 
 
 @pytest.mark.skipif(
