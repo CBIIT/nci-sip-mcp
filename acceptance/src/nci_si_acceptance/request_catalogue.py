@@ -1,10 +1,13 @@
 """Reviewed finite request declarations for explicit controlled diagnostic callers."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import yaml
@@ -25,11 +28,12 @@ from nci_si_acceptance.request_authorization import (
     RequestGrant,
 )
 from nci_si_acceptance.request_budget import ControlledRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.evs import LICENSE_KEY_HEADER, EVSClient
-from nci_si_mcp.http_client import RequestPolicyError, using_request_policy
-from nci_si_mcp.release import ReleaseContext, resolve_evs_release
+from nci_si_mcp.errors import RequestPolicyError
+from nci_si_mcp.request_policy import LICENSE_KEY_HEADER, using_request_policy
 from nci_si_mcp.validation import RELEASE_CHANNELS, ReleaseChannel
+
+if TYPE_CHECKING:
+    from nci_si_mcp.release import ReleaseContext
 
 POLICY = Path(__file__).parents[2] / "fixtures/request-policy.yaml"
 MANIFEST = POLICY.with_name("manifest.yaml")
@@ -229,6 +233,11 @@ class CompiledPolicy:
 
     def select_release(self, run: ControlledRun, *, channel: ReleaseChannel) -> ReleaseContext:
         """Discover and bind only a declared channel through this controller's policy."""
+        # Validation/attachment must not import operational clients during child bootstrap.
+        from nci_si_acceptance.request_transport import ControlledHttpPolicy  # noqa: PLC0415
+        from nci_si_mcp.evs import EVSClient  # noqa: PLC0415
+        from nci_si_mcp.release import resolve_evs_release  # noqa: PLC0415
+
         if type(run) is not ControlledRun:
             raise RequestPolicyError("authorization")
         if (

@@ -1,11 +1,14 @@
 """The per-tool report: outcomes from the final test outcomes, over both run modes, rendered."""
 
 import json
+import os
 from collections import Counter
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from nci_si_acceptance import report as report_module
 from nci_si_acceptance.report import (
     ATTRIBUTION,
     COLLECTOR,
@@ -586,6 +589,77 @@ def test_a_worker_writes_no_report_for_the_controller_to_overwrite(tmp_path):
     write_report(config, "fixture")
 
     assert not (tmp_path / "report.json").exists()
+
+
+@pytest.mark.parametrize("fault", ["fsync", "replace"])
+@pytest.mark.parametrize("cleanup_state", ["present", "unlink-fails", "already-absent"])
+def test_atomic_report_preserves_prior_file_and_each_publication_failure(
+    tmp_path, monkeypatch, cleanup_state, fault
+):
+    destination = tmp_path / "report.json"
+    prior = b'{"prior":true}\n'
+    destination.write_bytes(prior)
+    stash = pytest.Stash()
+    stash[COLLECTOR], stash[SUITE_KEY] = Collector(), SUITE
+    config = SimpleNamespace(getoption=lambda name: str(destination), stash=stash)
+    initiating, cleanup = OSError("owned publication failure"), LookupError("owned unlink failure")
+    original_unlink, owned_temporaries = Path.unlink, set()
+
+    def refuse_publication(*_args):
+        if cleanup_state == "already-absent":
+            temporaries = [path for path in tmp_path.iterdir() if path != destination]
+            assert len(temporaries) == 1
+            original_unlink(temporaries[0])
+        raise initiating
+
+    def unlink(path, *args, **kwargs):
+        if path.parent == tmp_path and path != destination:
+            owned_temporaries.add(path)
+            if cleanup_state == "unlink-fails":
+                raise cleanup
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(report_module.os, fault, refuse_publication)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    try:
+        with pytest.raises((OSError, LookupError, BaseExceptionGroup)) as observed:
+            write_report(config, "fixture", atomic=True)
+        assert destination.read_bytes() == prior
+        if cleanup_state == "unlink-fails":
+            assert isinstance(observed.value, BaseExceptionGroup)
+            assert observed.value.exceptions == (initiating, cleanup)
+        else:
+            assert observed.value is initiating
+            assert list(tmp_path.iterdir()) == [destination]
+    finally:
+        # Only temporaries observed from this writer are ours; keep the prior report.
+        for path in owned_temporaries:
+            original_unlink(path, missing_ok=True)
+
+
+def test_atomic_writer_creates_nested_path_and_syncs_complete_bytes(tmp_path, monkeypatch):
+    destination = tmp_path / "fresh" / "nested" / "report.json"
+    payload = '{"run": {"exit_status": 0}, "tests": {}}\n'
+    expected = payload.encode("utf-8")
+    synchronized = []
+    actual_sync = report_module.os.fsync
+
+    def sync(fd):
+        # Observe OS bytes before the existing synchronization, not flush invocations.
+        synchronized.append(os.pread(fd, len(expected) + 1, 0))
+        actual_sync(fd)
+
+    monkeypatch.setattr(report_module.os, "fsync", sync)
+    assert not destination.parent.exists()
+    failure = None
+    try:
+        report_module._publish_native(destination, payload)
+    except OSError as error:
+        failure = error
+    assert failure is None
+    assert destination.read_bytes() == expected
+    assert synchronized and all(data == expected for data in synchronized)
+    assert list(destination.parent.iterdir()) == [destination]
 
 
 def test_what_a_worker_noted_of_the_server_reaches_the_controller_once():

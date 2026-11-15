@@ -23,6 +23,7 @@ type Surface = Literal[
 ]
 SURFACES = get_args(Surface.__value__)
 VARIABLE = "NCI_SI_ACCEPTANCE_ENVIRONMENT"
+NATIVE_HANDOFF = "NCI_SI_ACCEPTANCE_RUN_HANDOFF"
 POLICY = Path(__file__).parents[2] / "fixtures/environments.yaml"
 LAUNCHER = [sys.executable, "-I", "-m", "nci_si_acceptance.live_launcher"]
 CREDENTIAL_SURFACES = {"NCI_SI_EVS_LICENSE_KEY": "evs", "NCI_SI_CADSR_CREDENTIAL": "cadsr"}

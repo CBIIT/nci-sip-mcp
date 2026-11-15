@@ -11,12 +11,19 @@ from mcp.server.stdio import stdio_server
 
 
 async def serve(replies):
+    listings = 0
+
     async def listing(_context, _params):
+        nonlocal listings
+        listings += 1
         return types.ListToolsResult(
+            ttl_ms=60_000,
             tools=[
-                types.Tool(name=name, input_schema={"type": "object"})
+                types.Tool(
+                    name=name, description=f"listing {listings}", input_schema={"type": "object"}
+                )
                 for name in sorted({row["tool"] for row in replies})
-            ]
+            ],
         )
 
     async def call(_context, params):

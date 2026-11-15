@@ -41,6 +41,8 @@ from .bounds import (
     current_deadline,
 )
 from .errors import PlatformError, current_correlation_id
+from .errors import RequestPolicyError as RequestPolicyError  # noqa: PLC0414 - public export.
+from .errors import UpstreamError as UpstreamError  # noqa: PLC0414 - public export.
 from .request_policy import (
     ControlledRequest,
     Exchange,
@@ -51,7 +53,6 @@ from .request_policy import (
     using_request_policy as _using_request_policy,
 )
 from .upstream import parse_upstream_json
-from .validation import PolicyReason
 
 using_request_policy = _using_request_policy
 
@@ -64,22 +65,6 @@ MAX_RETRY_DELAY_SECONDS = 60.0
 CORRELATION_HEADER = "X-Correlation-ID"
 # A backoff is waited between this share of its length and all of it.
 MIN_BACKOFF_SHARE = 0.5
-
-
-class UpstreamError(RuntimeError):
-    """Base error of a request that failed; `details` is what the error record carries."""
-
-    def __init__(self, message: str, /, **details: Any) -> None:
-        super().__init__(message)
-        self.details = details
-
-
-class RequestPolicyError(UpstreamError):
-    """Terminal refusal: internal reason is never a public error detail or cache fallback."""
-
-    def __init__(self, reason: PolicyReason) -> None:
-        super().__init__("Controlled upstream request refused.")
-        self.reason: PolicyReason = reason
 
 
 class UpstreamUnavailableError(UpstreamError):

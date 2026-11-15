@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn, Self, get_args
+from typing import TYPE_CHECKING, NoReturn, Self, get_args
 
 from nci_si_acceptance.request_authorization import (
     MAX_COUNTER,
@@ -26,10 +26,12 @@ from nci_si_acceptance.request_authorization import (
     RunDescriptor,
 )
 from nci_si_acceptance.request_summary import read_summary
-from nci_si_mcp.http_client import RequestPolicyError
-from nci_si_mcp.release import ReleaseContext
+from nci_si_mcp.errors import RequestPolicyError
 from nci_si_mcp.request_policy import TransportStart
 from nci_si_mcp.validation import LedgerState, PolicyReason
+
+if TYPE_CHECKING:
+    from nci_si_mcp.release import ReleaseContext
 
 # Bound cooperative contention, not filesystem or operating-system scheduling latency.
 BUSY_SECONDS = 0.1
