@@ -1,15 +1,15 @@
 {
-  "commit": "95dc90667c98fefbb8d3d6a8d19daa8967dd9b33",
-  "run": "https://github.com/CBIIT/nci-sip-mcp/actions/runs/43299782291",
+  "commit": "73e79b2ce63f4ff762cf303ac24e9c96546fc3b2",
+  "run": "https://github.com/CBIIT/nci-sip-mcp/actions/runs/43754723938",
   "totals": {
     "server": {
-      "covered_lines": 7371,
-      "num_statements": 7407,
-      "percent_covered": 99.40930082697884,
+      "covered_lines": 7372,
+      "num_statements": 7408,
+      "percent_covered": 99.40936426116839,
       "percent_covered_display": "99.41",
       "missing_lines": 36,
-      "excluded_lines": 50,
-      "percent_statements_covered": 99.51397326852977,
+      "excluded_lines": 54,
+      "percent_statements_covered": 99.51403887688984,
       "percent_statements_covered_display": "99.51",
       "num_branches": 1904,
       "num_partial_branches": 17,
@@ -19,20 +19,20 @@
       "percent_branches_covered_display": "99.00"
     },
     "harness": {
-      "covered_lines": 5217,
-      "num_statements": 5223,
-      "percent_covered": 99.8022813688213,
-      "percent_covered_display": "99.80",
+      "covered_lines": 5923,
+      "num_statements": 5929,
+      "percent_covered": 99.77159747413677,
+      "percent_covered_display": "99.77",
       "missing_lines": 6,
-      "excluded_lines": 41,
-      "percent_statements_covered": 99.88512349224584,
-      "percent_statements_covered_display": "99.89",
-      "num_branches": 1352,
-      "num_partial_branches": 7,
-      "covered_branches": 1345,
-      "missing_branches": 7,
-      "percent_branches_covered": 99.48224852071006,
-      "percent_branches_covered_display": "99.48"
+      "excluded_lines": 63,
+      "percent_statements_covered": 99.89880249620509,
+      "percent_statements_covered_display": "99.90",
+      "num_branches": 1514,
+      "num_partial_branches": 11,
+      "covered_branches": 1503,
+      "missing_branches": 11,
+      "percent_branches_covered": 99.27344782034346,
+      "percent_branches_covered_display": "99.27"
     }
   }
 }
