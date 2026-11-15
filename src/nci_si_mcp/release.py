@@ -14,14 +14,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .errors import PlatformError, with_next_step
-from .evs import EVSClient
 from .validation import (
     RELEASE_CHANNELS,
     RELEASE_FORM,
 )
+
+if TYPE_CHECKING:
+    from .evs import EVSClient
 
 
 @dataclass(frozen=True, slots=True)

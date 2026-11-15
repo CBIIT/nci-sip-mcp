@@ -1,0 +1,849 @@
+"""Receipts have run-local authority and require actual outside-thread settlement."""
+
+import json
+import select
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+from contextlib import nullcontext
+from dataclasses import FrozenInstanceError
+from http.client import HTTPResponse
+from types import SimpleNamespace
+
+import pytest
+from http_receiver import WireReceiver
+from test_request_supervision import authorization, failure_leaves, supervisor
+
+from nci_si_acceptance import request_children, request_supervision
+from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_si_acceptance.request_children import CleanupDeadline, Completions, CompletionToken
+from nci_si_acceptance.request_stdio import _PortalCall
+from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_si_acceptance.request_transport import ControlledHttpPolicy
+from nci_si_mcp.errors import RequestPolicyError
+from nci_si_mcp.http_client import HttpClient
+
+
+@pytest.fixture
+def calls():
+    owned = []
+
+    def create(operation):
+        call = _PortalCall(operation)
+        owned.append(call)
+        return call
+
+    yield create
+    for call in owned:
+        if call.thread.ident is not None:
+            call.thread.join(2)
+        assert not call.thread.is_alive()
+
+
+def test_recovered_terminal_read_still_publishes_final_failure_summary(
+    tmp_path, monkeypatch, calls
+):
+    owner = supervisor(tmp_path / "run")
+    resource = calls(lambda: b"owned completion finished")
+    close_failure = RequestPolicyError("accounting")
+    lock = sqlite3.connect(owner.run.directory / "ledger.sqlite")
+    summary = owner.run.directory / "summary.json"
+    actual_close, actual_finish, actual_snapshot = (
+        owner.run.close,
+        resource.finish,
+        owner.run.snapshot,
+    )
+    facts = {}
+
+    def close():
+        actual_close()
+        raise close_failure
+
+    def snapshot():
+        try:
+            return actual_snapshot()
+        except RequestPolicyError as error:
+            facts["storage_refusal"] = error
+            lock.rollback()
+            raise
+
+    def finish(deadline):
+        actual_finish(deadline)
+        facts["completion"] = (resource.thread.is_alive(), resource.result.result(timeout=0))
+        lock.execute("BEGIN IMMEDIATE")
+        facts["locked"] = lock.in_transaction
+        monkeypatch.setattr(owner.run, "snapshot", snapshot)
+
+    monkeypatch.setattr(owner.run, "close", close)
+    monkeypatch.setattr(resource, "finish", finish)
+    outward, initial = None, None
+    try:
+        try:
+            with owner:
+                owner.register_completion(resource, participant="transient-summary")
+                resource.start()
+                initial = summary.read_bytes()
+        except BaseException as error:  # noqa: BLE001 - assert real causes and metadata outside capture.
+            outward = error
+        assert initial is not None
+        assert facts.get("completion") == (False, b"owned completion finished")
+        assert (
+            resource.thread.ident is not None,
+            resource.thread.is_alive(),
+            owner._observer.is_alive(),
+            owner.pending_owners,
+        ) == (True, False, False, ())
+        refusal = facts.get("storage_refusal")
+        assert isinstance(refusal, RequestPolicyError) and refusal.reason == "accounting"
+        assert (facts.get("locked"), lock.in_transaction) == (True, False)
+        assert outward is not None
+        leaves = failure_leaves(outward)
+        assert any(error is close_failure for error in leaves)
+        assert any(error is refusal for error in leaves)
+        report = json.loads(summary.read_text())
+        assert report["state"] == "failed"
+        assert report["observationComplete"] is True
+    finally:
+        lock.rollback()
+        lock.close()
+
+
+def test_observer_failure_is_not_repeated_after_recovered_terminal_lookup(
+    tmp_path, monkeypatch, calls
+):
+    owner = supervisor(tmp_path / "run")
+    resource = calls(lambda: b"owned completion finished")
+    lock = sqlite3.connect(owner.run.directory / "ledger.sqlite")
+    actual_heartbeat, actual_finish = owner.run.heartbeat, resource.finish
+    facts = {}
+
+    def heartbeat():
+        actual_heartbeat()
+        raise OSError("Owned heartbeat inspection failed")
+
+    def finish(deadline):
+        actual_finish(deadline)
+        facts["completion"] = (resource.thread.is_alive(), resource.result.result(timeout=0))
+        lock.rollback()
+
+    monkeypatch.setattr(owner.run, "heartbeat", heartbeat)
+    monkeypatch.setattr(resource, "finish", finish)
+    outward, recorded_state = None, None
+    try:
+        try:
+            with owner:
+                owner.register_completion(resource, participant="observer-failure")
+                resource.start()
+                owner._observer.join(3)
+                if owner._observer.is_alive():
+                    raise TimeoutError("Actual observer did not finish its failure notification")
+                recorded_state = owner.run.snapshot().state
+                lock.execute("BEGIN IMMEDIATE")
+                facts["locked"] = lock.in_transaction
+        except BaseException as error:  # noqa: BLE001 - assert real failure identity outside capture.
+            outward = error
+        assert recorded_state == "failed"
+        assert facts.get("completion") == (False, b"owned completion finished")
+        assert (
+            resource.thread.is_alive(),
+            owner._observer.is_alive(),
+            owner.pending_owners,
+            facts.get("locked"),
+            lock.in_transaction,
+        ) == (False, False, (), True, False)
+        report = owner.snapshot()
+        assert (report["state"], report["observationComplete"]) == ("failed", True)
+        assert outward is not None
+        leaves = failure_leaves(outward)
+        assert all(
+            isinstance(error, RequestPolicyError) and error.reason == "accounting"
+            for error in leaves
+        )
+        assert len({id(error) for error in leaves}) == len(leaves)
+    finally:
+        lock.rollback()
+        lock.close()
+
+
+@pytest.mark.parametrize("release_before_cleanup", [False, True])
+def test_zero_http_leases_do_not_settle_an_owned_thread(
+    tmp_path, monkeypatch, calls, release_before_cleanup
+):
+    entered, release = threading.Event(), threading.Event()
+
+    def operation():
+        entered.set()
+        release.wait()
+        return "settled"
+
+    call = calls(operation)
+    owner = SupervisedRun.create(authorization(), tmp_path)
+    if not release_before_cleanup:
+        monkeypatch.setattr(request_children, "CLEANUP_SECONDS", 0.05)
+    expected = nullcontext() if release_before_cleanup else pytest.raises(BaseExceptionGroup)
+    try:
+        with expected, owner:
+            owner.register_completion(call, participant="owned-thread")
+            call.start()
+            assert entered.wait(1)
+            snapshot = owner.run.snapshot()
+            assert (snapshot.active, snapshot.pending_receipts, snapshot.transport_entries) == (
+                0,
+                0,
+                0,
+            )
+            assert owner.snapshot()["observationComplete"] is False
+            if release_before_cleanup:
+                release.set()
+        assert owner.snapshot()["observationComplete"] is release_before_cleanup
+        assert owner.pending_owners == (() if release_before_cleanup else (call.name,))
+        assert owner.snapshot()["state"] == ("completed" if release_before_cleanup else "failed")
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize("field", ["run_id", "policy_sha256", "participant"])
+def test_completion_receipt_identity_rejects_ordinary_assignment(field, calls):
+    registry = Completions("b" * 32, "a" * 64)
+    call = calls(lambda: "completed")
+    token = registry.register(call, "participant")
+    call.start()
+    registry.settle(token, CleanupDeadline())
+    with pytest.raises(FrozenInstanceError):
+        setattr(token, field, "foreign")
+    assert (token.run_id, token.policy_sha256, token.participant) == (
+        "b" * 32,
+        "a" * 64,
+        "participant",
+    )
+
+
+@pytest.mark.parametrize("corruption", ["run_id", "policy_sha256", "participant", "clone", "type"])
+def test_foreign_or_changed_receipt_cannot_clear_an_owner(calls, corruption):
+    registry = Completions("b" * 32, "a" * 64)
+    call = calls(lambda: "completed")
+    token = registry.register(call, "participant")
+    call.start()
+    original = token.run_id, token.policy_sha256, token.participant
+
+    class Untrusted:
+        def __hash__(self):
+            raise AssertionError("unsupported receipt was used before type validation")
+
+    offer = token
+    if corruption in ("run_id", "policy_sha256", "participant"):
+        object.__setattr__(token, corruption, "foreign")
+    else:
+        offer = CompletionToken(*original) if corruption == "clone" else Untrusted()
+    try:
+        with pytest.raises(RequestPolicyError) as denied:
+            registry.settle(offer, CleanupDeadline())
+        assert denied.value.reason == "authorization"
+        assert registry.pending == (call.name,)
+    finally:
+        for field, value in zip(("run_id", "policy_sha256", "participant"), original, strict=True):
+            object.__setattr__(token, field, value)
+    registry.settle(token, CleanupDeadline())
+    assert registry.pending == () and call.result.result() == "completed"
+
+
+def test_completion_cleanup_sees_closed_admission(tmp_path):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    admitted = []
+
+    class Completion:
+        name = "admission-witness"
+
+        def finish(self, _deadline):
+            try:
+                with owner.run.logical(authorization().grants[0]):
+                    admitted.append(True)
+            except RequestPolicyError:
+                admitted.append(False)
+
+    try:
+        with owner:
+            owner.register_completion(Completion(), participant="witness")
+    except RequestPolicyError:
+        pass  # The real refused admission is terminal, even during cleanup.
+    assert admitted == [False]
+    assert owner.run.snapshot().logical == 0
+    assert owner.pending_owners == ()
+
+
+@pytest.mark.parametrize(("end", "now"), [(float("inf"), 1.0), (2.0, float("nan"))])
+def test_nonfinite_cleanup_time_refuses_accounting(monkeypatch, end, now):
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: now))
+    with pytest.raises(RequestPolicyError) as refused:
+        CleanupDeadline(end).remaining()
+    assert refused.value.reason == "accounting"
+
+
+def test_owned_call_start_failure_preserves_its_cleanup_receipt(calls, monkeypatch):
+    call = calls(lambda: "unused")
+    initiating = RuntimeError("owned thread start failure")
+
+    def refuse_start():
+        raise initiating
+
+    monkeypatch.setattr(call.thread, "start", refuse_start)
+    observed = []
+    for operation in (call.start, lambda: call.finish(CleanupDeadline(time.monotonic() + 0.05))):
+        try:
+            operation()
+        except Exception as error:  # noqa: BLE001 - compare both actual operation outcomes below.
+            observed.append(error)
+    assert observed == [initiating, initiating]
+    assert call.started.exception(timeout=0) is initiating
+    assert call.thread.ident is None
+
+
+def test_completion_registration_before_entry_refuses_without_custody(tmp_path, calls):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    call = calls(lambda: "unused")
+    with pytest.raises(RequestPolicyError) as refused:
+        owner.register_completion(call, participant="early")
+    assert refused.value.reason == "authorization"
+    assert owner.pending_owners == ()
+    assert call.thread.ident is None
+
+
+def test_successful_controlled_child_releases_actual_custody(tmp_path, calls):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    call = calls(lambda: "settled")
+    with subprocess.Popen(
+        [sys.executable, "-I", "-c", "pass"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+        failure = None
+        try:
+            with owner:
+                assert child.wait(timeout=3) == 0
+                owner.register_child(child, participant="worker", role="worker")
+                owner.register_completion(call, participant="caller")
+                call.start()
+        except RequestPolicyError as error:
+            failure = error.reason
+        assert failure is None
+        assert child.returncode == 0
+        assert all(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
+        assert not call.thread.is_alive() and call.result.result() == "settled"
+        assert owner.pending_owners == ()
+        summary = json.loads((owner.run.directory / "summary.json").read_text())
+        assert summary["state"] == "completed" and summary["observationComplete"] is True
+
+
+def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(
+    tmp_path, monkeypatch, calls
+):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    call = calls(lambda: b"completed producer")
+    marker = tmp_path / "worker-completed"
+    script = (
+        "import sys\nfrom pathlib import Path\n"
+        "print('ready',flush=True)\n"
+        "sys.stdin.buffer.readline()\n"
+        "Path(sys.argv[1]).write_bytes(b'completed worker')\n"
+    )
+    with subprocess.Popen(  # noqa: S603 - fixed owned worker and local completion marker.
+        [sys.executable, "-I", "-c", script, str(marker)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+        actual_wait, actual_join = child._try_wait, owner._join
+        released = threading.Event()
+
+        def wait(flags):
+            # Release only after an actual OS receipt proves this worker is still pending.
+            result = actual_wait(flags)
+            if result[0] == 0 and not released.is_set():
+                released.set()
+                child.stdin.write(b"finish\n")
+                child.stdin.flush()
+            return result
+
+        def join_observer():
+            # This case owns worker waiting, not the independent observer-join contract.
+            owner._observer.join(request_supervision.JOIN_SECONDS)
+            actual_join()
+
+        monkeypatch.setattr(child, "_try_wait", wait)
+        monkeypatch.setattr(owner, "_join", join_observer)
+        failure = None
+        try:
+            assert select.select([child.stdout], [], [], 3)[0] == [child.stdout]
+            assert child.stdout.readline() == b"ready\n"
+            with owner:
+                owner.register_child(child, participant="worker", role="worker")
+                owner.register_completion(call, participant="producer")
+                call.start()
+                assert call.result.result(timeout=2) == b"completed producer"
+                assert not marker.exists()
+        except BaseException as error:  # noqa: BLE001 - compare the real caller outcome below.
+            failure = error
+        finally:
+            if not child.stdin.closed:
+                child.stdin.close()
+            child.wait(timeout=3)
+        assert failure is None
+        assert released.is_set() and marker.read_bytes() == b"completed worker"
+        assert child.returncode == 0
+        assert all(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
+        assert not call.thread.is_alive()
+        assert owner.pending_owners == ()
+        summary = json.loads((owner.run.directory / "summary.json").read_text())
+        assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+        assert owner.cleanup_deadline().remaining() > 0
+
+
+def test_sealed_receipt_is_one_use_and_callbacks_do_not_hold_registry_lock(calls):
+    registry = Completions("b" * 32, "a" * 64)
+    entered, release, finishing = threading.Event(), threading.Event(), threading.Event()
+
+    def observe():
+        entered.set()
+        release.wait()
+        return registry.pending
+
+    call = calls(observe)
+    token = registry.register(call, "participant")
+    settler = None
+    try:
+        call.start()
+        assert entered.wait(1)
+        with pytest.raises(RequestPolicyError):
+            registry.register(call, "duplicate")
+        assert registry.seal() == (token,)
+        with pytest.raises(RequestPolicyError):
+            registry.register(calls(lambda: "late"), "participant")
+        original_finish = call.finish
+
+        def finish(deadline):
+            finishing.set()
+            original_finish(deadline)
+
+        call.finish = finish
+        errors = []
+
+        def settle():
+            try:
+                registry.settle(token, CleanupDeadline(time.monotonic() + 0.25))
+            except BaseException as error:  # noqa: BLE001 - assert original callback outcome below.
+                errors.append(error)
+
+        settler = threading.Thread(target=settle, name="owned-receipt-settler")
+        settler.start()
+        assert finishing.wait(1)
+        release.set()
+        settler.join(1)
+        assert not settler.is_alive() and errors == []
+        assert call.result.result() == (call.name,) and registry.pending == ()
+        with pytest.raises(RequestPolicyError) as repeated:
+            registry.settle(token, CleanupDeadline())
+        assert repeated.value.reason == "authorization"
+    finally:
+        release.set()
+        if settler is not None and settler.ident is not None:
+            settler.join(21)
+            assert not settler.is_alive()
+
+
+def test_shutdown_cannot_miss_an_accepted_owner_before_registration_returns(
+    tmp_path, monkeypatch, calls
+):
+    owner = SupervisedRun.create(authorization(), tmp_path)
+    call = calls(lambda: "unused")
+    accepted, release = threading.Event(), threading.Event()
+    original = owner._completions.register
+
+    def register(resource, participant):
+        token = original(resource, participant)
+        accepted.set()
+        if not release.wait(3):
+            raise TimeoutError("owned registration safety release expired")
+        return token
+
+    monkeypatch.setattr(owner._completions, "register", register)
+    monkeypatch.setattr(request_children, "CLEANUP_SECONDS", 0.05)
+    errors = []
+
+    def enroll():
+        try:
+            owner.register_completion(call, participant="owned")
+        except BaseException as error:  # noqa: BLE001 - preserve the actor's original outcome.
+            errors.append(error)
+
+    actor = threading.Thread(target=enroll, name="owned-registration-actor")
+    outward = None
+    try:
+        try:
+            with owner:
+                actor.start()
+                assert accepted.wait(1)
+        except BaseException as error:  # noqa: BLE001 - assert the exact failed ownership outcome.
+            outward = error
+        report = json.loads((owner.run.directory / "summary.json").read_text())
+        assert report["observationComplete"] is False
+        assert report["state"] == "failed" and isinstance(outward, BaseExceptionGroup)
+    finally:
+        release.set()
+        actor.join(2)
+        assert not actor.is_alive() and errors == []
+
+
+def test_clock_failure_still_closes_admission_and_never_restarts_cleanup_time(
+    tmp_path, monkeypatch, calls
+):
+    owner = SupervisedRun.create(authorization(), tmp_path)
+    entered, release = threading.Event(), threading.Event()
+    interrupt = KeyboardInterrupt("owned clock interruption")
+
+    def operation():
+        entered.set()
+        release.wait()
+
+    def failed_clock():
+        raise interrupt
+
+    call = calls(operation)
+    outward = None
+    try:
+        try:
+            with owner:
+                owner.register_completion(call, participant="owned")
+                call.start()
+                assert entered.wait(1)
+                monkeypatch.setattr(
+                    request_children, "time", SimpleNamespace(monotonic=failed_clock)
+                )
+        except BaseException as error:  # noqa: BLE001 - preserve the original outward failure.
+            outward = error
+        assert owner.run.snapshot().state in {"closed", "failed"}
+        assert outward is not None and owner.snapshot()["state"] == "failed"
+        assert failure_leaves(outward)[0] is interrupt
+        deadline = owner.cleanup_deadline()
+        assert deadline.remaining() == 0 and owner.cleanup_deadline() is deadline
+    finally:
+        release.set()
+        owner._stop.set()
+        owner._observer.join(2)
+        assert not owner._observer.is_alive()
+
+
+def test_overlapping_settlement_cannot_reuse_token(calls):
+    registry = Completions("b" * 32, "a" * 64)
+    entered, release, finishing = threading.Event(), threading.Event(), threading.Event()
+
+    def operation():
+        entered.set()
+        release.wait()
+        return "settled"
+
+    call = calls(operation)
+    token = registry.register(call, "participant")
+    original_finish = call.finish
+
+    def finish(deadline):
+        finishing.set()
+        original_finish(deadline)
+
+    call.finish = finish
+    deadline = CleanupDeadline(time.monotonic() + 5)
+    errors = []
+
+    def settle():
+        try:
+            registry.settle(token, deadline)
+        except BaseException as error:  # noqa: BLE001 - retain actor errors for caller assertions.
+            errors.append(error)
+
+    actor = threading.Thread(target=settle, name="owned-first-settlement")
+    try:
+        call.start()
+        assert entered.wait(1)
+        actor.start()
+        assert finishing.wait(1)
+        refused = None
+        try:
+            registry.settle(token, deadline)
+        except BaseException as error:  # noqa: BLE001 - require the exact refusal below.
+            refused = error
+        assert isinstance(refused, RequestPolicyError) and refused.reason == "authorization"
+        assert registry.pending == (call.name,)
+        release.set()
+        actor.join(2)
+        assert not actor.is_alive() and errors == []
+        assert registry.pending == ()
+        assert call.result.result() == "settled"
+    finally:
+        release.set()
+        if actor.ident is not None:
+            actor.join(6)
+        assert not actor.is_alive()
+
+
+def test_failed_settlement_can_retry_without_rearming_deadline(calls):
+    registry = Completions("b" * 32, "a" * 64)
+    entered, release = threading.Event(), threading.Event()
+
+    def operation():
+        entered.set()
+        release.wait()
+        return "settled"
+
+    call = calls(operation)
+    token = registry.register(call, "participant")
+    deadline = CleanupDeadline(time.monotonic())
+    original_end = deadline.end
+    try:
+        call.start()
+        assert entered.wait(1)
+        assert deadline.remaining() == 0
+        with pytest.raises(BaseExceptionGroup) as failure:
+            registry.settle(token, deadline)
+        assert any(
+            isinstance(error, RequestPolicyError) and error.reason == "accounting"
+            for error in failure_leaves(failure.value)
+        )
+        assert registry.pending == (call.name,)
+        release.set()
+        call.thread.join(2)
+        assert not call.thread.is_alive() and call.result.result() == "settled"
+        retry_error = None
+        try:
+            registry.settle(token, deadline)
+        except BaseException as error:  # noqa: BLE001 - require successful real settlement below.
+            retry_error = error
+        assert retry_error is None
+        assert registry.pending == ()
+        assert deadline.end == original_end and deadline.remaining() == 0
+    finally:
+        release.set()
+
+
+def test_cleanup_deadline_rejects_reassignment():
+    deadline = CleanupDeadline(time.monotonic())
+    original_end = deadline.end
+    assert deadline.remaining() == 0
+    with pytest.raises(FrozenInstanceError):
+        deadline.end = time.monotonic() + 10
+    assert deadline.end == original_end and deadline.remaining() == 0
+
+
+def test_shutdown_refuses_an_already_authorized_completion_offer(tmp_path, monkeypatch, calls):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    marker = tmp_path / "late-task-started"
+    resource = calls(lambda: marker.write_bytes(b"owned late task\n"))
+    authorized, release = threading.Event(), threading.Event()
+    tokens, errors = [], []
+    actual_authorize, actual_join = owner.run.authorize_participant, owner._join
+
+    def authorize(participant):
+        actual_authorize(participant)
+        authorized.set()
+        if not release.wait(5):
+            raise TimeoutError("Owned authorization handoff was not released")
+
+    def offer():
+        try:
+            tokens.append(owner.register_completion(resource, participant="shutdown-offer"))
+            resource.start()
+        except BaseException as error:  # noqa: BLE001 - compare actual caller refusal outside capture.
+            errors.append(error)
+
+    actor = threading.Thread(target=offer, name="owned-authorized-completion-offer")
+
+    def join_then_offer():
+        actual_join()
+        release.set()
+        actor.join(3)
+
+    monkeypatch.setattr(owner.run, "authorize_participant", authorize)
+    monkeypatch.setattr(owner, "_join", join_then_offer)
+    authorization_seen = False
+    try:
+        with owner:
+            actor.start()
+            authorization_seen = authorized.wait(2)
+        assert authorization_seen
+        assert not actor.is_alive()
+        assert tokens == []
+        assert len(errors) == 1
+        assert type(errors[0]) is RequestPolicyError and errors[0].reason == "authorization"
+        assert not marker.exists() and resource.thread.ident is None
+        assert owner.pending_owners == ()
+        summary = owner.snapshot()
+        assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+    finally:
+        release.set()
+        if actor.ident is not None:
+            actor.join(3)
+        assert not actor.is_alive()
+
+
+def test_settled_tokens_do_not_complete_an_unjoined_observer(tmp_path, monkeypatch, calls):
+    ended, release = threading.Event(), threading.Event()
+    clock, intermediate = [time.monotonic()], []
+    actual_observe = SupervisedRun._observe
+
+    def observe(self):
+        try:
+            actual_observe(self)
+        finally:
+            ended.set()
+            release.wait(8)
+
+    monkeypatch.setattr(SupervisedRun, "_observe", observe)
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    resource = calls(lambda: b"owned producer finished")
+    actual_join, actual_settle = owner._join, owner._completions.settle
+    observer_seen, produced, failure = False, None, None
+
+    def join():
+        nonlocal observer_seen
+        observer_seen = ended.wait(3)
+        clock[0] += request_children.CLEANUP_SECONDS + 1
+        actual_join()
+
+    def settle(token, deadline):
+        actual_settle(token, deadline)
+        intermediate.append(
+            (
+                owner.snapshot()["observationComplete"],
+                owner.pending_owners,
+                owner._observer.is_alive(),
+            )
+        )
+
+    monkeypatch.setattr(owner, "_join", join)
+    monkeypatch.setattr(owner._completions, "settle", settle)
+    try:
+        try:
+            with owner:
+                owner.register_completion(resource, participant="observer-proof")
+                resource.start()
+                produced = resource.result.result(timeout=2)
+                resource.thread.join(2)
+        except BaseException as error:  # noqa: BLE001 - inspect actual completion outside capture.
+            failure = error
+        assert (
+            observer_seen,
+            produced,
+            resource.thread.is_alive(),
+            owner._observer.is_alive(),
+            owner.pending_owners,
+        ) == (True, b"owned producer finished", False, True, ())
+        summary = owner.snapshot()
+        assert summary["observationComplete"] is False
+        assert intermediate == [(False, (), True)]
+        assert (type(failure), getattr(failure, "reason", None)) == (
+            RequestPolicyError,
+            "accounting",
+        )
+        assert owner.cleanup_deadline().remaining() == 0
+    finally:
+        # All public snapshot/custody observations precede releasing the real observer thread.
+        release.set()
+        if owner._observer.ident is not None:
+            owner._observer.join(3)
+        assert not owner._observer.is_alive()
+
+
+def test_settled_resources_do_not_hide_an_outstanding_http_lease(tmp_path, monkeypatch, calls):
+    reading, release = threading.Event(), threading.Event()
+    payload, actual_read = b'{"ok":true}', HTTPResponse.read1
+
+    def read(self, *args, **kwargs):
+        reading.set()
+        return actual_read(self, *args, **kwargs)
+
+    def reply(handler):
+        handler.wfile.write(
+            (
+                "HTTP/1.1 200 OK\r\n"
+                f"Content-Length: {len(payload)}\r\n"
+                "Content-Type: application/json\r\n\r\n"
+            ).encode()
+        )
+        release.wait(8)
+        handler.wfile.write(payload)
+
+    monkeypatch.setattr(HTTPResponse, "read1", read)
+    resource = calls(lambda: b"owned producer finished")
+    results, errors, produced, read_seen, failure = [], [], None, False, None
+    with WireReceiver([reply]) as receiver:
+        grant = RequestGrant("GET", receiver.origin + "/lease", (("accept", "application/json"),))
+        auth = Authorization((grant,), Limits(response_bytes=8192, total_bytes=16384), "a" * 64)
+        owner = SupervisedRun.create(auth, tmp_path / "run")
+        client = HttpClient(
+            receiver.origin,
+            label="EVS",
+            timeout_seconds=5,
+            max_attempts=1,
+            retry_backoff_seconds=0,
+            max_response_bytes=32,
+            size_bound="owned-lease-observation",
+            request_policy=ControlledHttpPolicy(owner.run),
+        )
+
+        def fetch():
+            try:
+                results.append(client.get_json("/lease"))
+            except BaseException as error:  # noqa: BLE001 - retain caller errors outside thread capture.
+                errors.append(error)
+
+        actor = threading.Thread(target=fetch, name="owned-pending-http-receipt")
+        try:
+            try:
+                with owner:
+                    owner.register_completion(resource, participant="settled-resource")
+                    resource.start()
+                    produced = resource.result.result(timeout=2)
+                    resource.thread.join(2)
+                    actor.start()
+                    read_seen = reading.wait(3)
+            except BaseException as error:  # noqa: BLE001 - assert real owner state outside capture.
+                failure = error
+            assert (read_seen, produced, actor.is_alive(), release.is_set()) == (
+                True,
+                b"owned producer finished",
+                True,
+                False,
+            )
+            raw = owner.run.snapshot()
+            assert (
+                raw.active,
+                raw.pending_receipts,
+                raw.observation_complete,
+                resource.thread.is_alive(),
+                owner._observer.is_alive(),
+                owner.pending_owners,
+            ) == (1, 1, False, False, False, ())
+            summary = owner.snapshot()
+            assert summary["observationComplete"] is False
+            assert (type(failure), getattr(failure, "reason", None)) == (
+                RequestPolicyError,
+                "accounting",
+            )
+            assert (
+                receiver.contacts,
+                [(method, path, body) for method, path, _headers, body in receiver.requests],
+            ) == (1, [("GET", "/lease", b"")])
+        finally:
+            # Retire the real HTTP receipt only after capturing incomplete observation.
+            release.set()
+            if actor.ident is not None:
+                actor.join(6)
+            assert not actor.is_alive()
+        assert (len(errors), results) == (1, [])
+        assert [
+            (type(error), getattr(error, "reason", None)) for error in failure_leaves(errors[0])
+        ] == [(RequestPolicyError, "closed")]
+        after = owner.run.snapshot()
+        assert (after.active, after.pending_receipts) == (0, 0)

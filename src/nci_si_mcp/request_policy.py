@@ -10,6 +10,9 @@ from urllib.request import Request
 
 from .validation import BodyState
 
+# The licence key goes to EVS and to no other host (A7.5).
+LICENSE_KEY_HEADER = "X-EVSRESTAPI-License-Key"
+
 
 @dataclass(frozen=True, slots=True)
 class Exchange:

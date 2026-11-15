@@ -13,15 +13,15 @@ from .http_client import (
     UpstreamRejectedError,
 )
 from .models import NcitConcept, utc_now_iso
+from .request_policy import (
+    LICENSE_KEY_HEADER as LICENSE_KEY_HEADER,  # noqa: PLC0414 - public export.
+)
 from .validation import RelationshipKind, validate_text_target
 
 if TYPE_CHECKING:
     from .release import ReleaseContext
 
 SOURCE_VOCABULARIES = {"ncit": "NCI Thesaurus"}
-
-# The header that carries the licence key. It goes to EVS and to no other host (A7.5).
-LICENSE_KEY_HEADER = "X-EVSRESTAPI-License-Key"
 
 # What a concept request asks EVS to include: enough to build the search text
 # for indexing, and additionally every relation list for a lookup.

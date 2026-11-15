@@ -232,7 +232,7 @@ def test_launcher_refuses_untrusted_installation_before_cli(
     elif boundary == "prefix":
         monkeypatch.setattr(sys, "prefix", str(tmp_path))
     else:
-        monkeypatch.setattr(live_launcher.http_client, "_OPENER", None)
+        monkeypatch.setattr(http_client, "_OPENER", None)
     with pytest.raises(ValueError) as error:
         live_launcher.main()
     assert (

@@ -10,6 +10,7 @@ from threading import Event
 
 import pytest
 from http_receiver import WireReceiver
+from request_failure_observation import snapshot as observed_snapshot
 
 import nci_si_acceptance
 import nci_si_mcp
@@ -60,7 +61,7 @@ def wait_for(predicate):
 @pytest.mark.parametrize(
     "concurrent,total,reason", [(1, 130, "concurrency_limit"), (2, 65, "byte_limit")]
 )
-def test_registered_children_share_transport_capacity(tmp_path, concurrent, total, reason):
+def test_registered_children_share_transport_capacity(tmp_path, concurrent, total, reason, request):
     released = Event()
 
     def partial(handler):
@@ -111,7 +112,7 @@ def test_registered_children_share_transport_capacity(tmp_path, concurrent, tota
                 children[0].stdin.flush()
 
                 def awaiting_remainder():
-                    snapshot = owner.run.snapshot()
+                    snapshot = observed_snapshot(owner.run, request.node)
                     return (
                         snapshot.consumed_body_bytes == FRAGMENT_BYTES
                         and snapshot.pending_receipts == 1

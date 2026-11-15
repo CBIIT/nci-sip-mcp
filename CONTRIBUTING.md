@@ -228,7 +228,9 @@ identity before constructing the real EVS client inside that run's policy. Exist
 validation precedes the authenticated atomic ledger commit; no transaction spans discovery.
 Display version and pinned path remain distinct. Repeat selection still spends discovery;
 conflicts close admission and retain the first selection. Missing/corrupt state fails closed
-without migration or reset. Furnished caller adoption remains #448.
+without migration or reset. The explicitly guarded single native node is described in the
+[acceptance guide](acceptance/README.md#bounded-serial-execution); other caller adoption
+remains #448/#449.
 
 ### Explicit shared request accounting
 
@@ -268,12 +270,16 @@ Existing explicitly unmanaged accounting callers retain their current behavior.
 an actual owned direct-child handle. Keep the child behind its start barrier until registration
 succeeds; rejection leaves custody with the caller. Never register an arbitrary PID.
 Zero-exit workers need resolved leases; failed workers and unexpected service exits fail the run.
-Shutdown closes admission first, joins the observer within two seconds, then owns child cleanup
-and stream closure. Each worker gets up to ten seconds to exit, followed if necessary by the
-existing ten-second TERM/wait/KILL/wait leaf; service cleanup uses that leaf directly.
-Resource waits are bounded by `2 + 30N` seconds for N registered children, plus ledger operations
-and filesystem/OS scheduling, not a hard real-time guarantee. Intentional termination is not
-reported as successful worker completion. Initiating and cleanup failures remain distinct.
+Shutdown closes admission first, then joins the observer and owns child cleanup and stream
+closure. With no completion owners, the observer join gets up to two seconds, each worker gets
+up to ten seconds to exit followed if necessary by the existing ten-second TERM/wait/KILL/wait
+leaf, and service cleanup uses that leaf directly. This path's resource waits are bounded by
+`2 + 30N` seconds for N registered children. Runs that register any completion owner instead
+share one 20-second `CleanupDeadline` across resource waits, including when N is zero; see
+[bounded serial execution](acceptance/README.md#bounded-serial-execution). Both allowances
+exclude ledger operations and filesystem/OS scheduling; neither is a hard real-time guarantee.
+Intentional termination is not reported as successful worker completion. Initiating and cleanup
+failures remain distinct.
 Even a terminal ledger refusal caught inside the context produces one outer `RequestPolicyError` with the
 ledger's original reason. Observer notification does not duplicate that failure. An initiating
 caller exception remains first when additional cleanup failures require a `BaseExceptionGroup`.
@@ -426,6 +432,10 @@ Missing results receive explicit `INFRA` rows; corrupt JSON remains byte-for-byt
 original file, with its synthesized row in `result-N.infra.json`. Corruption fails the command
 even after scheduler exit zero; file permission failures remain diagnostic. An incomplete row
 never counts as a kill or verified scratch restoration. Retained runs are never resumed automatically.
+The PR mutation job uploads this directory on success or failure as
+`mutation-results-<merge-tree-sha>-<shard>` for 30 days. An `EMPTY` shard creates no scheduler
+directory; missing or incomplete raw evidence for a nonempty shard blocks review clearance,
+regardless of the workflow's displayed status. The raw results do not contain every runner phase.
 
 ## Coverage badges
 

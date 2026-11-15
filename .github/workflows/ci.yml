@@ -50,6 +50,15 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
           SHARD: ${{ matrix.shard }}/3
         run: pdm run mutation-gate --base "$BASE_SHA" --head "$HEAD_SHA" --shard "$SHARD" -n 2 --coverage-dir tmp/mutation-coverage
+      - name: Retain raw mutation results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: mutation-results-${{ github.sha }}-${{ matrix.shard }}
+          path: tmp/mutation-runs/
+          # An EMPTY shard never starts a scheduler; nonempty evidence is checked before clearance.
+          if-no-files-found: warn
+          retention-days: 30
 
   changes:
     name: image selection
@@ -319,7 +328,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           COVERAGE_PROCESS_START: ${{ github.workspace }}/tmp/mutation-config/.coveragerc
           UNIT_SHARD: ${{ matrix.shard }}
-        run: pdm run test --unit-shard "$UNIT_SHARD" -n 0 -p scripts.validation.mutation_probe --cov-config=tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= --junitxml=tmp/test-results/unit.xml
+        run: pdm run test --unit-shard "$UNIT_SHARD" -n 0 -p scripts.validation.mutation_probe --cov-config=tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= --junitxml=tmp/test-results/unit.xml -vv --durations=20 -o faulthandler_timeout=60
       - name: Summarize test results
         if: ${{ !cancelled() }}
         run: pdm run python scripts/junit_summary.py tmp/test-results/unit.xml "Unit tests" >> "$GITHUB_STEP_SUMMARY"

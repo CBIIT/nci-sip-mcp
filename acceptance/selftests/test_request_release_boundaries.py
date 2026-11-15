@@ -16,6 +16,7 @@ from nci_si_acceptance.request_budget import ControlledRun
 from nci_si_acceptance.request_catalogue import compile_policy
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_acceptance.request_transport import ControlledHttpPolicy
+from nci_si_mcp import release as release_module
 from nci_si_mcp.errors import correlated
 from nci_si_mcp.http_client import HttpClient, RequestPolicyError
 from nci_si_mcp.invocation import call
@@ -436,7 +437,7 @@ def test_expiry_after_validated_discovery_never_commits_selection(tmp_path, monk
         policy = compile_policy(selected(receiver.origin))
         run = ControlledRun.create(policy.authorization, tmp_path)
         run.open()
-        resolve = request_catalogue.resolve_evs_release
+        resolve = release_module.resolve_evs_release
 
         def discover_then_expire(*args):
             selection = resolve(*args)
@@ -448,7 +449,7 @@ def test_expiry_after_validated_discovery_never_commits_selection(tmp_path, monk
             return selection
 
         with monkeypatch.context() as restore:
-            restore.setattr(request_catalogue, "resolve_evs_release", discover_then_expire)
+            restore.setattr(release_module, "resolve_evs_release", discover_then_expire)
             with pytest.raises(Exception) as denied:
                 policy.select_release(run, channel="monthly")
         assert (type(denied.value), str(denied.value), denied.value.__cause__) == (
