@@ -1,9 +1,11 @@
 """Execution failure and positively settled resource custody are separate outcomes."""
 
+import asyncio
 import io
 import json
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -491,6 +493,76 @@ def test_sdk_exit_failure_after_ready_preserves_original_event(terminal_case, mo
     assert exit_seen
     assert outward is not None
     assert any(error is original for error in failure_leaves(outward))
+
+
+@pytest.fixture
+def runner_socket_close_failure(terminal_case, monkeypatch):
+    _owner, resources, _waited, _closed = terminal_case
+    original = OSError("Owned runner self-pipe close failed")
+    loops, observations = [], []
+    actual_loop, actual_close = asyncio.events.new_event_loop, socket.socket.close
+
+    def create_loop():
+        loop = actual_loop()
+        if resources and threading.current_thread() is resources[0].thread:
+            loops.append((loop, loop._csock))
+        return loop
+
+    def close(stream):
+        actual_close(stream)
+        if (
+            loops
+            and stream is loops[0][1]
+            and threading.current_thread() is resources[0].thread
+            and not observations
+        ):
+            resource = resources[0]
+            observations.append(
+                (resource.client_ready.done(), resource.process.returncode, resource._settled())
+            )
+            raise original
+
+    monkeypatch.setattr(asyncio.events, "new_event_loop", create_loop)
+    monkeypatch.setattr(socket.socket, "close", close)
+    try:
+        yield original, observations
+    finally:
+        # The real socket closed before its documented error; finish this owned loop's residue.
+        for loop, _stream in loops:
+            for stream in (loop._ssock, loop._csock):
+                if stream is not None:
+                    actual_close(stream)
+            asyncio.BaseEventLoop.close(loop)
+            if loop._selector is not None:
+                loop._selector.close()
+                loop._selector = None
+
+
+def test_real_runner_socket_close_failure_preserves_terminal_event(
+    terminal_case, runner_socket_close_failure
+):
+    owner, resources, _waited, _closed = terminal_case
+    original, observations = runner_socket_close_failure
+    listing, outward = None, None
+    try:
+        with (
+            owner,
+            open_session(
+                [sys.executable, "-c", CHILD, "0"], {}, io.StringIO(), timeout=3, owner=owner
+            ) as session,
+        ):
+            listing = session.list_tools()
+    except BaseException as error:  # noqa: BLE001 - assert real runner failure outside capture.
+        outward = error
+    assert listing is not None and listing.tools == []
+    assert observations == [(True, 0, True)]
+    assert outward is not None
+    assert sum(error is original for error in failure_leaves(outward)) == 1
+    _assert_failed_terminal_resources_settled(terminal_case, 0)
+    assert not resources[0].thread.is_alive()
+    with pytest.raises(RequestPolicyError) as refused:
+        owner.run.timeout(1)
+    assert refused.value.reason == "closed"
 
 
 def test_sdk_exit_error_during_owner_cleanup_preserves_original_event(terminal_case, monkeypatch):
