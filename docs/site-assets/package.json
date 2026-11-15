@@ -6,7 +6,7 @@
   },
   "description": "Pinned local diagram runtime for the public documentation build",
   "dependencies": {
-    "mermaid": "12.2.0"
+    "mermaid": "12.3.0"
   },
   "overrides": {
     "mermaid": {
@@ -18,7 +18,7 @@
     "test:browser": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.1",
+    "@playwright/test": "1.65.0",
     "esbuild": "0.28.2"
   }
 }
