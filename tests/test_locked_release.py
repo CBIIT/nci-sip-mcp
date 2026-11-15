@@ -257,7 +257,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                         action,
                         {
                             "ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e",
-                            "github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370",
+                            "github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066",
                         },
                     )
                     continue
