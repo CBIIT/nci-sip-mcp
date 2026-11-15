@@ -9,6 +9,10 @@ import anyio
 from mcp import types
 from mcp.shared.message import SessionMessage
 from test_request_stdio import _reap_for_test
+from test_request_stdio_terminal import CHILD
+from test_request_stdio_terminal import (
+    terminal_case as terminal_case,  # noqa: PLC0414 - pytest fixture export.
+)
 from test_request_supervision import authorization
 
 from nci_si_acceptance.client import open_session
@@ -81,3 +85,35 @@ def test_repeated_sdk_listing_receives_distinct_server_responses(tmp_path):
             [("owned", "listing 2")],
         ]
     assert owner.snapshot()["state"] == "completed"
+
+
+def test_initialized_notification_omits_unset_params_on_actual_pipe(tmp_path, terminal_case):
+    owner, resources, waited, closed = terminal_case
+    notification = tmp_path / "initialized.json"
+    child = "from pathlib import Path\n" + CHILD.replace(
+        "    request=json.loads(line)\n",
+        "    request=json.loads(line)\n"
+        "    if request.get('method')=='notifications/initialized':\n"
+        "        Path(sys.argv[2]).write_text(json.dumps(request))\n",
+    )
+    with (
+        owner,
+        open_session(
+            [sys.executable, "-c", child, "0", str(notification)],
+            {},
+            errlog=io.StringIO(),
+            timeout=3,
+            owner=owner,
+        ) as session,
+    ):
+        assert session.list_tools().tools == []
+    assert json.loads(notification.read_text()) == {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+    }
+    assert len(resources) == 1 and not resources[0].thread.is_alive()
+    assert waited and set(waited) == {0}
+    assert closed == {"stdin", "stdout", "stderr"}
+    assert owner.pending_owners == ()
+    summary = owner.snapshot()
+    assert (summary["state"], summary["observationComplete"]) == ("completed", True)

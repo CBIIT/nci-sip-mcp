@@ -1,6 +1,7 @@
 """Receipts have run-local authority and require actual outside-thread settlement."""
 
 import json
+import select
 import sqlite3
 import subprocess
 import sys
@@ -15,7 +16,7 @@ import pytest
 from http_receiver import WireReceiver
 from test_request_supervision import authorization, failure_leaves, supervisor
 
-from nci_si_acceptance import request_children
+from nci_si_acceptance import request_children, request_supervision
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_children import CleanupDeadline, Completions, CompletionToken
 from nci_si_acceptance.request_stdio import _PortalCall
@@ -334,6 +335,70 @@ def test_successful_controlled_child_releases_actual_custody(tmp_path, calls):
         assert owner.pending_owners == ()
         summary = json.loads((owner.run.directory / "summary.json").read_text())
         assert summary["state"] == "completed" and summary["observationComplete"] is True
+
+
+def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(
+    tmp_path, monkeypatch, calls
+):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    call = calls(lambda: b"completed producer")
+    marker = tmp_path / "worker-completed"
+    script = (
+        "import sys\nfrom pathlib import Path\n"
+        "print('ready',flush=True)\n"
+        "sys.stdin.buffer.readline()\n"
+        "Path(sys.argv[1]).write_bytes(b'completed worker')\n"
+    )
+    with subprocess.Popen(  # noqa: S603 - fixed owned worker and local completion marker.
+        [sys.executable, "-I", "-c", script, str(marker)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+        actual_wait, actual_join = child._try_wait, owner._join
+        released = threading.Event()
+
+        def wait(flags):
+            # Release only after an actual OS receipt proves this worker is still pending.
+            result = actual_wait(flags)
+            if result[0] == 0 and not released.is_set():
+                released.set()
+                child.stdin.write(b"finish\n")
+                child.stdin.flush()
+            return result
+
+        def join_observer():
+            # This case owns worker waiting, not the independent observer-join contract.
+            owner._observer.join(request_supervision.JOIN_SECONDS)
+            actual_join()
+
+        monkeypatch.setattr(child, "_try_wait", wait)
+        monkeypatch.setattr(owner, "_join", join_observer)
+        failure = None
+        try:
+            assert select.select([child.stdout], [], [], 3)[0] == [child.stdout]
+            assert child.stdout.readline() == b"ready\n"
+            with owner:
+                owner.register_child(child, participant="worker", role="worker")
+                owner.register_completion(call, participant="producer")
+                call.start()
+                assert call.result.result(timeout=2) == b"completed producer"
+                assert not marker.exists()
+        except BaseException as error:  # noqa: BLE001 - compare the real caller outcome below.
+            failure = error
+        finally:
+            if not child.stdin.closed:
+                child.stdin.close()
+            child.wait(timeout=3)
+        assert failure is None
+        assert released.is_set() and marker.read_bytes() == b"completed worker"
+        assert child.returncode == 0
+        assert all(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
+        assert not call.thread.is_alive()
+        assert owner.pending_owners == ()
+        summary = json.loads((owner.run.directory / "summary.json").read_text())
+        assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+        assert owner.cleanup_deadline().remaining() > 0
 
 
 def test_sealed_receipt_is_one_use_and_callbacks_do_not_hold_registry_lock(calls):

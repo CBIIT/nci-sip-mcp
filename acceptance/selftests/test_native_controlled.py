@@ -1,5 +1,6 @@
 """An explicit exact native node uses one controller ledger and a furnished isolated child."""
 
+import hashlib
 import json
 import os
 import stat
@@ -580,6 +581,82 @@ def pytest_sessionfinish(session):
     assert report["suite"] == expected_suite
     assert outcome.returncode != 0, outcome.stdout + outcome.stderr
     assert (tree / "acceptance/tmp/cleanup-visible.txt").read_text() == "visible"
+
+
+def test_sessionfinish_failure_preserves_failed_report_after_passing_native_item(native_tree):
+    tree, python, env = native_tree
+    (tree / "acceptance/src/native_sessionfinish_probe.py").write_text("""
+import hashlib
+import json
+from pathlib import Path
+import pytest
+from nci_si_acceptance import request_native
+
+failure = LookupError('owned sessionfinish failure')
+actual_complete = request_native.NativeRun.complete
+
+def occurrences(error):
+    if error is failure:
+        return 1
+    if isinstance(error, BaseExceptionGroup):
+        return sum(occurrences(child) for child in error.exceptions)
+    return 0
+
+def complete(self, *args, **kwargs):
+    if self.done:
+        return actual_complete(self, *args, **kwargs)
+    count = 0
+    try:
+        return actual_complete(self, *args, **kwargs)
+    except BaseException as error:
+        count = occurrences(error)
+        raise
+    finally:
+        source = Path(request_native.__file__)
+        owner, listener = self.controller, self.listener
+        Path('tmp/sessionfinish-observation.json').write_text(json.dumps({
+            'initiating_occurrences': count,
+            'listener_stopped': not listener.thread.is_alive(),
+            'observer_stopped': not owner._observer.is_alive(),
+            'pending_owners': owner.pending_owners,
+            'compiled': request_native.NativeRun._finish_controller.__code__.co_filename,
+            'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest()}))
+
+request_native.NativeRun.complete = complete
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session):
+    raise failure
+""")
+    expected_requests = [
+        ("GET", DISCOVERY, b""),
+        ("GET", DISCOVERY, b""),
+        ("GET", "/api/v1/metadata/terminologies", b""),
+        ("GET", CONTENT, b""),
+    ]
+    with WireReceiver(_native_replies(tree)) as receiver:
+        local_policy(tree, receiver)
+        outcome = run_native(tree, python, env, NODE, "-p", "native_sessionfinish_probe", "-n", "0")
+        assert [
+            (method, path, body) for method, path, _headers, body in receiver.requests
+        ] == expected_requests
+        assert receiver.contacts == len(expected_requests)
+    directory = tree / "acceptance/tmp"
+    observation = json.loads((directory / "sessionfinish-observation.json").read_text())
+    source = tree / "acceptance/src/nci_si_acceptance/request_native.py"
+    assert Path(observation["compiled"]).resolve() == source.resolve()
+    assert observation["source_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    report = json.loads((directory / "native-report.json").read_text())
+    assert report["tests"] == {NODE: EXPECTED_CASE | {"outcome": "passed"}}
+    assert report["run"] == ONE_CASE | {"exit_status": 1}
+    assert outcome.returncode != 0, outcome.stdout + outcome.stderr
+    assert observation["initiating_occurrences"] == 1
+    assert observation["listener_stopped"] and observation["observer_stopped"]
+    assert observation["pending_owners"] == []
+    summaries = list((directory / "native-run").glob("*/summary.json"))
+    assert len(summaries) == 1
+    summary = json.loads(summaries[0].read_text())
+    assert (summary["state"], summary["observationComplete"]) == ("failed", True)
 
 
 @pytest.mark.parametrize(

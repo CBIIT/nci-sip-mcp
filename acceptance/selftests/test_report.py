@@ -592,9 +592,9 @@ def test_a_worker_writes_no_report_for_the_controller_to_overwrite(tmp_path):
 
 
 @pytest.mark.parametrize("fault", ["fsync", "replace"])
-@pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("cleanup_state", ["present", "unlink-fails", "already-absent"])
 def test_atomic_report_preserves_prior_file_and_each_publication_failure(
-    tmp_path, monkeypatch, cleanup_fails, fault
+    tmp_path, monkeypatch, cleanup_state, fault
 ):
     destination = tmp_path / "report.json"
     prior = b'{"prior":true}\n'
@@ -606,12 +606,16 @@ def test_atomic_report_preserves_prior_file_and_each_publication_failure(
     original_unlink, owned_temporaries = Path.unlink, set()
 
     def refuse_publication(*_args):
+        if cleanup_state == "already-absent":
+            temporaries = [path for path in tmp_path.iterdir() if path != destination]
+            assert len(temporaries) == 1
+            original_unlink(temporaries[0])
         raise initiating
 
     def unlink(path, *args, **kwargs):
         if path.parent == tmp_path and path != destination:
             owned_temporaries.add(path)
-            if cleanup_fails:
+            if cleanup_state == "unlink-fails":
                 raise cleanup
         return original_unlink(path, *args, **kwargs)
 
@@ -621,7 +625,7 @@ def test_atomic_report_preserves_prior_file_and_each_publication_failure(
         with pytest.raises((OSError, LookupError, BaseExceptionGroup)) as observed:
             write_report(config, "fixture", atomic=True)
         assert destination.read_bytes() == prior
-        if cleanup_fails:
+        if cleanup_state == "unlink-fails":
             assert isinstance(observed.value, BaseExceptionGroup)
             assert observed.value.exceptions == (initiating, cleanup)
         else:
