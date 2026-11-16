@@ -55,6 +55,23 @@ KEY = "placeholder-licence-key"
 OK = b'{"ok": true}'
 
 
+def retained_exception_messages(error):
+    """Include suppressed links and urllib reasons that formatted tracebacks omit."""
+    pending, seen, messages = [error], set(), []
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        messages.append(str(current))
+        pending.extend(
+            linked
+            for linked in (current.__cause__, current.__context__, getattr(current, "reason", None))
+            if isinstance(linked, BaseException)
+        )
+    return messages
+
+
 class PolicyErrorCompatibilityTest(unittest.TestCase):
     def test_public_exports_preserve_catch_identity_and_private_reason(self):
         self.assertIs(RequestPolicyError, errors.RequestPolicyError)
@@ -1173,8 +1190,7 @@ class BufferedPolicyTest(ServerTestCase):
                     client.get_json("/x")
                 error = caught.exception
                 self.assertEqual(error.details, {"surface": "evs", "attempts": 1})
-                self.assertNotIsInstance(error.__cause__, ssl.SSLCertVerificationError)
-                self.assertNotIsInstance(error.__context__, ssl.SSLCertVerificationError)
+                self.assertNotIn(marker, "\n".join(retained_exception_messages(error)))
                 self.assertEqual(
                     [(row.attempt, row.failure) for row in records], [(1, "connection")]
                 )

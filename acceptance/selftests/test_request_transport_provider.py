@@ -5,6 +5,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from http.client import HTTPSConnection
 from importlib import import_module, util
+from urllib.error import URLError
 from urllib.request import Request
 
 import pytest
@@ -64,6 +65,17 @@ def direct_exchange(owner):
         )
 
 
+def exception_links(error):
+    links = [error.__cause__, error.__context__]
+    if isinstance(error, URLError):
+        links.append(error.reason)
+    if isinstance(error, TransportCleanupError):
+        links.extend([error.initiating, *error.cleanup_errors])
+    if isinstance(error, BaseExceptionGroup):
+        links.extend(error.exceptions)
+    return [linked for linked in links if isinstance(linked, BaseException)]
+
+
 def exception_chain(error):
     pending = [error]
     seen = set()
@@ -73,11 +85,7 @@ def exception_chain(error):
             continue
         seen.add(id(current))
         yield current
-        pending.extend(
-            linked for linked in (current.__cause__, current.__context__) if linked is not None
-        )
-        if isinstance(current, BaseExceptionGroup):
-            pending.extend(current.exceptions)
+        pending.extend(exception_links(current))
 
 
 def assert_sanitized_tls_chain(error):
@@ -433,4 +441,3 @@ def test_tls_cleanup_failure_does_not_retain_raw_certificate_exception(tmp_path,
         "Controlled upstream transport cleanup failed.",
     )
     assert_sanitized_tls_chain(caught.value)
-    assert_sanitized_tls_chain(caught.value.initiating)
