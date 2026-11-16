@@ -8,6 +8,7 @@ import unittest
 from dataclasses import replace
 from unittest.mock import Mock, patch
 
+import httpx2
 from mcp.client import Client
 from mcp.server.mcpserver import MCPServer
 
@@ -62,6 +63,58 @@ class StartupBoundaryTest(ServerFixture):
         )
         self.assertNotIn("required", json.dumps(records))
         self.assertNotIn("stdio", json.dumps(records))
+
+    def test_required_auth_http_starts_the_protected_application(self):
+        async def exercise(app):
+            headers = {
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": "2025-11-25",
+            }
+            initialize = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "startup-test", "version": "1"},
+                },
+            }
+            async with (
+                app.router.lifespan_context(app),
+                httpx2.AsyncClient(
+                    transport=httpx2.ASGITransport(app=app),
+                    base_url="http://127.0.0.1:8000",
+                ) as client,
+            ):
+                refused = await client.post("/mcp", headers=headers, json=initialize)
+                accepted = await client.post(
+                    "/mcp",
+                    headers=headers | {"Authorization": "Bearer synthetic"},
+                    json=initialize,
+                )
+            return refused.status_code, accepted.status_code
+
+        def launch(app, **_options):
+            self.responses = asyncio.run(exercise(app))
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "NCI_SI_DATA_DIR": str(self.settings.data_dir),
+                    "NCI_SI_TRANSPORT": "streamable-http",
+                    "NCI_SI_HTTP_SESSIONS": "stateless",
+                    "NCI_SI_HTTP_AUTH_MODE": "required",
+                    "NCI_SI_HTTP_AUTH_FACTORY": "test_http_access:integration",
+                },
+                clear=True,
+            ),
+            patch.object(container_entry, "configure_logging"),
+            patch("uvicorn.run", side_effect=launch),
+        ):
+            self.assertEqual(container_entry.main(), 0)
+        self.assertEqual(self.responses, (401, 200))
 
     def test_optional_index_stdio_override_serves_the_protocol_without_an_active_build(self):
         settings = replace(self.settings, transport="stdio", http_require_index=False)
