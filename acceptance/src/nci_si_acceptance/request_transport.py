@@ -1,6 +1,7 @@
 """Explicit exact-grant HTTP transport for an already supervised diagnostic run."""
 
 import re
+import ssl
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -37,6 +38,8 @@ class TransportCleanupError(RequestPolicyError):
 def _sanitized(error: BaseException) -> Exception | None:
     if isinstance(error, (RequestPolicyError, CallDeadlineError, RequestBudgetError)):
         return error
+    if isinstance(error, ssl.SSLCertVerificationError):
+        return ssl.SSLCertVerificationError("Controlled upstream certificate verification failed.")
     if isinstance(error, TimeoutError):
         return TimeoutError("Controlled upstream transport timed out.")
     if isinstance(error, HTTPException):
@@ -133,6 +136,10 @@ def _transport_errors(run: ControlledRun) -> Iterator[None]:
     """Normalize expected transport errors before resource cleanup handles their context."""
     try:
         yield
+    except ssl.SSLCertVerificationError:
+        raise ssl.SSLCertVerificationError(
+            "Controlled upstream certificate verification failed."
+        ) from None
     except TimeoutError:
         raise TimeoutError("Controlled upstream transport timed out.") from None
     except HTTPException:

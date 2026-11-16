@@ -1,11 +1,12 @@
 """The one HTTP client for the upstream platforms (docs/implementation-plan.md section 3.4).
 
 JSON API requests carry `Accept: application/json`; explicit export text requests ask for HTML.
-Both carry the correlation identifier of the call in progress (M7.1). A 5xx, a 429 and a
-connection failure are retried with jittered backoff, a 429
-after the wait the platform names; no other 4xx is retried. Every attempt is counted, reported in
-the error and handed to the request-log hook. A response is classified before it is returned: a
-failure masked as a success is an `upstream_unavailable` error (`upstream.parse_upstream_json`).
+Both carry the correlation identifier of the call in progress (M7.1). A 5xx, a 429 and connection
+failures other than TLS certificate verification failures are retried with jittered backoff; a
+429 waits the time the platform names, and no other 4xx is retried. Every entered attempt is
+counted, reported in the error and handed to the request-log hook. A response is classified before
+it is returned: a failure masked as a success is an `upstream_unavailable` error
+(`upstream.parse_upstream_json`).
 A credential is sent only to the platform the client was made for, and appears in no log record,
 hook record, error message or error detail (A7.5).
 HTTP protocol and transport failures use server-owned wording, never upstream exception text.
@@ -17,6 +18,7 @@ import json
 import logging
 import random
 import re
+import ssl
 import time
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
@@ -28,7 +30,7 @@ from functools import partial
 from http import HTTPStatus
 from http.client import HTTPException, HTTPMessage, IncompleteRead
 from typing import IO, Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -115,7 +117,7 @@ class RequestRecord:
 
 
 class _Transient(Exception):  # noqa: N818 - control flow inside this module, never escapes
-    """A failure that a retry can change, with what the loop needs to decide on it."""
+    """A normalized attempt failure with the information the retry loop needs."""
 
     def __init__(
         self,
@@ -124,12 +126,14 @@ class _Transient(Exception):  # noqa: N818 - control flow inside this module, ne
         timed_out: bool = False,
         status: int | None = None,
         retry_after: str | None = None,
+        retryable: bool = True,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.timed_out = timed_out
         self.status = status
         self.retry_after = retry_after
+        self.retryable = retryable
 
     def http_details(self, redact: Callable[[str], str]) -> dict[str, Any]:
         if self.status is None:
@@ -148,6 +152,7 @@ class _Attempt:
     number: int
     status: int | None = None
     failure: str | None = None
+    error_type: str | None = None
     entered: bool = False
     refused_before_entry: bool = False
 
@@ -295,6 +300,12 @@ def _timed_out(failure: Exception) -> bool:
     )
 
 
+def _certificate_verification_failure(failure: Exception) -> bool:
+    return isinstance(failure, ssl.SSLCertVerificationError) or (
+        isinstance(failure, URLError) and isinstance(failure.reason, ssl.SSLCertVerificationError)
+    )
+
+
 def _transport_failure(exc: Exception) -> str:
     if _timed_out(exc):
         return "timeout"
@@ -409,6 +420,7 @@ class HttpClient:
             status=record.status,
             failure=record.failure,
             attempt=record.attempt,
+            **({"errorType": attempt.error_type} if attempt.error_type else {}),
             elapsedMs=record.elapsed_seconds * 1000,
         )
         hook = self.on_request
@@ -564,12 +576,7 @@ class HttpClient:
         controlled: ControlledRequest | None = None,
     ) -> Any:
         try:
-            deadline = current_deadline()
-            timeout = (
-                min(self.timeout_seconds, deadline.remaining())
-                if deadline
-                else self.timeout_seconds
-            )
+            timeout = self._request_timeout(controlled)
             if controlled is not None:
                 response_limit = self.max_response_bytes
                 on_start = _TransportStart(partial(self._enter, attempt), attempt)
@@ -577,6 +584,7 @@ class HttpClient:
                     timeout_seconds=timeout, response_limit=response_limit, on_start=on_start
                 )
                 return self._buffered(exchange, path, attempt)
+            self._enter(attempt)
             with _open(request, timeout) as response:
                 attempt.status = response.status
                 return self._read(response, path, attempt)
@@ -593,13 +601,35 @@ class HttpClient:
         except OSError as exc:
             _require_transport_entry(controlled, attempt)
             attempt.failure = _transport_failure(exc)
-            failure = _Transient(
-                self._redact(f"{self.label} request failed for {path}: transport failure"),
-                timed_out=_timed_out(exc),
-            )
+            if _certificate_verification_failure(exc):
+                attempt.error_type = ssl.SSLCertVerificationError.__name__
+                failure = _Transient(
+                    self._redact(
+                        f"{self.label} request failed for {path}: TLS certificate "
+                        "verification failed"
+                    ),
+                    retryable=False,
+                )
+            else:
+                failure = _Transient(
+                    self._redact(f"{self.label} request failed for {path}: transport failure"),
+                    timed_out=_timed_out(exc),
+                )
         # Raised outside the handlers, so that no chain carries the failure as it came: an
         # HTTP status line can hold anything the platform chose to echo.
         raise failure
+
+    def _request_timeout(self, controlled: ControlledRequest | None) -> float:
+        deadline = current_deadline()
+        if deadline is None:
+            return self.timeout_seconds
+        check_deadline()
+        timeout = min(self.timeout_seconds, deadline.remaining())
+        if timeout <= 0:
+            if controlled is None:
+                raise CallDeadlineError(deadline.attempts, self.surface, deadline.figures())
+            check_deadline()
+        return timeout
 
     def _attempt(
         self,
@@ -611,8 +641,6 @@ class HttpClient:
         interpret: Callable[[bytes, int | None], None] | None,
         controlled: ControlledRequest | None = None,
     ) -> Any:
-        if controlled is None:
-            self._enter(_Attempt(number))
         attempt = _Attempt(number)
         started = time.monotonic()
         try:
@@ -637,22 +665,27 @@ class HttpClient:
             attempt.failure = "deadline"
             raise
         finally:
-            if controlled is None or attempt.entered:
+            if attempt.entered:
                 self._record(request, attempt, time.monotonic() - started)
 
     def _enter(self, attempt: _Attempt) -> None:
         if attempt.entered:
             raise RequestPolicyError("accounting")
         check_deadline()
-        if budget := current_budget():
-            budget.request()
+        budget = current_budget()
+        if budget is not None:
+            budget.check_request()
         if deadline := current_deadline():
             deadline.request(self.surface)
+        if budget is not None:
+            budget.request()
         attempt.entered = True
 
     def _delay(self, attempt: int, failure: _Transient) -> float | None:
         """The wait before the next attempt, or None when the platform asks for too long."""
 
+        if not failure.retryable:
+            return None
         backoff = min(self.retry_backoff_seconds * 2 ** (attempt - 1), MAX_RETRY_DELAY_SECONDS)
         backoff *= self.jitter(MIN_BACKOFF_SHARE, 1.0)
         named = _retry_after_seconds(failure.retry_after)
@@ -663,7 +696,7 @@ class HttpClient:
     def _unavailable(
         self, failure: _Transient, attempts: int, timeouts: int, last_http: dict[str, Any]
     ) -> UpstreamUnavailableError:
-        """The error for a request that kept failing, with what is known of the failures.
+        """The error for a request that cannot be retried or kept failing.
 
         It is a timeout only when every one of the `attempts` timed out; otherwise the details
         carry those of the last HTTP failure, if there was one.
@@ -703,10 +736,11 @@ class HttpClient:
         reject: Callable[[Any], str | None] | None = None,
         interpret: Callable[[bytes, int | None], None] | None = None,
     ) -> Any:
-        """GET a JSON document, retrying transport failures, HTTP 429 and HTTP 5xx.
+        """GET JSON, retrying eligible transport failures, HTTP 429 and HTTP 5xx.
 
         Every attempt is counted: the error reports the number of requests made. Whatever
-        the platform answered is classified before it is returned.
+        the platform answered is classified before it is returned. TLS certificate verification
+        failures are terminal; retrying cannot make an untrusted peer trustworthy.
         A request-local reject callback may name unusable domain content. That terminal
         failure carries this response's status and actual attempt count.
         An explicit operation interpretation may raise a domain error before the shared
