@@ -90,6 +90,14 @@ class HTTPTest(ServerFixture):
         response = asyncio.run(scenario())
         self.assertEqual((response.status_code, response.json()), (200, {"status": "ok"}))
 
+    def test_http_session_manager_uses_the_documented_idle_timeout_and_capacity(self):
+        """Given stateful HTTP, when built, then SDK sessions use the documented limits."""
+        app = create_http_app(self.settings, context=self.context)
+        endpoint = next(route.endpoint for route in app.routes if route.path == "/mcp")
+        manager = endpoint.session_manager
+
+        self.assertEqual((manager.session_idle_timeout, manager.max_sessions), (1800, 10_000))
+
     def test_legacy_index_readiness_keeps_the_previous_error_identity(self):
         logging.disable(logging.NOTSET)
         invoke(self.context, "index_codes", ["C3262"])
