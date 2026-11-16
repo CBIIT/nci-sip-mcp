@@ -66,7 +66,8 @@ def main() -> int:
     asset = "settings"
     try:
         settings = Settings.from_env()
-        require_local_stdio_access(settings)
+        if settings.transport == "stdio":
+            require_local_stdio_access(settings)
         configure_logging(settings.log_level)
         asset = "index"
         index = prepared_index(settings)
