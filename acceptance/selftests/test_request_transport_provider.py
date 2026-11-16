@@ -311,7 +311,8 @@ def test_tls_verification_precedes_credential_http(
                 assert isinstance(caught.value, UpstreamUnavailableError)
                 assert caught.value.details == {"surface": "owned", "attempts": 1}
                 assert credential not in str(caught.value) + repr(caught.value.details)
-        assert result == ({"ok": True} if accepted else "UpstreamUnavailableError")
+        if accepted:
+            assert result == {"ok": True}
         snapshot = owner.run.snapshot()
         assert (snapshot.attempts, snapshot.transport_entries) == (1, 1)
         assert (snapshot.active, snapshot.pending_receipts, snapshot.observation_complete) == (
