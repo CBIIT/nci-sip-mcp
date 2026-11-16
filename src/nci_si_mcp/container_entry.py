@@ -14,7 +14,7 @@ from ncit_index.errors import IndexCapabilityError, IndexCompatibilityError, NoA
 from ncit_index.index import LocalIndex
 
 from .audit import emit
-from .config import Settings, configure_logging
+from .config import Settings, configure_logging, require_local_stdio_access
 from .context import Context
 from .errors import PlatformError
 from .index_adapter import LocalIndexAdapter
@@ -66,6 +66,8 @@ def main() -> int:
     asset = "settings"
     try:
         settings = Settings.from_env()
+        if settings.transport == "stdio":
+            require_local_stdio_access(settings)
         configure_logging(settings.log_level)
         asset = "index"
         index = prepared_index(settings)
