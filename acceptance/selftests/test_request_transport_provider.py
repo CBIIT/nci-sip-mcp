@@ -11,7 +11,12 @@ from http_receiver import WireReceiver, tls_certificate
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import correlated
-from nci_si_mcp.http_client import HttpClient, RequestPolicyError, UpstreamError
+from nci_si_mcp.http_client import (
+    HttpClient,
+    RequestPolicyError,
+    UpstreamError,
+    UpstreamUnavailableError,
+)
 from nci_si_mcp.invocation import call
 
 
@@ -255,14 +260,15 @@ def test_redirect_never_moves_credentials_or_exposes_private_fields(tmp_path, st
 @pytest.mark.parametrize(
     "trusted,certificate_address,accepted",
     [
-        pytest.param(False, "127.0.0.1", False, id="False"),
-        pytest.param(True, "127.0.0.1", True, id="True"),
+        pytest.param(False, "127.0.0.1", False, id="untrusted"),
+        pytest.param(True, "127.0.0.1", True, id="trusted"),
         pytest.param(True, "127.0.0.2", False, id="trusted-wrong-host"),
     ],
 )
 def test_tls_verification_precedes_credential_http(
-    tmp_path, monkeypatch, trusted, certificate_address, accepted
+    tmp_path, monkeypatch, caplog, trusted, certificate_address, accepted
 ):
+    """Given synthetic TLS trust cases, when connected, then only verified hosts reach HTTP."""
     server_context, certificate = tls_certificate(tmp_path, address=certificate_address)
     if trusted:
         client_context = ssl.create_default_context(cafile=certificate)
@@ -287,20 +293,37 @@ def test_tls_verification_precedes_credential_http(
                 receiver.origin,
                 label="owned",
                 timeout_seconds=1,
-                max_attempts=1,
+                max_attempts=3,
                 retry_backoff_seconds=0,
                 max_response_bytes=64,
                 size_bound="owned",
                 credentials={"Authorization": credential},
                 request_policy=provider(owner.run),
             )
-            try:
+            records = []
+            client.on_request = records.append
+            caplog.set_level("DEBUG", logger="nci_si_mcp")
+            if accepted:
                 result = client.get_json("/owned")
-            except UpstreamError as error:
-                result = type(error).__name__
+            else:
+                with pytest.raises(UpstreamError) as caught:
+                    client.get_json("/owned")
+                assert isinstance(caught.value, UpstreamUnavailableError)
+                assert caught.value.details == {"surface": "owned", "attempts": 1}
+                assert credential not in str(caught.value) + repr(caught.value.details)
         assert result == ({"ok": True} if accepted else "UpstreamUnavailableError")
+        snapshot = owner.run.snapshot()
+        assert (snapshot.attempts, snapshot.transport_entries) == (1, 1)
+        assert (snapshot.active, snapshot.pending_receipts, snapshot.observation_complete) == (
+            0,
+            0,
+            True,
+        )
+        assert [(record.attempt, record.failure) for record in records] == [
+            (1, None if accepted else "connection")
+        ]
         assert receiver.contacts == 1
         assert len(receiver.requests) == int(accepted)
         if accepted:
             assert dict(receiver.requests[0][2])["authorization"] == credential
-        assert owner.run.snapshot().transport_entries == 1
+        assert credential not in caplog.text

@@ -6,6 +6,7 @@ A request the server saw is a request the client made: the attempt counts are ch
 import io
 import json
 import socket
+import ssl
 import tempfile
 import threading
 import time
@@ -16,6 +17,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import FrozenInstanceError, dataclass, field
 from datetime import UTC, datetime
 from email.utils import formatdate
+from functools import partial
 from http import HTTPStatus
 from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -23,7 +25,7 @@ from pathlib import Path
 from threading import Barrier
 from typing import ClassVar
 from unittest.mock import patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 
 from fakes import FakeEVS, concept, release, terminology_row
@@ -1045,6 +1047,29 @@ class FailingPolicy(BufferedPolicy):
         raise failure
 
 
+class ScriptedPolicy(BufferedPolicy):
+    def __init__(self, url, outcomes):
+        super().__init__(url)
+        self.outcomes = list(outcomes)
+        self.entries = []
+
+    def exchange(self, *, timeout_seconds, response_limit, on_start):
+        self.entries.append(timeout_seconds)
+        on_start()
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+class SyntheticCertificateVerificationError(ssl.SSLCertVerificationError):
+    pass
+
+
+def same_failure(error):
+    return error
+
+
 class BufferedPolicyTest(ServerTestCase):
     def guarded(self, server, **policy_options):
         policy = BufferedPolicy(server.url + "/x", **policy_options)
@@ -1121,6 +1146,113 @@ class BufferedPolicyTest(ServerTestCase):
                 self.assertEqual(record.outbound_requests, 2)
                 self.assertNotIn(marker, json.dumps(result))
                 self.assertEqual(server.seen, [])
+
+    def test_certificate_verification_is_terminal_for_direct_and_urllib_errors(self):
+        """Given a certificate failure, when direct or wrapped, then one safe attempt fails."""
+        server = self.serve()
+        for shape in ("direct subclass", "urllib reason"):
+            with self.subTest(shape=shape):
+                marker = f"synthetic-certificate-details-{shape}"
+                failure = (
+                    SyntheticCertificateVerificationError(marker)
+                    if shape == "direct subclass"
+                    else URLError(ssl.SSLCertVerificationError(marker))
+                )
+                policy = FailingPolicy(
+                    server.url + "/x", partial(same_failure, failure), after_entry=True
+                )
+                client = self.client(
+                    server, request_policy=policy, max_attempts=3, retry_backoff_seconds=0
+                )
+                records = []
+                client.on_request = records.append
+                with (
+                    self.assertLogs("nci_si_mcp", level="DEBUG") as logs,
+                    self.assertRaises(UpstreamUnavailableError) as caught,
+                ):
+                    client.get_json("/x")
+                error = caught.exception
+                self.assertEqual(error.details, {"surface": "evs", "attempts": 1})
+                self.assertNotIsInstance(error.__cause__, ssl.SSLCertVerificationError)
+                self.assertNotIsInstance(error.__context__, ssl.SSLCertVerificationError)
+                self.assertEqual(
+                    [(row.attempt, row.failure) for row in records], [(1, "connection")]
+                )
+                output = (
+                    str(error),
+                    repr(error.details),
+                    "".join(traceback.format_exception(error)),
+                    repr(records),
+                    "\n".join(entry.getMessage() for entry in logs.records),
+                )
+                self.assertNotIn(marker, "\n".join(output))
+                self.assertTrue(
+                    any(
+                        json.loads(entry.getMessage()).get("errorType")
+                        == "SSLCertVerificationError"
+                        for entry in logs.records
+                    )
+                )
+
+    def test_nonverification_ssl_and_dns_errors_remain_retryable(self):
+        """Given generic SSL or DNS errors, when requested, then three attempts remain eligible."""
+        server = self.serve()
+        for shape in ("generic ssl", "transient dns"):
+            with self.subTest(shape=shape):
+                marker = f"synthetic-transient-details-{shape}"
+                failure = (
+                    ssl.SSLError(marker)
+                    if shape == "generic ssl"
+                    else socket.gaierror(socket.EAI_AGAIN, marker)
+                )
+                policy = FailingPolicy(
+                    server.url + "/x", partial(same_failure, failure), after_entry=True
+                )
+                client = self.client(
+                    server, request_policy=policy, max_attempts=3, retry_backoff_seconds=0
+                )
+                records = []
+                client.on_request = records.append
+                with self.assertRaises(UpstreamUnavailableError) as caught:
+                    client.get_json("/x")
+                self.assertEqual(caught.exception.details, {"surface": "evs", "attempts": 3})
+                self.assertEqual(len(policy.failures), 3)
+                self.assertEqual(
+                    [(row.attempt, row.failure) for row in records],
+                    [(1, "connection"), (2, "connection"), (3, "connection")],
+                )
+                self.assertNotIn(
+                    marker,
+                    str(caught.exception) + repr(caught.exception.details),
+                )
+
+    def test_certificate_after_http_retry_keeps_last_status_and_stops(self):
+        """Given a 503 then cert failure, when retried, then status survives; no third send."""
+        server = self.serve()
+        marker = "synthetic-certificate-details-after-503"
+        policy = ScriptedPolicy(
+            server.url + "/x",
+            [
+                Exchange(503, {}, b'{"message":"temporary"}'),
+                ssl.SSLCertVerificationError(marker),
+                ssl.SSLCertVerificationError(marker),
+            ],
+        )
+        client = self.client(server, request_policy=policy, max_attempts=3, retry_backoff_seconds=0)
+        records = []
+        client.on_request = records.append
+        with self.assertRaises(UpstreamUnavailableError) as caught:
+            client.get_json("/x")
+        self.assertEqual(
+            caught.exception.details,
+            {"surface": "evs", "attempts": 2, "status": 503},
+        )
+        self.assertEqual(len(policy.entries), 2)
+        self.assertEqual(
+            [(row.attempt, row.status, row.failure) for row in records],
+            [(1, 503, "http_status"), (2, None, "connection")],
+        )
+        self.assertNotIn(marker, str(caught.exception) + repr(caught.exception.details))
 
     def test_retry_after_case_preserves_wait(self):
         for header in ("retry-after", "rEtRy-AfTeR"):
