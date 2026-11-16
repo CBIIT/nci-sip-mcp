@@ -94,6 +94,16 @@ def _latch_cleanup(
         return reason
 
 
+def _raise_sanitized(error: Exception) -> NoReturn:
+    try:
+        raise error from None
+    except Exception as sanitized:
+        # A generator resumes under the caller's exception; suppression alone retains it.
+        sanitized.__context__ = None
+        sanitized.__cause__ = None
+        raise
+
+
 def _cleanup_failure(
     run: ControlledRun, initiating: BaseException | None, failures: list[BaseException]
 ) -> NoReturn:
@@ -105,7 +115,7 @@ def _cleanup_failure(
             ([initiating] if initiating is not None else []) + failures,
         ) from None
     cleanup = tuple(map(_cleanup_expected, failures))
-    raise TransportCleanupError(reason, original, cleanup) from None
+    _raise_sanitized(TransportCleanupError(reason, original, cleanup))
 
 
 @contextmanager
@@ -137,15 +147,15 @@ def _transport_errors(run: ControlledRun) -> Iterator[None]:
     try:
         yield
     except ssl.SSLCertVerificationError:
-        raise ssl.SSLCertVerificationError(
-            "Controlled upstream certificate verification failed."
-        ) from None
+        _raise_sanitized(
+            ssl.SSLCertVerificationError("Controlled upstream certificate verification failed.")
+        )
     except TimeoutError:
-        raise TimeoutError("Controlled upstream transport timed out.") from None
+        _raise_sanitized(TimeoutError("Controlled upstream transport timed out."))
     except HTTPException:
-        raise HTTPException("Controlled upstream response framing failed.") from None
+        _raise_sanitized(HTTPException("Controlled upstream response framing failed."))
     except OSError:
-        raise OSError("Controlled upstream transport failed.") from None
+        _raise_sanitized(OSError("Controlled upstream transport failed."))
     except BaseExceptionGroup as error:
         _cleanup_failure(run, error.exceptions[0], list(error.exceptions[1:]))
 

@@ -76,6 +76,10 @@ handoff files contain local run authority; do not publish them. The native repor
 its existing schema and actual per-case outcomes. The separate sanitized `summary.json`
 records request accounting and whether resource observation completed.
 
+Controlled transport normalizes expected failures without retaining raw exception chains,
+including TLS certificate details. Cleanup failures retain sanitized initiating and cleanup
+exceptions; unexpected exceptions remain visible rather than being normalized.
+
 Admission closes before cleanup. Registered child operations, the refusal listener and
 transferred stderr files share one cleanup deadline. Completion requires actual joins and
 process reaping; an unjoined owner remains pending and cannot produce successful completion.
