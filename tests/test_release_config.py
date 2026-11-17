@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import tomllib
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 import yaml
@@ -58,7 +59,52 @@ class PullRequestTitleTest(unittest.TestCase):
             with self.subTest(title):
                 self.assertEqual(self.check(title), (0, ""))
 
+    def test_title_workflow_preserves_validation_structure_and_exact_regex(self):
+        """Given a PR event, validation keeps its exact authorization and execution contract."""
+        workflow = deepcopy(WORKFLOW)
+        workflow["jobs"]["conventional"]["steps"][0]["run"] = "<Bash checked at its entry point>"
+        self.assertEqual(
+            workflow,
+            {
+                "name": "PR title",
+                "run-name": "Validate PR title: ${{ github.event.pull_request.title }}",
+                True: {
+                    "pull_request": {
+                        "types": ["opened", "edited", "reopened", "synchronize"],
+                        "branches": ["main"],
+                    }
+                },
+                "permissions": {},
+                "concurrency": {
+                    "group": "pr-title-${{ github.event.pull_request.number }}",
+                    "cancel-in-progress": True,
+                },
+                "jobs": {
+                    "conventional": {
+                        "name": "conventional commit subject",
+                        "runs-on": "ubuntu-24.04",
+                        "timeout-minutes": 5,
+                        "steps": [
+                            {
+                                "name": "Validate",
+                                "env": {"TITLE": "${{ github.event.pull_request.title }}"},
+                                "run": "<Bash checked at its entry point>",
+                            }
+                        ],
+                    }
+                },
+            },
+        )
+        [pattern] = re.findall(r"^pattern='([^']+)'$", SCRIPT, re.MULTILINE)
+        self.assertEqual(
+            pattern,
+            r"^(feat|fix|perf|docs|style|refactor|test|chore|build|ci|revert|security|deprecate)"
+            r"(\([a-z0-9._/-]+\))?!?: .+",
+        )
+
     def test_other_titles_fail_with_an_explanation(self):
+        """Given an invalid title, Bash rejects it and explains both release landing methods."""
+        self.maxDiff = None
         for title in (
             "Fix something",
             "feature: add a tool",
@@ -72,8 +118,25 @@ class PullRequestTitleTest(unittest.TestCase):
                 code, summary = self.check(title)
 
                 self.assertEqual(code, 1)
-                self.assertIn(title, summary)
-                self.assertIn("CONTRIBUTING.md", summary)
+                self.assertEqual(
+                    summary,
+                    "## The PR title is not a Conventional Commit\n"
+                    "\n"
+                    "```\n"
+                    f"{title}\n"
+                    "```\n"
+                    "\n"
+                    "Expected `type(scope)?!?: subject`, for example:\n"
+                    "\n"
+                    "- `feat(traversal): follow role edges in both directions`\n"
+                    "- `fix(index): reject a vector of another dimension`\n"
+                    "- `docs: describe the release pinning`\n"
+                    "- `feat(server)!: rename the lookup tool`\n"
+                    "\n"
+                    "Merge releases follow included commit messages, including bodies; squash\n"
+                    'releases follow the title. CONTRIBUTING.md, "Pull requests and releases",\n'
+                    "lists the types and what each releases.\n",
+                )
 
 
 class PackageDependenciesTest(unittest.TestCase):
