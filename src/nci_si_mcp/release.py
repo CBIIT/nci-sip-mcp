@@ -187,9 +187,17 @@ def current_terminologies(rows: list[dict[str, Any]], channel: str) -> list[dict
 def _current_rows(
     rows: list[dict[str, Any]], terminology: str, channel: str
 ) -> list[dict[str, Any]]:
-    current = [row for row in rows if row.get("latest") is True]
-    if terminology == "ncit":
-        return [row for row in current if (row.get("tags") or {}).get(channel) == "true"]
+    current = []
+    for row in rows:
+        if row.get("latest") is not True:
+            continue
+        if terminology == "ncit":
+            tags = row.get("tags") or {}
+            if not isinstance(tags, dict):
+                raise _not_available("EVS returned invalid current release tags", terminology)
+            if tags.get(channel) != "true":
+                continue
+        current.append(row)
     return current
 
 
