@@ -2,6 +2,7 @@
 
 import io
 import json
+import signal
 import sys
 import threading
 import traceback
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import anyio
 import pytest
+from anyio.streams.buffered import BufferedByteReceiveStream
 from test_request_supervision import authorization, failure_leaves
 
 from nci_si_acceptance import request_children, request_stdio
@@ -18,6 +20,9 @@ from nci_si_acceptance.request_authorization import Authorization, Limits, Reque
 from nci_si_acceptance.request_stdio import StderrTransfer, StdioOwner
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import RequestPolicyError
+
+# Deadlock protection for fixture phases, not a startup or production cleanup deadline.
+PROCESS_SAFETY_SECONDS = 30
 
 
 def _stop_child_for_test(resource):
@@ -34,7 +39,7 @@ async def _reap_for_test(resource):
     process = resource.process
     if process is not None:
         # Actual-parent wait supplies the receipt even if the stop raced natural exit.
-        with anyio.fail_after(3):
+        with anyio.fail_after(PROCESS_SAFETY_SECONDS):
             await process.wait()
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
@@ -42,6 +47,29 @@ async def _reap_for_test(resource):
     # These are this implementation's owned in-memory handles, not SDK private handles.
     for stream in (resource.read, resource.write, resource._read_send, resource._write_receive):
         await stream.aclose()
+
+
+def _ready_process_handoff(monkeypatch):
+    original_open = anyio.open_process
+
+    async def open_ready(*args, **kwargs):
+        process = await original_open(*args, **kwargs)
+        try:
+            assert process.stdout is not None
+            with anyio.fail_after(PROCESS_SAFETY_SECONDS):
+                marker = await BufferedByteReceiveStream(process.stdout).receive_exactly(5)
+                assert marker == b"ready"
+            return process
+        except BaseException:
+            with anyio.CancelScope(shield=True):
+                with suppress(ProcessLookupError):
+                    process.kill()
+                with anyio.fail_after(PROCESS_SAFETY_SECONDS):
+                    await process.wait()
+                    await process.aclose()
+            raise
+
+    monkeypatch.setattr(anyio, "open_process", open_ready)
 
 
 def test_failure_before_process_acquisition_closes_actual_endpoints(tmp_path, monkeypatch):
@@ -238,16 +266,29 @@ def test_real_sdk_session_keeps_completion_pending_until_external_cleanup(tmp_pa
     assert not errors.closed
 
 
-def test_cancel_immediately_after_spawn_settles_before_independent_fallback(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("ready", "expected_status"),
+    [(True, 0), (False, -signal.SIGTERM)],
+    ids=["ready-cooperative-eof", "unready-forced-termination"],
+)
+def test_cancel_at_first_owned_handle_settles_before_independent_fallback(
+    tmp_path, monkeypatch, ready, expected_status
+):
     owner = SupervisedRun.create(
         Authorization((RequestGrant("GET", "http://127.0.0.1:9/unused", ()),), Limits(), "a" * 64),
         tmp_path / "run",
     )
-    replies = tmp_path / "replies.json"
-    replies.write_text("[]")
+    if ready:
+        # Finish startup before handoff; cancellation still precedes the owner's I/O setup.
+        _ready_process_handoff(monkeypatch)
+    program = (
+        "import os; os.write(1,b'ready');\nwhile os.read(0,65536): pass\nos._exit(0)"
+        if ready
+        else "import threading; threading.Event().wait()"
+    )
     resource = StdioOwner(
         owner,
-        [sys.executable, str(Path(__file__).with_name("live_content_server.py")), str(replies)],
+        [sys.executable, "-I", "-S", "-c", program],
         {},
         io.StringIO(),
     )
@@ -266,8 +307,7 @@ def test_cancel_immediately_after_spawn_settles_before_independent_fallback(tmp_
                     with anyio.CancelScope(shield=True):
                         process = resource.process
                         if process is not None:
-                            # Before this loop's reap; returncode=0 below still requires
-                            # cooperative exit, not the outer fallback's forced kill.
+                            # Capture actual owner settlement before independent fallback.
                             observed.update(
                                 returncode=process.returncode,
                                 waited=resource.waited,
@@ -291,16 +331,16 @@ def test_cancel_immediately_after_spawn_settles_before_independent_fallback(tmp_
         with owner:
             owner.register_completion(resource, participant="stdio")
             resource.thread.start()
-            resource.thread.join(5)
+            resource.thread.join(3 * PROCESS_SAFETY_SECONDS)
             assert not resource.thread.is_alive()
     except BaseException as error:  # noqa: BLE001 - assert the exact initiating event below.
         outward = error
     finally:
         _stop_child_for_test(resource)
-        resource.thread.join(25)
+        resource.thread.join(3 * PROCESS_SAFETY_SECONDS)
         assert not resource.thread.is_alive()
     assert observed == {
-        "returncode": 0,
+        "returncode": expected_status,
         "waited": True,
         "closed": frozenset({"stdin", "stdout", "stderr"}),
     }
