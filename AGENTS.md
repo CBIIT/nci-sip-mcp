@@ -190,12 +190,16 @@ detail.
 
 No verification runs only after merge: provide a pull-request twin or an explicit tested exemption; publishing remains post-merge.
 
-- Every change reaches `main` through a pull request that is squash-merged. The PR title is the
-  commit subject and must be a Conventional Commit (`feat: ...`, `fix(scope): ...`); the squash
-  body is blank, so only the title counts.
-- A release is cut automatically from the title after CI passes on `main`: `feat` bumps the
-  minor version, `fix` and `perf` the patch, `!` the minor while below 1.0; other types release
-  nothing. Tags are `vX.Y.Z`. Nothing is written back to `main`.
+- Every change reaches `main` through a pull request. Milestone landings use merge commits;
+  squash remains allowed when selected instead. Use the Conventional Commit PR title
+  (`feat: ...`, `fix(scope): ...`) as the landing commit subject and leave its body blank.
+- After CI passes on `main`, releases follow eligible newly reachable non-merge commit
+  messages since the last tag, including their bodies. Merge landings preserve the issue and
+  review history; their PR/merge title does not override it. An eligible conventional line in
+  an issue or review commit body can alter the release. Squash landings use only the title
+  when the body is blank. The highest eligible bump wins: `feat` bumps the minor version,
+  `fix` and `perf` the patch, `!` the minor while below 1.0; other types release nothing.
+  Tags are `vX.Y.Z`. Nothing is written back to `main`.
 - The accepted types are `allowed_tags` in `[tool.semantic_release.commit_parser_options]` and the
   regex in `.github/workflows/pr-title.yml`; a test keeps them equal. semantic-release reads no
   other list (`other_allowed_tags` alone leaves a type unparseable).
@@ -320,8 +324,9 @@ The government sponsor approves changes; the NCI SI MCP project coordinator rela
 and the reviewer acts for the coordinator.
 
 8. **Merge only on the reviewer's clearance,** given as a PR comment that names the head commit,
-   with `gh pr merge N --squash --subject "<title>" --body "" --delete-branch --match-head-commit
-   <sha>`. A push after the clearance needs a new one. Wait for every workflow the pull request
+   with `gh pr merge N --merge --subject "<title>" --body "" --delete-branch --match-head-commit
+   <sha>` (use `--squash` instead only when that method is selected). A push after the clearance
+   needs a new one. Wait for every workflow the pull request
    triggered to finish and pass before asking; never hand over on "CI is running".
 9. **After the merge,** confirm CI, Audit, CodeQL and Release on the merge commit, that the
     issues closed, and that the release was cut. After confirming every milestone issue is
@@ -346,8 +351,8 @@ checks, because the milestone pull request into `main` runs the full CI on the m
 branch (steps 3 and 4). Review fixes (steps 5 and 7) are committed on the milestone branch
 itself and pushed; run the local gates first, as for an issue. When `main` moves, sync it with a
 merge commit (`git merge origin/main` on the milestone branch, then push), never a rebase or a
-squash, so `main` stays an ancestor and the next sync does not conflict; `main` itself accepts
-squash merges only. Findings made along the
+squash, so `main` stays an ancestor and the next sync does not conflict. `main` accepts merge
+and squash landings; milestone landings use merge commits by default. Findings made along the
 way are fixed on the branch they belong to; only an unrelated problem gets an issue. Do not change
 the ruleset, repository settings, `spec/`'s conventions or another issue's scope without the
 reviewer's agreement.

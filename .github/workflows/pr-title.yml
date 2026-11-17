@@ -1,10 +1,9 @@
 name: PR title
 run-name: "Validate PR title: ${{ github.event.pull_request.title }}"
 
-# A pull request is squash-merged with its title as the commit subject and an
-# empty body, and the release workflow computes the next version from that
-# subject alone. A title that is not a Conventional Commit would land as a commit
-# the release cannot read, so it fails here, at review time.
+# Both landing methods use a Conventional Commit title. Merge releases follow
+# the included non-merge messages, including bodies; squash releases follow the
+# title with a blank body. Keep the title truthful for either method.
 #
 # The rule is one regular expression, so it is checked inline and not by a
 # third-party action.
@@ -53,8 +52,9 @@ jobs:
               echo '- `docs: describe the release pinning`'
               echo '- `feat(server)!: rename the lookup tool`'
               echo
-              echo "The title decides the next version. CONTRIBUTING.md, \"Pull requests and"
-              echo "releases\", lists the types and what each releases."
+              echo "Merge releases follow included commit messages, including bodies; squash"
+              echo "releases follow the title. CONTRIBUTING.md, \"Pull requests and releases\","
+              echo "lists the types and what each releases."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error title=The PR title is not a Conventional Commit::$TITLE"
             exit 1
