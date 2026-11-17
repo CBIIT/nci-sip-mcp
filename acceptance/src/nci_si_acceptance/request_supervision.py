@@ -283,9 +283,9 @@ class SupervisedRun:
         errors.extend(self._collect([self._seal_registry]))
         self._stop.set()
         resources = self._collect([self._join])
-        known: list[BaseException] = []
+        reported_fallbacks: set[PolicyReason] = set()
         if terminal:
-            known = self._terminal_failures(errors)
+            known = self._terminal_failures(errors, reported_fallbacks=reported_fallbacks)
             errors[:0] = [error for error in known if not self._contains(errors, error)]
         actions: list[Callable[[], None]] = [
             lambda child=child: self._finish_child(child) for child in self._children
@@ -295,7 +295,7 @@ class SupervisedRun:
             resources.extend(self._settle_completions())
             self._resources_complete = not resources
         errors.extend(resources)
-        errors.extend(self._observed_failures(errors, include_unrecorded=not known))
+        errors.extend(self._observed_failures(errors, reported_fallbacks=reported_fallbacks))
 
     def _settle_completions(self) -> list[BaseException]:
         deadline = self.cleanup_deadline()
@@ -330,7 +330,7 @@ class SupervisedRun:
             errors.append(error)
 
     def _observed_failures(
-        self, errors: list[BaseException], *, include_unrecorded: bool
+        self, errors: list[BaseException], *, reported_fallbacks: set[PolicyReason]
     ) -> list[BaseException]:
         observed: list[BaseException] = list(self._child_errors.values())
         if self._observer_error is not None:
@@ -339,7 +339,7 @@ class SupervisedRun:
         if self._controlled_cleanup:
             # Settlement can publish the original event after an earlier lookup failed.
             observed.extend(
-                self._terminal_failures(errors + observed, include_unrecorded=include_unrecorded)
+                self._terminal_failures(errors + observed, reported_fallbacks=reported_fallbacks)
             )
         return [error for error in observed if not self._contains(errors, error)]
 
@@ -348,7 +348,7 @@ class SupervisedRun:
         self._completions.seal()
 
     def _terminal_failures(
-        self, errors: list[BaseException], *, include_unrecorded: bool = True
+        self, errors: list[BaseException], *, reported_fallbacks: set[PolicyReason]
     ) -> list[BaseException]:
         retained: list[BaseException] = []
 
@@ -356,10 +356,15 @@ class SupervisedRun:
             # Validate private identity and counters before selecting the event.
             self.run.snapshot()
             failure, event = self.run._failure_record()
-            if event is None and not include_unrecorded:
+            if failure is None:
                 return
-            if failure is not None and (event is None or not self._contains(errors, event)):
-                retained.append(event or RequestPolicyError(failure))
+            if event is None:
+                if failure in reported_fallbacks:
+                    return
+                retained.append(RequestPolicyError(failure))
+                reported_fallbacks.add(failure)
+            elif not self._contains(errors, event):
+                retained.append(event)
 
         # Normalize new lookup failures, never the already-classified retained event.
         return self._collect([observe]) + retained

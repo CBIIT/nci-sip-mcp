@@ -1162,16 +1162,6 @@
   original: "8bb652cd8a739e39b42847139ea37fdcb2207de4b4d24538ef024eec1c4fee91"
   mutated: "4607b19206e10256291b395e453a9530afe154b883a9654b0f74704004a6cc13"
   reason: "Supported NativeRun.start stores the controller before setting entered=True, and no supported lifecycle clears that owner. Thus entered=True implies owner is not None; entered=False returns unchanged in both forms. External internal-attribute mutation is not a supported lifecycle. This is the exact recorded S3/154 static proof, not an observed kill. Reassess if the owner/entered lifecycle changes."
-# Approved: #495 comment 6896703526 / #479 comment 6896697491; exact attempt2 S3/141.
-# Reviewed #507 rekey: issuecomment-6958389395; unchanged predicate and exception invariant.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
-  qualname: "SupervisedRun._terminal_failures.observe"
-  operator: "boolean:drop:0"
-  site: "/body/3/test/0/values/1"
-  context: "c3c71193c107d43c446ce97d9831426bb94c8c133d18ed202e201b59d3351d82"
-  original: "41b805770df3da71f6e0e83c65f013e572ef3679083cdebb3b727a96c96c2c35"
-  mutated: "80fbb4f92b578a1b995522c0071f70a4328cd42fcca1eab8a1b3e2f314dfdbb8"
-  reason: "Supported errors are list[BaseException] with valid exception-group members, so no element is None and identity-recursive _contains has no side effects. For event=None both forms append the same RequestPolicyError; for non-None events the remaining operand is identical. This is the exact recorded S3/141 static proof, not an observed kill. Reassess if the error invariant or helper changes."
 # Approved: #495 comment 6898485881 / #479 comment 6898489268; exact attempt2 S3/170.
 - file: "acceptance/src/nci_si_acceptance/request_stdio.py"
   qualname: "StdioOwner._settled"

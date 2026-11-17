@@ -99,6 +99,7 @@ failure. Newly raised cleanup or terminal-record lookup errors still use cleanup
 After resource settlement, newly published actual events are retained by identity even when
 an earlier lookup failed. Distinct lookup/cleanup errors remain visible, without duplicating
 an already-known fallback for an event whose original object is unavailable.
+Only an emitted fallback suppresses its repetition; a lookup error does not.
 Report publication failures propagate rather than leaving a successful command result.
 The creator retains responsibility for private run directories and evidence cleanup.
 
