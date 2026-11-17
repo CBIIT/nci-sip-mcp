@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CROSS_IMPORT_TARGETS = 184
+CROSS_IMPORT_TARGETS = 183
 
 
 def is_test_module(name: str) -> bool:
