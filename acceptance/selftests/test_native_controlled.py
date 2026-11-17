@@ -190,8 +190,8 @@ def test_native_serial_node_shares_controller_release_and_budget(native_tree, lo
             tree / "acceptance/tmp/native-junit.xml"
         ).find(".//testcase/failure")
         assert failure is not None
-        assert "assert not result.is_error, result.content" in (failure.text or "")
-        assert "Controlled upstream request refused." in (failure.text or "")
+        assert "assert not result.is_error, result.content" in (failure.text or ""), failure.text
+        assert "Controlled upstream request refused." in (failure.text or ""), failure.text
     summaries = tuple((tree / "acceptance/tmp/native-run").glob("*/summary.json"))
     assert len(summaries) == 1
     assert stat.S_IMODE(summaries[0].with_name("native.json").stat().st_mode) == (
