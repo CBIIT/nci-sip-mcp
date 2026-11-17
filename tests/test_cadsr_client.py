@@ -244,6 +244,19 @@ class CaDSRClientTest(ServerTestCase):
             raised.exception.details, {"surface": "cadsr", "seconds": 45, "attempts": 3}
         )
 
+    def test_data_element_retry_waits_for_the_cadsr_backoff_before_returning_content(self):
+        """Given a transient caDSR error, when retried, then content follows one 0.25s wait."""
+        server = self.serve(Reply(503), reply({"DataElement": {"publicId": "123"}}))
+        client = self.cadsr(server)
+        waits = []
+        client.http.sleep = waits.append
+
+        with patch.object(client.http, "jitter", side_effect=lambda low, high: high):
+            data_element = client.get_data_element("123")
+
+        self.assertEqual(data_element, {"publicId": "123"})
+        self.assertEqual(waits, [0.25])
+
     def test_export_origin_gets_no_authorization_even_with_a_configured_credential(self):
         credential = "fixture:" + uuid4().hex
         api = self.serve(Reply(404, body=b""))

@@ -209,7 +209,7 @@ A leading `~` is expanded, and an empty value is rejected. The other settings:
 | `NCI_SI_TIMEOUT_SECONDS` | `30` | Per-request timeout |
 | `NCI_SI_MATCH_TIMEOUT_SECONDS` | `45` | Timeout of a caDSR match request |
 | `NCI_SI_CALL_DEADLINE_SECONDS` | `50` | Shared elapsed-time budget per call, including release discovery, retries and workflow hops; finite and positive, no disable switch. Index operator commands are outside this deadline. DNS resolution and connection setup are bounded only by the per-request timeout: this is not a hard real-time cutoff |
-| `NCI_SI_EVS_MAX_ATTEMPTS` | `3` | Request attempts, 1 to 10. Only a 5xx, a 429 and a connection failure are retried; a 429 waits for its `Retry-After` (a platform that asks for more than 60 seconds is not asked again) |
+| `NCI_SI_EVS_MAX_ATTEMPTS` | `3` | Request attempts, 1 to 10. Only a 5xx, a 429 and connection failures other than TLS certificate verification failures are retried; a 429 waits for its `Retry-After` (a platform that asks for more than 60 seconds is not asked again) |
 | `NCI_SI_EVS_RETRY_BACKOFF_SECONDS` | `0.25` | Initial exponential backoff, jittered between half and all of it; a single wait is capped at 60 seconds |
 | `NCI_SI_EVS_MAX_RESPONSE_BYTES` | `10485760` | Maximum accepted EVS REST or FHIR response, up to 1 GiB |
 | `NCI_SI_INDEX_BATCH_SIZE` | `100` | Codes per EVS indexing request |

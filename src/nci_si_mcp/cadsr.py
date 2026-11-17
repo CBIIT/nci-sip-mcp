@@ -31,6 +31,16 @@ EXPORT_FOLDER = "/CDE/XML/"
 DISTRIBUTION = "releasedCDEsXML-OD.zip"
 _LISTING_DATE = re.compile(r"(?<!\S)\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?!\S)")
 
+# Bound retries for transient caDSR failures; the count is unmeasured. Re-measure
+# failure and recovery rates and request latency before changing it.
+CADSR_MAX_ATTEMPTS = 3
+# Space retries to avoid immediate repeat load; the delay is unmeasured. Re-measure
+# caDSR recovery times and retry traffic before changing it.
+CADSR_RETRY_BACKOFF_SECONDS = 0.25
+# Bound response memory; the limit is unmeasured. Re-measure caDSR response sizes
+# and memory use before changing it.
+CADSR_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+
 
 def _form_absence(public_id: str, payload: bytes, status: int | None) -> None:
     if status != HTTPStatus.OK:
@@ -204,9 +214,9 @@ class CaDSRClient:
         transport = partial(
             HttpClient,
             label="CADSR",
-            max_attempts=3,
-            retry_backoff_seconds=0.25,
-            max_response_bytes=10 * 1024 * 1024,
+            max_attempts=CADSR_MAX_ATTEMPTS,
+            retry_backoff_seconds=CADSR_RETRY_BACKOFF_SECONDS,
+            max_response_bytes=CADSR_MAX_RESPONSE_BYTES,
             size_bound="cadsr_response_bytes",
         )
         self.http = transport(

@@ -31,6 +31,13 @@ logger = logging.getLogger(__name__)
 # Coordinate changes with the orchestrator's termination grace period.
 GRACEFUL_SHUTDOWN_SECONDS = 20
 
+# Reclaim inactive SDK sessions; the interval is unmeasured. Re-measure client idle
+# durations and session retention before changing it.
+SESSION_IDLE_TIMEOUT_SECONDS = 1800
+# Bound process-local session state; the capacity is unmeasured. Re-measure concurrent
+# session counts and per-session memory before changing it.
+MAX_HTTP_SESSIONS = 10_000
+
 
 class HTTPBoundary:
     """Protect all HTTP routes and record only the status of authentication refusals."""
@@ -158,8 +165,8 @@ def create_http_app(
         json_response=True,
         max_request_body_size=settings.http_max_request_bytes,
         transport_security=security,
-        session_idle_timeout=1800,
-        max_sessions=10_000,
+        session_idle_timeout=SESSION_IDLE_TIMEOUT_SECONDS,
+        max_sessions=MAX_HTTP_SESSIONS,
     )
 
     async def health(request: Any) -> JSONResponse:
