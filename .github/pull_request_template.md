@@ -1,4 +1,5 @@
-<!-- The title is the squash commit subject: a Conventional Commit, such as `fix(evs): ...`. -->
+<!-- The landing commit subject is the Conventional Commit title, such as `fix(evs): ...`.
+Merge releases follow included commit messages; squash releases follow the title with a blank body. -->
 
 ## What changes
 

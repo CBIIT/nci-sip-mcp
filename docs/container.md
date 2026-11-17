@@ -112,7 +112,7 @@ config:
 ---
 flowchart TB
     PR["Reviewed pull request<br/>local gates + green PR CI"]
-    PR -->|"head clearance; squash merge"| Main["Green CI on main merge commit"]
+    PR -->|"head clearance; merge commit"| Main["Green CI on main merge commit"]
     Main --> Release["Release workflow<br/>eligible tag + wheel + amd64 image"]
     Release --> Gate["Image verification<br/>offline HTTP smoke + SBOM<br/>zero High / Critical findings"]
     Gate --> Publish["Public GHCR digest + release evidence<br/>anonymous digest access verified"]

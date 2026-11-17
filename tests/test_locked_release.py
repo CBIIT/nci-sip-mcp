@@ -8,6 +8,7 @@ import sys
 import tomllib
 import unittest
 import venv
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -38,6 +39,103 @@ def git(root, *arguments, env=None):
         text=True,
         stderr=subprocess.PIPE,
     ).strip()
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseHistory:
+    commits: tuple[str, ...]
+    title: str
+    version: str
+    squash: bool = False
+
+
+def _release_environment(directory: Path) -> dict[str, str]:
+    """Allow runtime/coverage essentials only; never inherit Git or hosting credentials."""
+    runtime = {
+        "PATH",
+        "SYSTEMROOT",
+        "WINDIR",
+        "LD_LIBRARY_PATH",
+        "DYLD_LIBRARY_PATH",
+        "PDM_PROJECT_ROOT",
+    }
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key in runtime or key.startswith("COVERAGE_")
+    }
+    environment.update(
+        HOME=str(directory),
+        XDG_CONFIG_HOME=str(directory),
+        GIT_CONFIG_NOSYSTEM="1",
+        GIT_CONFIG_SYSTEM=os.devnull,
+        GIT_CONFIG_GLOBAL=os.devnull,
+        GIT_TERMINAL_PROMPT="0",
+        GIT_ALLOW_PROTOCOL="file",
+        GIT_AUTHOR_DATE="2026-01-01T00:00:00+00:00",
+        GIT_COMMITTER_DATE="2026-01-01T00:00:00+00:00",
+        LC_ALL="C",
+        TZ="UTC",
+    )
+    return environment
+
+
+def _commit(directory: Path, environment: dict[str, str], message: str) -> None:
+    footer = "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+    git(directory, "commit", "--allow-empty", "-m", f"{message}\n\n{footer}", env=environment)
+
+
+def _initialize_release_repository(directory: Path, environment: dict[str, str]) -> None:
+    # Copy the real configuration, not a reconstruction of the release algorithm.
+    (directory / "pyproject.toml").write_text(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    git(directory, "init", "--initial-branch=main", "--template=", env=environment)
+    git(directory, "config", "--local", "user.name", "Release verification", env=environment)
+    git(
+        directory,
+        "config",
+        "--local",
+        "user.email",
+        "release-verification@example.invalid",
+        env=environment,
+    )
+    git(directory, "config", "--local", "core.hooksPath", os.devnull, env=environment)
+    # The CLI needs a hosting URL to configure its hosting client; no fetch/push is performed.
+    git(
+        directory,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/release-verification/release-verification.git",
+        env=environment,
+    )
+    git(directory, "add", "pyproject.toml", env=environment)
+    _commit(directory, environment, "docs: release baseline")
+    git(directory, "tag", "v0.39.1", env=environment)
+
+
+def _release_from_history(
+    directory: Path, history: ReleaseHistory
+) -> subprocess.CompletedProcess[str]:
+    environment = _release_environment(directory)
+    _initialize_release_repository(directory, environment)
+    git(directory, "checkout", "-b", "topic", env=environment)
+    for message in history.commits:
+        _commit(directory, environment, message)
+    git(directory, "checkout", "main", env=environment)
+    merge_options = ("--squash",) if history.squash else ("--no-ff", "--no-commit")
+    git(directory, "merge", *merge_options, "topic", env=environment)
+    _commit(directory, environment, history.title)
+    return subprocess.run(
+        [sys.executable, "-m", "semantic_release", "--noop", "version", "--print"],
+        cwd=directory,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
 
 
 GUARD_RUN = """"$PDM_TOOL_HOME/venv/bin/python" - <<'PYTHON'
@@ -265,6 +363,53 @@ class ReleaseWorkflowTest(unittest.TestCase):
 
 
 class LockedReleaseCliTest(unittest.TestCase):
+    def test_cli_releases_from_reachable_nonmerge_messages_including_bodies(self):
+        """Given local merge/squash DAGs, --noop version --print returns the specified release."""
+        histories = (
+            ReleaseHistory(
+                ("test: regression (red)", "fix: repair behavior", "docs: explain repair"),
+                "fix: land repair",
+                "0.39.2",
+            ),
+            ReleaseHistory(
+                (
+                    "fix: repair behavior",
+                    "feat(review): add reviewed behavior",
+                    "docs: review notes",
+                ),
+                "fix: land reviewed repair",
+                "0.40.0",
+            ),
+            ReleaseHistory(
+                ("fix: repair behavior", "docs: review notes"),
+                "feat: land repair",
+                "0.39.2",
+            ),
+            ReleaseHistory(("fix!: replace behavior",), "fix: land replacement", "0.40.0"),
+            ReleaseHistory(
+                ("test: regression (red)", "docs: review notes"),
+                "feat: land tests and documentation",
+                "0.39.1",
+            ),
+            ReleaseHistory(
+                ("feat: feature not reachable after squash",),
+                "fix: land squashed repair",
+                "0.39.2",
+                squash=True,
+            ),
+            ReleaseHistory(
+                ("fix: repair behavior\n\nfeat: feature text in the commit body",),
+                "fix: land repair with review body",
+                "0.40.0",
+            ),
+        )
+        for history in histories:
+            with self.subTest(history=history), TemporaryDirectory() as directory:
+                result = _release_from_history(Path(directory), history)
+                self.assertEqual(
+                    (result.returncode, result.stdout), (0, f"{history.version}\n"), result.stderr
+                )
+
     def test_release_sync_selects_no_project_or_unrelated_groups(self):
         setup = yaml.safe_load((ROOT / ".github/actions/setup/action.yml").read_text())
         command = setup["runs"]["steps"][-1]["run"].splitlines()[-1].split()

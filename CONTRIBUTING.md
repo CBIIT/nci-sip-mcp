@@ -641,23 +641,31 @@ clearance, after all triggered workflows pass. See [AGENTS.md](AGENTS.md#how-wor
 for the milestone process and [operations](docs/operations.md) for available signals, ATO
 evidence inputs and open hosting responsibilities.
 
-Every change reaches `main` through a pull request that is squash-merged. The pull request
-title becomes the commit subject, and the next version is computed from it, so the title is a
-[Conventional Commit](https://www.conventionalcommits.org) subject. A check on the pull request
+Every change reaches `main` through a pull request. Milestone landings use merge commits;
+squash remains an allowed alternative. Use the pull request title as the landing commit
+subject and leave its body blank. The title must be a
+[Conventional Commit](https://www.conventionalcommits.org) subject; a check on the pull request
 fails otherwise. Changes to `spec/` and `acceptance/` follow the change control in
 [acceptance/README.md](acceptance/README.md#change-control): the NCI SI MCP project coordinator is
 their code owner.
 
-| Title | Release (while the version is below 1.0) |
+Merge landings preserve the issue and review commits. Releases take the highest eligible bump
+from newly reachable non-merge commit messages since the last tag, **including bodies**; the
+PR/merge title does not override that history. An eligible conventional line in an issue or
+review commit body can therefore alter the release. Review those messages as well as the PR
+title. Squash landings use only the title when the landing commit body is blank.
+
+| Commit type | Release (while the version is below 1.0) |
 | --- | --- |
 | `feat: …` | Minor: 0.3.1 → 0.4.0 |
 | `fix: …`, `perf: …` | Patch: 0.3.1 → 0.3.2 |
 | `!` after the type, as in `feat!: …` | Minor |
 | `docs`, `style`, `refactor`, `test`, `chore`, `build`, `ci`, `revert`, `security`, `deprecate` | None |
 
-A scope is optional, in lower case: `fix(index): …`. Choose the type with care, because it
-decides the version. Only the title counts: the squash commit has no body, so mark a breaking
-change with `!`, and do not edit the commit message in the merge dialog.
+A scope is optional, in lower case: `fix(index): …`. Choose the included commit types with
+care, and make the PR title reflect their client impact. Mark a breaking change with `!` in
+the relevant commit subject and PR title. Do not edit the selected title or add a body in the
+merge dialog.
 
 Review the exact PDM (including its bootstrap hishel, unearth and virtualenv constraints), Ruff,
 basedpyright, Zensical and python-semantic-release tool pins monthly,

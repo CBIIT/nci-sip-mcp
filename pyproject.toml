@@ -87,9 +87,10 @@ lock = ["-G", ":all"]
 source = "scm"
 fallback_version = "0.0.0"
 
-# The release workflow computes the next version from the commit subjects on main
-# since the last tag, which are pull request titles (CONTRIBUTING.md). Below 1.0 a
-# breaking change releases a minor version; 1.0.0 is tagged by hand.
+# The release workflow reads eligible newly reachable non-merge commit messages,
+# including bodies, since the last tag. Merge landings preserve that history;
+# squash landings use the PR title with a blank body (CONTRIBUTING.md).
+# Below 1.0 a breaking change releases a minor version; 1.0.0 is tagged by hand.
 [tool.semantic_release]
 tag_format = "v{version}"  # the form the version source above reads
 allow_zero_version = true
@@ -107,8 +108,8 @@ allowed_tags = [
     "docs", "style", "refactor", "test",
     "chore", "build", "ci", "revert", "security", "deprecate",
 ]
-# The defaults, stated because the scheme depends on them: a squash commit is read
-# line by line, and its body is empty (a repository setting), so only the title counts.
+# These defaults also apply to preserved issue/review messages: a conventional
+# line in a body can affect the release. Merge commit messages themselves are ignored.
 ignore_merge_commits = true
 parse_squash_commits = true
 
