@@ -7,7 +7,13 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from nci_si_mcp import http_client
-from nci_si_mcp.bounds import Budget, CallDeadlineError, budgeted, deadline_scope
+from nci_si_mcp.bounds import (
+    Budget,
+    CallDeadlineError,
+    RequestBudgetError,
+    budgeted,
+    deadline_scope,
+)
 from nci_si_mcp.config import Settings
 from nci_si_mcp.errors import correlated
 from nci_si_mcp.http_client import RequestRecord, UpstreamRejectedError
@@ -172,6 +178,26 @@ class DeadlineHttpTest(ServerTestCase):
             [(1, None)],
         )
 
+    def test_request_budget_refusal_does_not_count_as_an_entered_deadline_attempt(self):
+        """Given a budget refusal, when work later enters, then only that send is counted."""
+        server = self.serve()
+        client = self.observed_client(server)
+        with deadline_scope(10):
+            with budgeted(Budget(requests=0)), self.assertRaises(RequestBudgetError) as refused:
+                client.get_json("/refused")
+            self.assertEqual(
+                refused.exception.details, {"bound": "requests", "limit": 0, "reached": 0}
+            )
+            self.assertEqual(server.seen, [])
+            self.assertEqual(self.records, [])
+            with budgeted(Budget(requests=1)):
+                self.assertEqual(client.get_json("/eligible"), {"ok": True})
+            self.clock.advance(10)
+            expired = call("read", lambda: client.get_json("/expired"))
+        self.assertEqual(expired["error"]["details"], {"surface": "evs", "attempts": 1})
+        self.assertEqual([path for path, _ in server.seen], ["/eligible"])
+        self.assertEqual([(record.attempt, record.failure) for record in self.records], [(1, None)])
+
     def test_backoff_that_cannot_fit_never_sleeps_or_retries(self):
         """Given insufficient time for backoff, retry fails without doing more work."""
         for seconds in (0.125, 0.25):
@@ -328,24 +354,26 @@ class DeadlineHttpTest(ServerTestCase):
 
     def test_expiry_at_controlled_timeout_construction_prevents_exchange(self):
         """Given expiry during timeout construction, when controlled, then no exchange starts."""
-        server = self.serve()
-        policy = TimedPolicy(server.url + "/x")
-        client = self.observed_client(server, request_policy=policy)
-        readings = iter((0.0, 1.0))
+        for instants in ((0.0, 1.0), (0.0, 0.0, 1.0)):
+            with self.subTest(instants=instants):
+                server = self.serve()
+                policy = TimedPolicy(server.url + "/x")
+                client = self.observed_client(server, request_policy=policy)
+                readings = iter(instants)
 
-        def monotonic():
-            return next(readings, 1.0)
+                def monotonic(readings=readings):
+                    return next(readings, 1.0)
 
-        with (
-            patch("nci_si_mcp.bounds.monotonic", monotonic),
-            deadline_scope(1),
-            self.assertRaises(CallDeadlineError) as raised,
-        ):
-            client.get_json("/x")
-        self.assertEqual(raised.exception.details, {"attempts": 0})
-        self.assertEqual(policy.timeouts, [])
-        self.assertEqual(server.seen, [])
-        self.assertEqual(self.records, [])
+                with (
+                    patch("nci_si_mcp.bounds.monotonic", monotonic),
+                    deadline_scope(1),
+                    self.assertRaises(CallDeadlineError) as raised,
+                ):
+                    client.get_json("/x")
+                self.assertEqual(raised.exception.details, {"attempts": 0})
+                self.assertEqual(policy.timeouts, [])
+                self.assertEqual(server.seen, [])
+                self.assertEqual(self.records, [])
 
     def test_expiry_before_uncontrolled_transport_is_a_deadline_refusal(self):
         """Given expiry before an uncontrolled send, when requested, then no transport opens."""

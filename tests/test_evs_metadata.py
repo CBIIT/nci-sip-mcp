@@ -96,7 +96,7 @@ class TerminologyMetadataTest(ServerFixture):
         self.assertFalse(failed)
         self.assertEqual([item["release"] for item in result["terminologies"]], ["26.06e"])
 
-    def test_missing_null_and_falsy_current_ncit_tags_keep_no_channel_release_behavior(self):
+    def test_missing_null_and_falsy_current_ncit_tags_keep_channel_selection_behavior(self):
         cases = (
             ("absent", None, False),
             ("null", None, True),
@@ -120,6 +120,16 @@ class TerminologyMetadataTest(ServerFixture):
                 self.assertTrue(failed)
                 self.assertEqual(result["error"]["code"], "release_not_available")
                 self.assertEqual(result["error"]["details"], {"requested": "ncit", "source": "evs"})
+                valid = terminology_row("26.07d", monthly="true")
+                for rows in ([row, valid], [valid, row]):
+                    self.evs.rows = rows
+
+                    failed, result = self.call("list_terminologies")
+
+                    self.assertFalse(failed)
+                    self.assertEqual(
+                        [item["release"] for item in result["terminologies"]], ["26.07d"]
+                    )
 
     def test_valid_ncit_tags_still_select_the_configured_channel(self):
         self.evs.rows = listing(
