@@ -147,7 +147,7 @@ Extend `models.py`'s per-concept fields into one `ProvenanceEnvelope` attached *
 One client for all surfaces, replacing `EVSClient._get_json` and the per-module ad hoc calls:
 
 - JSON API GET/POST requests send `Accept: application/json` (several caDSR routes return HTML otherwise); the export listing explicitly requests bounded text. Both carry the correlation header (M7.1).
-- Retries only `5xx` and connection errors, with jittered backoff, **and counts every attempt against the call's `Budget`** (A5.3). Honours `Retry-After` on `429`.
+- Retries `5xx`, `429` and connection errors except TLS certificate verification failures, with jittered backoff, **and counts only entered attempts against the call's `Budget`** (A5.3). Honours `Retry-After` on `429`.
 - Classifies the response before returning it (§3.1): status, content type, webMethods envelope, FHIR `OperationOutcome`.
 - Exposes a request-log hook. In production it feeds the audit record; under the acceptance suite it is what the fixture server mirrors.
 - Holds credentials (licence keys, any caDSR credential) from configuration and never logs them.

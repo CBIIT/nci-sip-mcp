@@ -1,5 +1,7 @@
 """What EVS says of a terminology and of a concept's place in its hierarchy reaches the caller."""
 
+from dataclasses import replace
+
 from fakes import concept, terminology_row
 from test_server import ServerFixture
 
@@ -65,6 +67,85 @@ class TerminologyMetadataTest(ServerFixture):
 
         self.assertFalse(failed)
         self.assertEqual(result["terminologies"][1].get("tags"), {})
+
+    def test_truthy_non_mapping_current_ncit_tags_make_listing_unavailable(self):
+        for tags in ("monthly", 1, True, ["monthly"]):
+            malformed = terminology_row()
+            malformed["tags"] = tags
+            valid = terminology_row("26.07d", monthly="true")
+            for listed in ([malformed], [malformed, valid], [valid, malformed]):
+                with self.subTest(tags=tags, versions=[row["version"] for row in listed]):
+                    self.evs.rows = listed
+
+                    result = self.session(lambda client: client.call_tool("list_terminologies", {}))
+                    structured = result.structured_content
+                    error = structured.get("error", {}) if isinstance(structured, dict) else {}
+
+                    self.assertTrue(result.is_error)
+                    self.assertEqual(error.get("code"), "release_not_available")
+                    self.assertEqual(error.get("details"), {"requested": "ncit", "source": "evs"})
+                    self.assertNotIn("terminologies", structured or {})
+
+    def test_malformed_tags_on_a_non_current_ncit_release_do_not_fail_listing(self):
+        malformed = terminology_row("26.05e", latest=False)
+        malformed["tags"] = ["monthly"]
+        self.evs.rows = [malformed, terminology_row()]
+
+        failed, result = self.call("list_terminologies")
+
+        self.assertFalse(failed)
+        self.assertEqual([item["release"] for item in result["terminologies"]], ["26.06e"])
+
+    def test_missing_null_and_falsy_current_ncit_tags_keep_channel_selection_behavior(self):
+        cases = (
+            ("absent", None, False),
+            ("null", None, True),
+            ("empty mapping", {}, True),
+            ("empty list", [], True),
+            ("empty string", "", True),
+            ("zero", 0, True),
+            ("false", False, True),
+        )
+        for name, tags, present in cases:
+            with self.subTest(tags=name):
+                row = terminology_row()
+                if present:
+                    row["tags"] = tags
+                else:
+                    row.pop("tags")
+                self.evs.rows = [row]
+
+                failed, result = self.call("list_terminologies")
+
+                self.assertTrue(failed)
+                self.assertEqual(result["error"]["code"], "release_not_available")
+                self.assertEqual(result["error"]["details"], {"requested": "ncit", "source": "evs"})
+                valid = terminology_row("26.07d", monthly="true")
+                for rows in ([row, valid], [valid, row]):
+                    self.evs.rows = rows
+
+                    failed, result = self.call("list_terminologies")
+
+                    self.assertFalse(failed)
+                    self.assertEqual(
+                        [item["release"] for item in result["terminologies"]], ["26.07d"]
+                    )
+
+    def test_valid_ncit_tags_still_select_the_configured_channel(self):
+        self.evs.rows = listing(
+            {"version": "26.09c", "tags": {"monthly": "false", "weekly": "true"}},
+            {"version": "26.09d", "tags": {"monthly": "true", "weekly": "false"}},
+        )
+        for channel, expected in (("monthly", "26.09d"), ("weekly", "26.09c")):
+            with self.subTest(channel=channel):
+                settings = replace(self.settings, release_channel=channel)
+                self.settings = settings
+                self.context.settings = settings
+
+                failed, result = self.call("list_terminologies")
+
+                self.assertFalse(failed)
+                self.assertEqual([item["release"] for item in result["terminologies"]], [expected])
 
     def test_malformed_terminology_metadata_fails_the_listing(self):
         # NCIt's tags are read by release selection first; another terminology's are not.
