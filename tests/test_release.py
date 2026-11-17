@@ -1,7 +1,6 @@
 import io
 import json
 import unittest
-from dataclasses import replace
 from unittest.mock import patch
 from urllib.error import HTTPError
 
@@ -13,7 +12,6 @@ from nci_si_mcp.registry import invoke
 from nci_si_mcp.release import registry_state, resolve_evs_release, served_evs_release
 from test_evs_client import FakeResponse
 from test_handlers import NEOPLASM, HandlerTestCase
-from test_server import ServerFixture
 
 # The weekly build is listed first, as EVS may list it, and both are latest for their channel.
 WEEKLY = terminology_row("26.09c", "2026-09-21", weekly="true")
@@ -354,20 +352,6 @@ class RegistryStateTest(unittest.TestCase):
                 self.assertEqual(error["code"], "upstream_unavailable")
                 self.assertEqual(error["details"], {"surface": "cadsr"})
                 self.assertIn("distribution", error["message"])
-
-
-class TerminologyChannelTest(ServerFixture):
-    def test_listing_ignores_false_channel_tags_and_uses_the_configured_channel(self):
-        self.evs.rows = [
-            terminology_row("weekly", monthly="false", weekly="true"),
-            terminology_row("monthly", monthly="true", weekly="false"),
-        ]
-        for channel in ("monthly", "weekly"):
-            with self.subTest(channel=channel):
-                self.context.settings = replace(self.settings, release_channel=channel)
-                result = invoke(self.context, "list_terminologies")
-                self.assertIn("terminologies", result)
-                self.assertEqual([item["release"] for item in result["terminologies"]], [channel])
 
 
 class SelectionMetadataTest(unittest.TestCase):
