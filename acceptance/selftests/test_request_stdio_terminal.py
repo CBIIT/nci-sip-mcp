@@ -9,12 +9,14 @@ import socket
 import sys
 import threading
 import time
+from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import anyio
 import pytest
 from mcp.shared.exceptions import MCPError
-from test_request_stdio import _reap_for_test, _stop_child_for_test
+from test_request_stdio import PROCESS_SAFETY_SECONDS, _reap_for_test, _stop_child_for_test
 from test_request_supervision import authorization, failure_leaves
 
 from nci_si_acceptance import request_children, request_stdio
@@ -465,7 +467,68 @@ def test_sdk_startup_error_is_delivered_while_process_cleanup_is_held(
         assert not caller.is_alive()
 
 
-def test_sdk_exit_failure_after_ready_preserves_original_event(terminal_case, monkeypatch):
+@pytest.fixture
+def _sdk_marker_schedule(terminal_case, monkeypatch, request):
+    if not request.param:
+        yield
+        return
+    owner, _, _, _ = terminal_case
+    created, release = threading.Event(), threading.Event()
+    actual_open, actual_register, actual_cleanup = (
+        Path.open,
+        owner.register_completion,
+        owner._cleanup,
+    )
+
+    @contextmanager
+    def held_marker(stream):
+        with stream:
+            created.set()
+            assert release.wait(PROCESS_SAFETY_SECONDS)
+            yield stream
+
+    def open_marker(path, mode="r", *args, **kwargs):
+        stream = actual_open(path, mode, *args, **kwargs)
+        return (
+            held_marker(stream)
+            if path == owner.run.directory / "failed" and mode == "x"
+            else stream
+        )
+
+    def register(resource, **kwargs):
+        token = actual_register(resource, **kwargs)
+        if isinstance(resource, StdioOwner):
+            actual_finish = resource.finish
+
+            def finish(deadline):
+                release.set()
+                return actual_finish(deadline)
+
+            monkeypatch.setattr(resource, "finish", finish)
+        return token
+
+    def cleanup(errors, *, terminal):
+        try:
+            assert created.wait(PROCESS_SAFETY_SECONDS)
+            return actual_cleanup(errors, terminal=terminal)
+        finally:
+            release.set()
+
+    monkeypatch.setattr(Path, "open", open_marker)
+    monkeypatch.setattr(owner, "register_completion", register)
+    monkeypatch.setattr(owner, "_cleanup", cleanup)
+    try:
+        yield
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize(
+    "_sdk_marker_schedule", [False, True], indirect=True, ids=["immediate-marker", "delayed-marker"]
+)
+def test_sdk_exit_failure_after_ready_preserves_original_event(
+    terminal_case, monkeypatch, _sdk_marker_schedule
+):
     owner, _, _, _ = terminal_case
     original = LookupError("Owned SDK exit failed after readiness")
     completed = threading.Event()
@@ -492,7 +555,8 @@ def test_sdk_exit_failure_after_ready_preserves_original_event(terminal_case, mo
     assert getattr(listing, "tools", unlisted) == []
     assert exit_seen
     assert outward is not None
-    assert any(error is original for error in failure_leaves(outward))
+    assert any(error is original for error in failure_leaves(outward)), outward
+    assert sum(error is original for error in failure_leaves(outward)) == 1
 
 
 @pytest.fixture
