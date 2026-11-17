@@ -168,9 +168,48 @@ def test_observer_failure_is_not_repeated_after_recovered_terminal_lookup(
         lock.close()
 
 
-@pytest.mark.parametrize("initiating", [False, True], ids=["terminal", "initiating"])
-def test_attached_refusal_is_one_event_after_real_completion(tmp_path, calls, initiating):
+def _transient_terminal_marker_lookup(owner, monkeypatch, enabled):
+    if not enabled:
+        return
+    actual_terminal, actual_record = owner._terminal_failures, owner.run._failure_record
+    first_terminal = True
+    marker_reread = 2
+
+    def terminal_lookup(*args, **kwargs):
+        nonlocal first_terminal
+        if not first_terminal:
+            return actual_terminal(*args, **kwargs)
+        first_terminal = False
+        reads = 0
+
+        def fail_second_read():
+            nonlocal reads
+            reads += 1
+            if reads == marker_reread:
+                raise OSError("Owned transient marker lookup failure")
+            return actual_record()
+
+        with monkeypatch.context() as scoped:
+            scoped.setattr(owner.run, "_failure_record", fail_second_read)
+            return actual_terminal(*args, **kwargs)
+
+    monkeypatch.setattr(owner, "_terminal_failures", terminal_lookup)
+
+
+@pytest.mark.parametrize(
+    "initiating,lookup_fault,expected_reasons",
+    [
+        (False, False, ["transport"]),
+        (True, False, ["transport"]),
+        (False, True, ["accounting", "transport"]),
+    ],
+    ids=["terminal", "initiating", "recovered-lookup"],
+)
+def test_attached_refusal_is_one_event_after_real_completion(
+    tmp_path, calls, monkeypatch, initiating, lookup_fault, expected_reasons
+):
     owner = supervisor(tmp_path / "run")
+    _transient_terminal_marker_lookup(owner, monkeypatch, lookup_fault)
     resource = calls(lambda: b"owned completion finished")
     original = LookupError("Owned caller failure")
     outward = None
@@ -202,7 +241,9 @@ def test_attached_refusal_is_one_event_after_real_completion(tmp_path, calls, in
     if initiating:
         assert leaves[0] is original
         leaves = leaves[1:]
-    assert [(type(error), error.reason) for error in leaves] == [(RequestPolicyError, "transport")]
+    assert [(type(error), error.reason) for error in leaves] == [
+        (RequestPolicyError, reason) for reason in expected_reasons
+    ]
 
 
 @pytest.mark.parametrize("release_before_cleanup", [False, True])
