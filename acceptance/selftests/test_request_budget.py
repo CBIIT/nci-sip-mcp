@@ -37,7 +37,7 @@ from nci_si_acceptance.request_authorization import (
     RequestGrant,
     RunDescriptor,
 )
-from nci_si_acceptance.request_budget import AttemptLease, ControlledRun
+from nci_si_acceptance.request_budget import AttemptLease, ControlledRun, LedgerSnapshot
 from nci_si_mcp.http_client import RequestPolicyError
 
 # This explicit local consumer exercises shared accounting through the real HttpClient.
@@ -409,6 +409,32 @@ def test_inflight_exhaustion_preserves_admitted_read_receipts(tmp_path):
             assert len(upstream.log()) == 1
         finally:
             stop_actor(child)
+
+
+def test_snapshot_reads_committed_counters_without_reserving_a_writer(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as writer:
+            writer.execute("BEGIN IMMEDIATE")
+            writer.execute("UPDATE run SET logical=1")
+            try:
+                try:
+                    observed = run.snapshot()
+                except RequestPolicyError as error:
+                    observed = error
+            finally:
+                writer.rollback()
+        assert isinstance(observed, LedgerSnapshot), observed
+        assert (
+            observed.state,
+            observed.logical,
+            observed.attempts,
+            observed.transport_entries,
+            observed.pending_receipts,
+            observed.observation_complete,
+            observed.failure,
+        ) == ("open", 0, 0, 0, 0, True, None)
+        after = run.snapshot()
+        assert (after.logical, after.failure) == (0, None)
 
 
 def test_real_sqlite_contention_closes_admission(tmp_path):
