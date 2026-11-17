@@ -680,11 +680,12 @@
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
 # Reviewed #474 rekey: issuecomment-6780656194; historical SURVIVED retained.
+# Reviewed #507 rekey: issuecomment-6958389395; unchanged predicate and invariant.
 - file: "acceptance/src/nci_si_acceptance/request_budget.py"
   qualname: "ControlledRun.snapshot"
   operator: "boolean:drop:0"
-  site: "/body/0/body/5/value/0/keywords/11/value/0"
-  context: "2cdfbf91c8166fcae58d8c84243992a679420a2b84a4984cef8e61857c5ca3ef"
+  site: "/body/1/body/5/value/0/keywords/11/value/0"
+  context: "2577abfc67c3debb06f831d657d33598ca81a7e36b22182f61a9b914a1787303"
   original: "d88ea2fcfa71baf2627048901517cae57af041e8ff5ffcba3916e2fcb5581e79"
   mutated: "656b4a887b603dc985ba0a78ac5c5cb402e2ab188ba5e945c5b208867fe681ea"
   reason: "Every returned snapshot satisfies pending_receipts <= active. Hence active == 0 implies pending == 0; dropping the pending conjunct cannot change a returned completion flag. Corrupt pending > active is refused by the independently tested cross-field bound."
@@ -700,11 +701,12 @@
   reason: "The owning inputs are STRICT SQLite INTEGER columns and count(*), with NULL rejected. SQLite yields int rather than Python bool; comparison TypeError for NULL is translated at the same connection boundary to the identical terminal accounting refusal. No public call accepts arbitrary _count inputs."
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
+# Reviewed #507 rekey: issuecomment-6958389395; only the existing host-conditional URI site.
 - file: "acceptance/src/nci_si_acceptance/request_budget.py"
   qualname: "ControlledRun._connection"
   operator: "boolean:literal"
   site: "/body/1/body/1/value/0/keywords/0/value/0"
-  context: "c5758b4ceb53d455e33b21003af23bac80af3915189d0eb0951e0c3a3a418f2c"
+  context: "e0f919dab3e08b75aea847f9f7c1c02856dd9a1dec0df6fc6f8e9908fc7cca8f"
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Conditional host equivalence: when SQLite is compiled with USE_URI, URI parsing already applies even with uri=False; native positive/missing-mode=rw controls are identical. Keep uri=True for portability: on a build where this flag matters, existing successful-run and missing-state controls kill this mutation. This is not a universal URI equivalence."
@@ -1161,11 +1163,12 @@
   mutated: "4607b19206e10256291b395e453a9530afe154b883a9654b0f74704004a6cc13"
   reason: "Supported NativeRun.start stores the controller before setting entered=True, and no supported lifecycle clears that owner. Thus entered=True implies owner is not None; entered=False returns unchanged in both forms. External internal-attribute mutation is not a supported lifecycle. This is the exact recorded S3/154 static proof, not an observed kill. Reassess if the owner/entered lifecycle changes."
 # Approved: #495 comment 6896703526 / #479 comment 6896697491; exact attempt2 S3/141.
+# Reviewed #507 rekey: issuecomment-6958389395; unchanged predicate and exception invariant.
 - file: "acceptance/src/nci_si_acceptance/request_supervision.py"
   qualname: "SupervisedRun._terminal_failures.observe"
   operator: "boolean:drop:0"
-  site: "/body/2/test/0/values/1"
-  context: "cd62511d8d74384fa7c045645cd7b849ca6aed177ccf3b17dad997d9dd0cc935"
+  site: "/body/3/test/0/values/1"
+  context: "c3c71193c107d43c446ce97d9831426bb94c8c133d18ed202e201b59d3351d82"
   original: "41b805770df3da71f6e0e83c65f013e572ef3679083cdebb3b727a96c96c2c35"
   mutated: "80fbb4f92b578a1b995522c0071f70a4328cd42fcca1eab8a1b3e2f314dfdbb8"
   reason: "Supported errors are list[BaseException] with valid exception-group members, so no element is None and identity-recursive _contains has no side effects. For event=None both forms append the same RequestPolicyError; for non-None events the remaining operand is identical. This is the exact recorded S3/141 static proof, not an observed kill. Reassess if the error invariant or helper changes."
