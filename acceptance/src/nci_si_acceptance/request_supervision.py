@@ -295,7 +295,7 @@ class SupervisedRun:
             resources.extend(self._settle_completions())
             self._resources_complete = not resources
         errors.extend(resources)
-        errors.extend(self._observed_failures(errors, observe_terminal=not known))
+        errors.extend(self._observed_failures(errors, include_unrecorded=not known))
 
     def _settle_completions(self) -> list[BaseException]:
         deadline = self.cleanup_deadline()
@@ -330,27 +330,34 @@ class SupervisedRun:
             errors.append(error)
 
     def _observed_failures(
-        self, errors: list[BaseException], *, observe_terminal: bool
+        self, errors: list[BaseException], *, include_unrecorded: bool
     ) -> list[BaseException]:
         observed: list[BaseException] = list(self._child_errors.values())
         if self._observer_error is not None:
             observed.append(self._observer_error)
         observed.extend(self._recording_errors)
-        if self._controlled_cleanup and observe_terminal:
-            observed.extend(self._terminal_failures(errors))
+        if self._controlled_cleanup:
+            # Settlement can publish the original event after an earlier lookup failed.
+            observed.extend(
+                self._terminal_failures(errors + observed, include_unrecorded=include_unrecorded)
+            )
         return [error for error in observed if not self._contains(errors, error)]
 
     def _seal_registry(self) -> None:
         self._registrations.append(None)
         self._completions.seal()
 
-    def _terminal_failures(self, errors: list[BaseException]) -> list[BaseException]:
+    def _terminal_failures(
+        self, errors: list[BaseException], *, include_unrecorded: bool = True
+    ) -> list[BaseException]:
         retained: list[BaseException] = []
 
         def observe() -> None:
             # Validate private identity and counters before selecting the event.
             self.run.snapshot()
             failure, event = self.run._failure_record()
+            if event is None and not include_unrecorded:
+                return
             if failure is not None and (event is None or not self._contains(errors, event)):
                 retained.append(event or RequestPolicyError(failure))
 
