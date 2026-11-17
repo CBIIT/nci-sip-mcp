@@ -129,10 +129,13 @@ class Budget:
         if self.per_kind is not None:
             self.per_kind = min(self.per_kind, HARD_MAX_PER_KIND)
 
-    def request(self) -> None:
+    def check_request(self) -> None:
         if self.attempts >= self.requests:
             self.exhausted = True
             raise RequestBudgetError(self.requests, self.attempts)
+
+    def request(self) -> None:
+        self.check_request()
         self.attempts += 1
 
     def node_bound(self, total: int, kind: str) -> str | None:

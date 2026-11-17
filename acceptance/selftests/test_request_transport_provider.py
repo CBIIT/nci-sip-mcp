@@ -1,8 +1,11 @@
 """Production provider contracts observed through HttpClient and real owned sockets."""
 
 import ssl
+from collections.abc import Callable
 from contextlib import contextmanager
+from http.client import HTTPSConnection
 from importlib import import_module, util
+from urllib.error import URLError
 from urllib.request import Request
 
 import pytest
@@ -10,15 +13,89 @@ from http_receiver import WireReceiver, tls_certificate
 
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_si_acceptance.request_transport import TransportCleanupError
 from nci_si_mcp.errors import correlated
-from nci_si_mcp.http_client import HttpClient, RequestPolicyError, UpstreamError
+from nci_si_mcp.http_client import (
+    HttpClient,
+    RequestPolicyError,
+    UpstreamError,
+    UpstreamUnavailableError,
+)
 from nci_si_mcp.invocation import call
+
+TLS_URL = "https://tls.example/owned"
+SANITIZED_TLS_MESSAGE = "Controlled upstream certificate verification failed."
 
 
 def provider(run):
     name = "nci_si_acceptance.request_transport"
     assert util.find_spec(name) is not None, "The authorized production HTTP provider must exist"
     return import_module(name).ControlledHttpPolicy(run)
+
+
+class EnteredTransport:
+    @property
+    def refused_before_entry(self):
+        return False
+
+    def __call__(self):
+        pass
+
+    def invoke[T](self, *, admit: Callable[[], None], operation: Callable[[], T]) -> T:
+        admit()
+        return operation()
+
+
+def https_owner(tmp_path):
+    grant = RequestGrant("GET", TLS_URL, (("accept", "application/json"),))
+    owner = SupervisedRun.create(
+        Authorization((grant,), Limits(response_bytes=64, total_bytes=8194), "a" * 64),
+        tmp_path,
+    )
+    return owner
+
+
+def direct_exchange(owner):
+    request = Request("https://tls.example/owned", headers={"Accept": "application/json"})
+    with provider(owner.run).request(request) as controlled:
+        return controlled.exchange(
+            timeout_seconds=1,
+            response_limit=64,
+            on_start=EnteredTransport(),
+        )
+
+
+def exception_links(error):
+    links = [error.__cause__, error.__context__]
+    if isinstance(error, URLError):
+        links.append(error.reason)
+    if isinstance(error, TransportCleanupError):
+        links.extend([error.initiating, *error.cleanup_errors])
+    if isinstance(error, BaseExceptionGroup):
+        links.extend(error.exceptions)
+    return [linked for linked in links if isinstance(linked, BaseException)]
+
+
+def exception_chain(error):
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        pending.extend(exception_links(current))
+
+
+def assert_sanitized_tls_chain(error):
+    retained_certificate_messages = [
+        linked.args
+        for linked in exception_chain(error)
+        if isinstance(linked, ssl.SSLCertVerificationError)
+        and linked.args != (SANITIZED_TLS_MESSAGE,)
+    ]
+    assert retained_certificate_messages == []
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
@@ -255,14 +332,15 @@ def test_redirect_never_moves_credentials_or_exposes_private_fields(tmp_path, st
 @pytest.mark.parametrize(
     "trusted,certificate_address,accepted",
     [
-        pytest.param(False, "127.0.0.1", False, id="False"),
-        pytest.param(True, "127.0.0.1", True, id="True"),
+        pytest.param(False, "127.0.0.1", False, id="untrusted"),
+        pytest.param(True, "127.0.0.1", True, id="trusted"),
         pytest.param(True, "127.0.0.2", False, id="trusted-wrong-host"),
     ],
 )
 def test_tls_verification_precedes_credential_http(
-    tmp_path, monkeypatch, trusted, certificate_address, accepted
+    tmp_path, monkeypatch, caplog, trusted, certificate_address, accepted
 ):
+    """Given synthetic TLS trust cases, when connected, then only verified hosts reach HTTP."""
     server_context, certificate = tls_certificate(tmp_path, address=certificate_address)
     if trusted:
         client_context = ssl.create_default_context(cafile=certificate)
@@ -287,20 +365,79 @@ def test_tls_verification_precedes_credential_http(
                 receiver.origin,
                 label="owned",
                 timeout_seconds=1,
-                max_attempts=1,
+                max_attempts=3,
                 retry_backoff_seconds=0,
                 max_response_bytes=64,
                 size_bound="owned",
                 credentials={"Authorization": credential},
                 request_policy=provider(owner.run),
             )
-            try:
+            records = []
+            client.on_request = records.append
+            caplog.set_level("DEBUG", logger="nci_si_mcp")
+            if accepted:
                 result = client.get_json("/owned")
-            except UpstreamError as error:
-                result = type(error).__name__
-        assert result == ({"ok": True} if accepted else "UpstreamUnavailableError")
+            else:
+                with pytest.raises(UpstreamError) as caught:
+                    client.get_json("/owned")
+                assert isinstance(caught.value, UpstreamUnavailableError)
+                assert caught.value.details == {"surface": "owned", "attempts": 1}
+                assert credential not in str(caught.value) + repr(caught.value.details)
+                assert_sanitized_tls_chain(caught.value)
+        if accepted:
+            assert result == {"ok": True}
+        snapshot = owner.run.snapshot()
+        assert (snapshot.attempts, snapshot.transport_entries) == (1, 1)
+        assert (snapshot.active, snapshot.pending_receipts, snapshot.observation_complete) == (
+            0,
+            0,
+            True,
+        )
+        assert [(record.attempt, record.failure) for record in records] == [
+            (1, None if accepted else "connection")
+        ]
         assert receiver.contacts == 1
         assert len(receiver.requests) == int(accepted)
         if accepted:
             assert dict(receiver.requests[0][2])["authorization"] == credential
-        assert owner.run.snapshot().transport_entries == 1
+        assert credential not in caplog.text
+
+
+def test_provider_does_not_retain_raw_tls_verification_exception(tmp_path, monkeypatch):
+    tls_failure = ssl.SSLCertVerificationError("PRIVATE-CERTIFICATE-DETAIL")
+
+    def reject_certificate(_connection):
+        raise tls_failure
+
+    monkeypatch.setattr(HTTPSConnection, "connect", reject_certificate)
+    owner = https_owner(tmp_path)
+    with pytest.raises(ssl.SSLCertVerificationError) as caught, owner:
+        direct_exchange(owner)
+
+    assert caught.value.args == (SANITIZED_TLS_MESSAGE,)
+    assert_sanitized_tls_chain(caught.value)
+
+
+def test_tls_cleanup_failure_does_not_retain_raw_certificate_exception(tmp_path, monkeypatch):
+    tls_failure = ssl.SSLCertVerificationError("PRIVATE-CERTIFICATE-DETAIL")
+    original_close = HTTPSConnection.close
+
+    def reject_certificate(_connection):
+        raise tls_failure
+
+    def close_then_fail(connection):
+        original_close(connection)
+        raise OSError("PRIVATE-CLOSE-DETAIL")
+
+    monkeypatch.setattr(HTTPSConnection, "connect", reject_certificate)
+    monkeypatch.setattr(HTTPSConnection, "close", close_then_fail)
+    owner = https_owner(tmp_path)
+    with pytest.raises(TransportCleanupError) as caught, owner:
+        direct_exchange(owner)
+
+    assert type(caught.value) is TransportCleanupError
+    assert caught.value.initiating.args == (SANITIZED_TLS_MESSAGE,)
+    assert tuple(map(str, caught.value.cleanup_errors)) == (
+        "Controlled upstream transport cleanup failed.",
+    )
+    assert_sanitized_tls_chain(caught.value)
