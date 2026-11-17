@@ -319,6 +319,59 @@ class CohortTest(WorkflowFixture):
                     )
                     self.assert_cohort_edges(result)
 
+    def test_cohort_member_window_preserves_the_hard_edge_bound(self):
+        """Given two complete levels, a large member window still admits only 5,000 edges."""
+        cases = (
+            (5000, 0, {"occurred": False}),
+            (
+                5001,
+                1,
+                {
+                    "occurred": True,
+                    "bound": "edges",
+                    "limit": 5000,
+                    "reached": 5000,
+                    "omitted": 1,
+                    "exact": False,
+                },
+            ),
+        )
+        for edge_count, omitted, truncation in cases:
+            with self.subTest(upstream_edges=edge_count):
+                expected_pairs = self.cohort_edge_fixture(omitted)
+                self.assertEqual(len(expected_pairs), edge_count)
+                result = self.call(
+                    "expand_cohort",
+                    conceptCode="C1",
+                    maxDepth=2,
+                    maxNodes=1000,
+                )
+                self.assertEqual(len(result["codes"]), 201)
+                self.assertEqual(set(result["codes"]), {f"C{i}" for i in range(1, 202)})
+                self.assertEqual(result["excluded"], [])
+                self.assertEqual(len(result["edges"]), 5000)
+                children = self.edges_of(result, "child")
+                actual_pairs = {(edge["sourceCode"], edge["targetCode"]) for edge in children}
+                self.assertEqual(len(actual_pairs), 5000)
+                self.assertLessEqual(actual_pairs, expected_pairs)
+                self.assertEqual(len(expected_pairs - actual_pairs), omitted)
+                self.assertEqual(result["truncation"], truncation)
+
+    def cohort_edge_fixture(self, extra_edge):
+        """Specify public child/parent pairs, then build full, exclusion-free EVS concepts."""
+        pairs = {(f"C{child}", "C1") for child in range(2, 102)}
+        pairs.update(
+            (f"C{leaf}", f"C{middle}") for middle in range(2, 51) for leaf in range(102, 202)
+        )
+        if extra_edge:
+            pairs.add(("C102", "C51"))
+        self.evs.concepts = {
+            f"C{i}": concept(f"C{i}", active=True, children=[], roles=[]) for i in range(1, 202)
+        }
+        for child, parent in sorted(pairs):
+            self.evs.concepts[parent]["children"].append({"code": child})
+        return pairs
+
     def assert_cohort_edges(self, result):
         present = set(result["codes"])
         expected = {

@@ -32,7 +32,7 @@ def retained(node):
 def test_real_snapshot_retains_refusal_before_cleanup(tmp_path, request, capsys):
     run = ledger(tmp_path)
     with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
-        blocker.execute("BEGIN IMMEDIATE")
+        blocker.execute("BEGIN EXCLUSIVE")
         with pytest.raises(RequestPolicyError) as caught:
             snapshot(run, request.node)
         assert caught.value.reason == "accounting" and caught.value.__suppress_context__
@@ -75,7 +75,7 @@ def controlled_refusal(monkeypatch):
         if not injected and current_thread() is main_thread() and ready:
             injected = True
             with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
-                blocker.execute("BEGIN IMMEDIATE")
+                blocker.execute("BEGIN EXCLUSIVE")
                 try:
                     return original(run)
                 except RequestPolicyError as error:

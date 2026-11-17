@@ -6,7 +6,7 @@ from itertools import batched
 from typing import Annotated, Any, NotRequired, TypedDict
 
 from . import cadsr_content, cadsr_matching, content, seam
-from .bounds import Budget, budgeted, current_budget
+from .bounds import HARD_MAX_EDGES, Budget, budgeted, current_budget
 from .caching import select_cache_hint
 from .catalogue import exclusion_codes, load_catalogue
 from .context import Context
@@ -318,14 +318,13 @@ def _cohort(
     exclusions = exclusion_codes(context.settings, "ncit")
     load_catalogue(context.evs, selected, exclusions)
     # Roles are read independently: a small cohort bound must not hide an exclusion.
-    budget.depth, budget.nodes, budget.edges = 1, 1000, 5000
+    budget.depth, budget.nodes, budget.edges = 1, 1000, HARD_MAX_EDGES
     roles = content._graph_record(
         content._graph(context, selected, code, ["role"], budget, exclusions=exclusions)
     )
     excluded = _exclusions(roles, code)
     withheld = set() if negative else {row["code"] for row in excluded}
     budget.depth, budget.nodes = depth, maximum + len(withheld) + 1
-    budget.edges = budget.nodes**2
     require("get_concept_hierarchy")
     graph = content._graph_record(content._graph(context, selected, code, ["child"], budget))
     return _cohort_result(graph, roles, excluded, withheld, maximum)
@@ -395,7 +394,8 @@ def expand_cohort(
     exclusion roles withhold.
 
     Returns codes, excluded (every exclusion assertion, whether or not the code is kept), edges
-    and truncation naming any bound that omitted content. Only the root's exclusion roles govern
+    and truncation naming any bound that omitted content. The role and descendant walks each keep
+    the hard traversal edge bound, regardless of maxNodes. Only the root's exclusion roles govern
     the cohort, not those of descendants.
 
     not_found for an unknown code; bound_exceeded when the request limit is spent before a

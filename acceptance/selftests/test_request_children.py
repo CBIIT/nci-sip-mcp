@@ -18,6 +18,7 @@ from test_request_supervision import authorization, failure_leaves, supervisor
 
 from nci_si_acceptance import request_children, request_supervision
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_si_acceptance.request_budget import ControlledRun
 from nci_si_acceptance.request_children import CleanupDeadline, Completions, CompletionToken
 from nci_si_acceptance.request_stdio import _PortalCall
 from nci_si_acceptance.request_supervision import SupervisedRun
@@ -72,7 +73,7 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
     def finish(deadline):
         actual_finish(deadline)
         facts["completion"] = (resource.thread.is_alive(), resource.result.result(timeout=0))
-        lock.execute("BEGIN IMMEDIATE")
+        lock.execute("BEGIN EXCLUSIVE")
         facts["locked"] = lock.in_transaction
         monkeypatch.setattr(owner.run, "snapshot", snapshot)
 
@@ -140,7 +141,7 @@ def test_observer_failure_is_not_repeated_after_recovered_terminal_lookup(
                 if owner._observer.is_alive():
                     raise TimeoutError("Actual observer did not finish its failure notification")
                 recorded_state = owner.run.snapshot().state
-                lock.execute("BEGIN IMMEDIATE")
+                lock.execute("BEGIN EXCLUSIVE")
                 facts["locked"] = lock.in_transaction
         except BaseException as error:  # noqa: BLE001 - assert real failure identity outside capture.
             outward = error
@@ -165,6 +166,84 @@ def test_observer_failure_is_not_repeated_after_recovered_terminal_lookup(
     finally:
         lock.rollback()
         lock.close()
+
+
+def _transient_terminal_marker_lookup(owner, monkeypatch, enabled):
+    if not enabled:
+        return
+    actual_terminal, actual_record = owner._terminal_failures, owner.run._failure_record
+    first_terminal = True
+    marker_reread = 2
+
+    def terminal_lookup(*args, **kwargs):
+        nonlocal first_terminal
+        if not first_terminal:
+            return actual_terminal(*args, **kwargs)
+        first_terminal = False
+        reads = 0
+
+        def fail_second_read():
+            nonlocal reads
+            reads += 1
+            if reads == marker_reread:
+                raise OSError("Owned transient marker lookup failure")
+            return actual_record()
+
+        with monkeypatch.context() as scoped:
+            scoped.setattr(owner.run, "_failure_record", fail_second_read)
+            return actual_terminal(*args, **kwargs)
+
+    monkeypatch.setattr(owner, "_terminal_failures", terminal_lookup)
+
+
+@pytest.mark.parametrize(
+    "initiating,lookup_fault,expected_reasons",
+    [
+        (False, False, ["transport"]),
+        (True, False, ["transport"]),
+        (False, True, ["accounting", "transport"]),
+    ],
+    ids=["terminal", "initiating", "recovered-lookup"],
+)
+def test_attached_refusal_is_one_event_after_real_completion(
+    tmp_path, calls, monkeypatch, initiating, lookup_fault, expected_reasons
+):
+    owner = supervisor(tmp_path / "run")
+    _transient_terminal_marker_lookup(owner, monkeypatch, lookup_fault)
+    resource = calls(lambda: b"owned completion finished")
+    original = LookupError("Owned caller failure")
+    outward = None
+    try:
+        with owner:
+            owner.register_completion(resource, participant="owned-completion")
+            resource.start()
+            owner.run.authorize_participant("attached-worker")
+            attached = ControlledRun.attach(
+                owner.run.descriptor, authorization(), participant="attached-worker"
+            )
+            with pytest.raises(RequestPolicyError) as refused:
+                attached.refuse("transport")
+            assert refused.value.reason == "transport"
+            if initiating:
+                raise original
+    except BaseException as error:  # noqa: BLE001 - inspect actual outward failure after settlement.
+        outward = error
+    assert (
+        resource.thread.is_alive(),
+        resource.result.result(timeout=0),
+        owner._observer.is_alive(),
+        owner.pending_owners,
+    ) == (False, b"owned completion finished", False, ())
+    report = owner.snapshot()
+    assert (report["state"], report["observationComplete"]) == ("failed", True)
+    assert outward is not None
+    leaves = failure_leaves(outward)
+    if initiating:
+        assert leaves[0] is original
+        leaves = leaves[1:]
+    assert [(type(error), error.reason) for error in leaves] == [
+        (RequestPolicyError, reason) for reason in expected_reasons
+    ]
 
 
 @pytest.mark.parametrize("release_before_cleanup", [False, True])

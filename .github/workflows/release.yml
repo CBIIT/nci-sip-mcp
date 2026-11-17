@@ -1,9 +1,9 @@
 name: Release
 
 # Tags and releases the commit on main that CI has just validated. The version
-# comes from the Conventional Commit subjects since the last tag (the rules are in
-# [tool.semantic_release] in pyproject.toml). The workflow adds a tag and a GitHub
-# release; it never pushes a commit to main.
+# comes from eligible non-merge commit messages, including bodies, since the last
+# tag (the rules are in [tool.semantic_release] in pyproject.toml). The workflow
+# adds a tag and a GitHub release; it never pushes a commit to main.
 #
 # Why `workflow_run` and not `push` or `pull_request: [closed]`:
 #   - `push` would release code whose CI has not finished, or has failed.

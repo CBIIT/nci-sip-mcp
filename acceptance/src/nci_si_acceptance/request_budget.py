@@ -291,7 +291,7 @@ class ControlledRun:
         return key
 
     @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
+    def _connection(self, *, write: bool = True) -> Iterator[sqlite3.Connection]:
         connection = None
         try:
             try:
@@ -307,7 +307,7 @@ class ControlledRun:
             )
             connection.row_factory = sqlite3.Row
             with connection:
-                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
                 self._identity(connection)
                 yield connection
         except sqlite3.Error, OSError, ValueError, TypeError, OverflowError:
@@ -544,7 +544,8 @@ class ControlledRun:
         yield LogicalRequest(self, request_id)
 
     def snapshot(self) -> LedgerSnapshot:
-        with self._connection() as connection:
+        """Read one committed ledger state without acquiring a write reservation."""
+        with self._connection(write=False) as connection:
             row = connection.execute("SELECT * FROM run").fetchone()
             state = STATES.get(row["state"])
             if state is None:

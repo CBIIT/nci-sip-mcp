@@ -76,6 +76,10 @@ handoff files contain local run authority; do not publish them. The native repor
 its existing schema and actual per-case outcomes. The separate sanitized `summary.json`
 records request accounting and whether resource observation completed.
 
+Accounting snapshots read identity, counters and related rows in one committed read
+transaction without reserving the writer. Admissions, mutations and receipts retain atomic
+write transactions; exclusive/commit contention and storage failures still fail closed.
+
 Controlled transport normalizes expected failures without retaining raw exception chains,
 including TLS certificate details. Cleanup failures retain sanitized initiating and cleanup
 exceptions; unexpected exceptions remain visible rather than being normalized.
@@ -92,6 +96,10 @@ catches it and initialization later succeeds. Both readiness waits share one dea
 an exception from an already-completed startup operation retains its original cause.
 Owner completion replays that retained cause without reclassifying it as a new cleanup
 failure. Newly raised cleanup or terminal-record lookup errors still use cleanup error handling.
+After resource settlement, newly published actual events are retained by identity even when
+an earlier lookup failed. Distinct lookup/cleanup errors remain visible, without duplicating
+an already-known fallback for an event whose original object is unavailable.
+Only an emitted fallback suppresses its repetition; a lookup error does not.
 Report publication failures propagate rather than leaving a successful command result.
 The creator retains responsibility for private run directories and evidence cleanup.
 
