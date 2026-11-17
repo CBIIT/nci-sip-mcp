@@ -69,24 +69,22 @@ class TerminologyMetadataTest(ServerFixture):
         self.assertEqual(result["terminologies"][1].get("tags"), {})
 
     def test_truthy_non_mapping_current_ncit_tags_make_listing_unavailable(self):
-        malformed = terminology_row()
-        malformed["tags"] = ["monthly"]
-        rows = (
-            [malformed],
-            [malformed, terminology_row("26.07d", monthly="true")],
-        )
-        for listed in rows:
-            with self.subTest(row_count=len(listed)):
-                self.evs.rows = listed
+        for tags in ("monthly", 1, True, ["monthly"]):
+            malformed = terminology_row()
+            malformed["tags"] = tags
+            valid = terminology_row("26.07d", monthly="true")
+            for listed in ([malformed], [malformed, valid], [valid, malformed]):
+                with self.subTest(tags=tags, versions=[row["version"] for row in listed]):
+                    self.evs.rows = listed
 
-                result = self.session(lambda client: client.call_tool("list_terminologies", {}))
-                structured = result.structured_content
-                error = structured.get("error", {}) if isinstance(structured, dict) else {}
+                    result = self.session(lambda client: client.call_tool("list_terminologies", {}))
+                    structured = result.structured_content
+                    error = structured.get("error", {}) if isinstance(structured, dict) else {}
 
-                self.assertTrue(result.is_error)
-                self.assertEqual(error.get("code"), "release_not_available")
-                self.assertEqual(error.get("details"), {"requested": "ncit", "source": "evs"})
-                self.assertNotIn("terminologies", structured or {})
+                    self.assertTrue(result.is_error)
+                    self.assertEqual(error.get("code"), "release_not_available")
+                    self.assertEqual(error.get("details"), {"requested": "ncit", "source": "evs"})
+                    self.assertNotIn("terminologies", structured or {})
 
     def test_malformed_tags_on_a_non_current_ncit_release_do_not_fail_listing(self):
         malformed = terminology_row("26.05e", latest=False)
