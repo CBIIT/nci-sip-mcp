@@ -11,6 +11,7 @@ from pathlib import Path
 
 import anyio
 import pytest
+from anyio.streams.buffered import BufferedByteReceiveStream
 from test_request_supervision import authorization, failure_leaves
 
 from nci_si_acceptance import request_children, request_stdio
@@ -19,6 +20,9 @@ from nci_si_acceptance.request_authorization import Authorization, Limits, Reque
 from nci_si_acceptance.request_stdio import StderrTransfer, StdioOwner
 from nci_si_acceptance.request_supervision import SupervisedRun
 from nci_si_mcp.errors import RequestPolicyError
+
+# Deadlock protection for fixture phases, not a startup or production cleanup deadline.
+PROCESS_SAFETY_SECONDS = 30
 
 
 def _stop_child_for_test(resource):
@@ -35,7 +39,7 @@ async def _reap_for_test(resource):
     process = resource.process
     if process is not None:
         # Actual-parent wait supplies the receipt even if the stop raced natural exit.
-        with anyio.fail_after(3):
+        with anyio.fail_after(PROCESS_SAFETY_SECONDS):
             await process.wait()
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
@@ -52,14 +56,15 @@ def _ready_process_handoff(monkeypatch):
         process = await original_open(*args, **kwargs)
         try:
             assert process.stdout is not None
-            with anyio.fail_after(3):
-                assert await process.stdout.receive(5) == b"ready"
+            with anyio.fail_after(PROCESS_SAFETY_SECONDS):
+                marker = await BufferedByteReceiveStream(process.stdout).receive_exactly(5)
+                assert marker == b"ready"
             return process
         except BaseException:
             with anyio.CancelScope(shield=True):
                 with suppress(ProcessLookupError):
                     process.kill()
-                with anyio.fail_after(3):
+                with anyio.fail_after(PROCESS_SAFETY_SECONDS):
                     await process.wait()
                     await process.aclose()
             raise
@@ -326,13 +331,13 @@ def test_cancel_at_first_owned_handle_settles_before_independent_fallback(
         with owner:
             owner.register_completion(resource, participant="stdio")
             resource.thread.start()
-            resource.thread.join(5)
+            resource.thread.join(3 * PROCESS_SAFETY_SECONDS)
             assert not resource.thread.is_alive()
     except BaseException as error:  # noqa: BLE001 - assert the exact initiating event below.
         outward = error
     finally:
         _stop_child_for_test(resource)
-        resource.thread.join(25)
+        resource.thread.join(3 * PROCESS_SAFETY_SECONDS)
         assert not resource.thread.is_alive()
     assert observed == {
         "returncode": expected_status,
