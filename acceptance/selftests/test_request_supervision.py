@@ -8,7 +8,7 @@ import importlib
 import importlib.util
 import inspect
 import json
-import os
+import select
 import signal
 import sqlite3
 import subprocess
@@ -17,6 +17,7 @@ import textwrap
 import threading
 import time
 from contextlib import closing, contextmanager
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,13 +25,21 @@ import pytest
 
 import nci_si_acceptance
 import nci_si_mcp
-from nci_si_acceptance import request_budget, request_children
+from nci_si_acceptance import request_budget, request_children, request_supervision
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_si_mcp.http_client import RequestPolicyError
 
 KNOWN_BODY_BYTES = 5
 OBSERVED_FAILURE_COUNT = 2
 FAILED_WORKER_EXIT = 7
+LEGACY_WORKER_GRACE_SECONDS = 10.0
+CLEANUP_WORKER = (
+    "import sys\nfrom pathlib import Path\n"
+    "print('ready', flush=True)\n"
+    "line = sys.stdin.buffer.readline()\n"
+    "if line:\n"
+    "    Path(sys.argv[1]).write_bytes(line)\n"
+)
 
 
 def failure_leaves(error):
@@ -90,73 +99,163 @@ def supervisor(directory):
     return importlib.import_module(name).SupervisedRun.create(authorization(), directory)
 
 
-@pytest.mark.skipif(not hasattr(os, "waitpid"), reason="Owns the POSIX nonterminal wait receipt")
+def close_and_reap_worker(child, wait):
+    if child.stdin is not None and not child.stdin.closed:
+        child.stdin.close()
+    if child.poll() is None:
+        child.kill()
+    try:
+        wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        wait(timeout=3)
+
+
+def finish_legacy_workers(release, helper, children):
+    release.set()
+    helper.join(request_supervision.JOIN_SECONDS)
+    if helper.is_alive():
+        for child, _wait in children:
+            if child.poll() is None:
+                child.kill()
+        helper.join(request_supervision.JOIN_SECONDS)
+    for child, wait in children:
+        close_and_reap_worker(child, wait)
+    return not helper.is_alive()
+
+
+def finish_first_worker_wait(actual_wait, clock, timeout=None):
+    result = actual_wait(timeout=timeout)
+    if result == 0:
+        clock[0] += request_children.CLEANUP_SECONDS + 1
+    return result
+
+
+def release_legacy_worker(second, release, release_sent, helper_done, helper_errors):
+    try:
+        allowance = (
+            request_children.CLEANUP_SECONDS
+            + request_supervision.STOP_SECONDS
+            + request_supervision.JOIN_SECONDS
+        )
+        if not release.wait(allowance):
+            raise TimeoutError("second public child wait was not reached")
+        if second.poll() is None and second.stdin is not None and not second.stdin.closed:
+            second.stdin.write(b"finish\n")
+            second.stdin.flush()
+            release_sent.set()
+    except BaseException as error:  # noqa: BLE001 - assert helper failures after cleanup.
+        helper_errors.append(error)
+    finally:
+        helper_done.set()
+
+
+def wait_for_legacy_worker(second, owner, waits, wait_entered, release, actual_wait, timeout=None):
+    if not waits:
+        waits.append((second.poll() is None, owner.cleanup_deadline().remaining(), timeout))
+        wait_entered.set()
+        release.set()
+    return actual_wait(timeout=timeout)
+
+
+def run_legacy_cleanup(owner, first, second):
+    try:
+        with owner:
+            owner.register_child(first, participant="first-worker", role="worker")
+            owner.register_child(second, participant="second-worker", role="worker")
+            first.stdin.close()
+    except BaseException as error:  # noqa: BLE001 - assert the caller outcome after cleanup.
+        return error
+    return None
+
+
+def assert_worker_ready(child):
+    assert child.stdin is not None and child.stdout is not None
+    assert select.select([child.stdout], [], [], 3)[0] == [child.stdout]
+    assert child.stdout.readline() == b"ready\n"
+    assert child.poll() is None
+
+
 def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypatch):
     owner = supervisor(tmp_path)
-    clock, polling = [time.monotonic()], threading.local()
-    actual_waitpid = os.waitpid
-    polls = []
+    clock = [time.monotonic()]
     monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
-    command = [sys.executable, "-I", "-c", "import sys;sys.stdin.buffer.read()"]
+    first_marker = tmp_path / "first-worker"
+    marker = tmp_path / "second-worker-completed"
     with (
         subprocess.Popen(  # noqa: S603 - fixed owned interpreter and synthetic stdin-only worker.
-            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            [sys.executable, "-I", "-c", CLEANUP_WORKER, str(first_marker)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         ) as first,
         subprocess.Popen(  # noqa: S603 - same fixed program, distinct owned worker.
-            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            [sys.executable, "-I", "-c", CLEANUP_WORKER, str(marker)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         ) as second,
     ):
-        first_wait, second_wait = first.wait, second.wait
+        assert_worker_ready(first)
+        assert_worker_ready(second)
+        actual_first_wait, actual_second_wait = first.wait, second.wait
+        wait_entered, release, helper_done, release_sent = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        helper_errors = []
+        waits = []
 
-        def finish_first(*args, **kwargs):
-            code = first_wait(*args, **kwargs)
-            if code == 0:
-                clock[0] += request_children.CLEANUP_SECONDS + 1
-            return code
-
-        def wait_second(*args, **kwargs):
-            polling.second = True
-            try:
-                return second_wait(*args, **kwargs)
-            finally:
-                polling.second = False
-
-        def waitpid(pid, options):
-            receipt = actual_waitpid(pid, options)
-            if pid == second.pid and getattr(polling, "second", False) and receipt[0] == 0:
-                polls.append(receipt)
-                second.stdin.close()
-            return receipt
-
+        finish_first = partial(finish_first_worker_wait, actual_first_wait, clock)
+        public_second_wait = partial(
+            wait_for_legacy_worker,
+            second,
+            owner,
+            waits,
+            wait_entered,
+            release,
+            actual_second_wait,
+        )
         monkeypatch.setattr(first, "wait", finish_first)
-        monkeypatch.setattr(second, "wait", wait_second)
-        monkeypatch.setattr(os, "waitpid", waitpid)
-        failure = None
+        monkeypatch.setattr(second, "wait", public_second_wait)
+        helper = threading.Thread(
+            target=release_legacy_worker,
+            args=(second, release, release_sent, helper_done, helper_errors),
+            name="release-legacy-worker",
+        )
+        helper.start()
         try:
-            try:
-                with owner:
-                    owner.register_child(first, participant="first-worker", role="worker")
-                    owner.register_child(second, participant="second-worker", role="worker")
-                    first.stdin.close()
-            except BaseException as error:  # noqa: BLE001 - assert caller outcome outside capture.
-                failure = error
-            assert polls and all(pid == 0 for pid, _status in polls)
-            assert failure is None
-            assert (first.returncode, second.returncode) == (0, 0)
-            assert all(
-                stream.closed
-                for child in (first, second)
-                for stream in (child.stdin, child.stdout, child.stderr)
-            )
-            summary = owner.snapshot()
-            assert (summary["state"], summary["observationComplete"]) == ("completed", True)
-            assert owner.cleanup_deadline().remaining() == 0
+            failure = run_legacy_cleanup(owner, first, second)
         finally:
-            # Independent bounded reaping owns only these two actual children.
-            for child, wait in ((first, first_wait), (second, second_wait)):
-                if child.poll() is None:
-                    child.kill()
-                wait(timeout=3)
+            helpers_clean = finish_legacy_workers(
+                release,
+                helper,
+                ((first, actual_first_wait), (second, actual_second_wait)),
+            )
+            monkeypatch.setattr(first, "wait", actual_first_wait)
+            monkeypatch.setattr(second, "wait", actual_second_wait)
+        assert helpers_clean
+        assert helper_done.is_set() and not helper.is_alive()
+        assert helper_errors == []
+        assert wait_entered.is_set() and waits
+        pending, remaining, timeout = waits[0]
+        assert pending and remaining == 0
+        assert timeout == request_supervision.STOP_SECONDS == LEGACY_WORKER_GRACE_SECONDS
+        assert release_sent.is_set()
+        assert failure is None
+        assert (first.returncode, second.returncode) == (0, 0)
+        assert not first_marker.exists()
+        assert marker.read_bytes() == b"finish\n"
+        assert all(
+            stream.closed
+            for child in (first, second)
+            for stream in (child.stdin, child.stdout, child.stderr)
+        )
+        summary = owner.snapshot()
+        assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+        assert owner.cleanup_deadline().remaining() == 0
 
 
 def test_initial_summary_precedes_admission(tmp_path):
