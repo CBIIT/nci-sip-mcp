@@ -4,9 +4,15 @@ The server, optional NCIt index, documentation site and validation companion are
 local components. Choose one row, then run only the linked component sections. The installer
 owns the server only. It never installs an index, documentation or the companion.
 
-Current release examples use `CBIIT/nci-sip-mcp`. Installers from v0.29.1 accept both canonical
-origins; older installers need the [old-origin instructions](installer-targets.md#verify-a-released-local-installation).
-Package, import, command, environment and data-directory names are unchanged.
+The repository URL and package namespace changed in different releases. The commands below require
+a tag that contains the NCI SIP namespace (`nci-sip-mcp`, `nci_sip_mcp`, `nci-sip-install`,
+`NCI_SIP_*`). Pre-SIP tags retain `nci-si-mcp`, `nci_si_mcp`, `nci-si-install` and `NCI_SI_*`;
+those names are not aliases in the new package. The `.nci-si-mcp` data directory remains unchanged.
+Use the [pre-SIP release instructions](installer-targets.md#pre-sip-package-release) for an older
+tag. Installers from v0.29.1 accept both exact repository origins; older installers need the
+[old-origin instructions](installer-targets.md#verify-a-released-local-installation). In Local run
+CI, PR, push and manual branch runs verify the checked-out candidate; the weekly schedule verifies
+the latest released tag.
 
 ## Combinations
 
@@ -25,8 +31,8 @@ server replaces the installer's HTTP server. Documentation uses 8080. The compan
 
 ## Prerequisites
 
-Use Python 3.14 or newer and Git. Replace `vX.Y.Z` below with the exact tag from the releases
-page. Before the server and index commands, set `SERVER_VENV`, `INDEX_VENV`, `STDIO_ROOT`,
+Use Python 3.14 or newer and Git. Replace `vX.Y.Z` below with an exact post-SIP namespace tag
+from the releases page. Before the server and index commands, set `SERVER_VENV`, `INDEX_VENV`, `STDIO_ROOT`,
 `HTTP_ROOT` and `INDEX_DATA` to five fresh absolute paths; the two installer roots must differ
 because each state record binds its transport and profile. An omitted `--profile` means `unified`;
 when selecting `evs` or `cadsr`, pass that same profile to every installer lifecycle command.

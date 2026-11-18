@@ -37,7 +37,7 @@ STEPS = [
     ("Check that the documented Python and PDM are in use (macOS)", f"({PDM_ROWS}) && {MACOS}"),
     ("Check that the documented Python and PDM are in use (Linux)", f"({PDM_ROWS}) && {LINUX}"),
     ("Print the EVS release", "matrix.combination == 'server'"),
-    ("Select the released index source (CI only)", "matrix.server || matrix.index"),
+    ("Select release or candidate index source (CI only)", "matrix.server || matrix.index"),
     ("Install released server and optional index environments", "matrix.server || matrix.index"),
     ("Start the loopback caDSR and Shared SI recorder (CI only)", "matrix.server"),
     ("Verify the local server lifecycle", "matrix.server"),
@@ -140,7 +140,7 @@ CI_ONLY = {
     "that the runner image ships takes over from the uv install",
     "Write the readiness probe (CI only)": "the helper that starts a documented server, waits "
     "for its readiness endpoint and stops it",
-    "Select the released index source (CI only)": "unreleased PR, push and dispatch candidates "
+    "Select release or candidate index source (CI only)": "PR, main-push and manual branch runs "
     "use this checkout; scheduled runs select the latest published release",
     "Serve over stdio and initialize (CI only)": "an initialize round-trip that no one types",
     "Verify required-index HTTP and indexed search (CI only)": "starts the documented command "
@@ -876,7 +876,7 @@ class LocalRunWorkflowTest(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            by_name["Select the released index source (CI only)"],
+            by_name["Select release or candidate index source (CI only)"],
             "\n".join(
                 (
                     "set -euo pipefail",
@@ -895,7 +895,7 @@ class LocalRunWorkflowTest(unittest.TestCase):
         )
 
     def test_source_selection_uses_candidate_for_unreleased_events_and_tag_for_schedule(self):
-        script = run_by_name()["Select the released index source (CI only)"]
+        script = run_by_name()["Select release or candidate index source (CI only)"]
         scenarios = (
             ("pull_request", "refs/pull/42/merge", "v0.0.0", True),
             ("push", "refs/heads/main", "v0.0.0", True),
@@ -1078,7 +1078,7 @@ class LocalRunWorkflowTest(unittest.TestCase):
         self.assertEqual(
             extra,
             {
-                "Select the released index source (CI only)": ["env"],
+                "Select release or candidate index source (CI only)": ["env"],
                 "Install released server and optional index environments": ["env"],
                 "Start the loopback caDSR and Shared SI recorder (CI only)": ["id"],
                 "Build selected local container images": ["env"],

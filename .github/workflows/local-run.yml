@@ -198,19 +198,19 @@ jobs:
       - name: Print the EVS release
         if: matrix.combination == 'server'
         run: pdm run nci-sip-mcp release-info
-      - name: Select the released index source (CI only)
+      - name: Select release or candidate index source (CI only)
         if: matrix.server || matrix.index
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "pull_request" ]; then
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            RELEASE_TAG="$(git describe --tags --abbrev=0)"
+          else
             RELEASE_TAG=v0.0.0
             git tag "$RELEASE_TAG" HEAD
             git config --global --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-si-mcp
             git config --global --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-sip-mcp
-          else
-            RELEASE_TAG="$(git describe --tags --abbrev=0)"
           fi
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
       - name: Install released server and optional index environments

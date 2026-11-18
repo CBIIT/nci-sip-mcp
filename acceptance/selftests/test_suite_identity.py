@@ -38,7 +38,7 @@ FILES = {
     "spec/tools.yaml": b"tools: []\n",
 }
 # The digest of FILES as the format defines it: a length before each name and each content.
-GOLDEN = "847cc1ccf045f3dc821be22c8288856dbb7b3439f1c276dd4468e548636dca38"
+GOLDEN = "adc4270dea06c0e385b8ff5508582e69f95d7683b27eb1181ff105c32a55c00b"
 # Each is one of the kinds of file the digest covers.
 COVERED = [
     "acceptance/tests/test_a.py",

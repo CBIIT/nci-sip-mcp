@@ -280,7 +280,16 @@ def snapshot(root: Path):
 
 
 def environment(scratch: Path, work: Path) -> dict[str, str]:
-    prefixes = ("COVERAGE", "PYTEST", "GIT_", "NCI_SIP_", "PDM_", "MUTATION_", "SELFTEST_")
+    prefixes = (
+        "COVERAGE",
+        "PYTEST",
+        "GIT_",
+        "NCI_SI_",
+        "NCI_SIP_",
+        "PDM_",
+        "MUTATION_",
+        "SELFTEST_",
+    )
     env = {key: value for key, value in os.environ.items() if not key.startswith(prefixes)}
     env.update(
         {

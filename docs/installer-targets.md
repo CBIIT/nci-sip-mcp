@@ -68,13 +68,16 @@ installation.
 
 ## Verify a released local installation
 
-Released installers from v0.29.1 accept both exact canonical repository origins and fetch
-new server installations from `CBIIT/nci-sip-mcp` at the installer's full commit. Use the
-new origin below for current releases. Package, import, command, environment and
-data-directory names remain unchanged.
+The repository URL changed before the NCI SIP package namespace. Installers from v0.29.1 accept
+both exact canonical repository origins and fetch new installations from `CBIIT/nci-sip-mcp` at
+the installer's full commit. Package, import, command and environment names follow the selected
+tag: pre-SIP releases use `nci-si-mcp`, `nci_si_mcp`, `nci-si-install` and `NCI_SI_*`; the NCI SIP
+namespace release and later tags use `nci-sip-mcp`, `nci_sip_mcp`, `nci-sip-install` and `NCI_SIP_*`.
+Old names are not aliases in the new package. Both eras retain the `.nci-si-mcp` data directory.
 
-Set `PYTHON` to an absolute Python 3.14-or-newer executable, `RELEASE_TAG` to a released `vX.Y.Z`,
-and choose fresh absolute paths for the other variables below. Run from a directory outside a
+Set `PYTHON` to an absolute Python 3.14-or-newer executable and `RELEASE_TAG` to a released tag
+from the namespace era that uses `nci-sip-mcp`; choose fresh absolute paths for the other variables
+below. Run from a directory outside a
 source checkout. The HTTP commands inherit any configured upstream URLs; trusted-local HTTP remains
 on loopback.
 
@@ -93,6 +96,19 @@ on loopback.
 "$INSTALLER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
 "$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
 ```
+
+### Pre-SIP package release
+
+For a pre-SIP tag (the latest is `v0.39.2` at this documentation date), use its historical
+distribution and installer executable even though the GitHub repository now has the new origin:
+
+```bash
+"$PYTHON" -m venv "$INSTALLER_VENV"
+"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"
+"$INSTALLER_VENV/bin/nci-si-install" check --target local
+```
+
+Its settings are `NCI_SI_*`; they are not aliases for the `NCI_SIP_*` settings of the new package.
 
 For immutable v0.28.0 or v0.29.0 installers, keep the old origin: they accept only the
 old PEP 610 origin, even though GitHub redirects Git fetches. Set `LEGACY_RELEASE_TAG`
