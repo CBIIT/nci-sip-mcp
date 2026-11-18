@@ -468,7 +468,11 @@ def wait_for_controlled_worker(
         waits.append((child.poll() is None, owner.cleanup_deadline().remaining(), timeout))
         wait_entered.set()
         release.set()
-    return actual_wait(timeout=timeout)
+    try:
+        return actual_wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        release.set()
+        raise
 
 
 def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(

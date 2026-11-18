@@ -155,7 +155,11 @@ def wait_for_legacy_worker(second, owner, waits, wait_entered, release, actual_w
         waits.append((second.poll() is None, owner.cleanup_deadline().remaining(), timeout))
         wait_entered.set()
         release.set()
-    return actual_wait(timeout=timeout)
+    try:
+        return actual_wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        release.set()
+        raise
 
 
 def run_legacy_cleanup(owner, first, second):
