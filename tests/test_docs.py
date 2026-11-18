@@ -1047,7 +1047,7 @@ class DocumentationTest(unittest.TestCase):
         section = document.split("### Pre-SIP package release\n", 1)[1]
         section = section.split("\n### ", 1)[0]
         assignments = re.findall(r"^PRE_SIP_TAG=(v\d+\.\d+\.\d+)$", section, re.MULTILINE)
-        self.assertEqual(assignments, ["PRE_SIP_TAG=v0.39.2"])
+        self.assertEqual(assignments, ["v0.39.2"])
         project = tomllib.loads(
             subprocess.check_output(  # noqa: S603 - fixed Git inspection of a verified docs tag
                 ["git", "show", f"{assignments[0]}:pyproject.toml"],  # noqa: S607
@@ -1056,7 +1056,7 @@ class DocumentationTest(unittest.TestCase):
             )
         )
         self.assertEqual(project["project"]["name"], "nci-si-mcp")
-        self.assertIn("v0.29.1 or later while still pre-SIP", section)
+        self.assertIn("`v0.29.1` or later while still pre-SIP", section)
         self.assertIn(
             '"nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"',
             section,

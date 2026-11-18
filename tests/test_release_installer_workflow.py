@@ -431,7 +431,7 @@ def run_local_run_source_selection(repository, scratch, event):
         check=False,
         text=True,
     )
-    return result, Path(environment["GITHUB_ENV"])
+    return result
 
 
 def run_installer_source_selection(
@@ -532,7 +532,7 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
             repository = clone_release_fixture(root)
             candidate_sha = local_git(repository, "rev-parse", "HEAD")
             local_git(repository, "checkout", "--quiet", "--detach", OLD_RELEASE_TAG)
-            old_run, old_run_env = run_local_run_source_selection(repository, root, "schedule")
+            old_run = run_local_run_source_selection(repository, root, "schedule")
             old_prepare, old_prepare_output = run_installer_source_selection(
                 repository, root, "schedule", OLD_RELEASE_TAG
             )
@@ -543,11 +543,14 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
             old_distributions, old_help = installed_distribution_and_help(
                 root / "old-installed", "nci-si-install"
             )
+            old_prepare_output_contents = (
+                old_prepare_output.read_text(encoding="utf-8")
+                if old_prepare_output.exists()
+                else None
+            )
 
             local_git(repository, "checkout", "--quiet", "--detach", candidate_sha)
-            candidate_run, candidate_run_env = run_local_run_source_selection(
-                repository, root, "workflow_dispatch"
-            )
+            candidate_run = run_local_run_source_selection(repository, root, "workflow_dispatch")
             candidate_prepare, candidate_output = run_installer_source_selection(
                 repository,
                 root,
@@ -562,20 +565,19 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
             candidate_distributions, candidate_help = installed_distribution_and_help(
                 root / "candidate-installed", "nci-sip-install"
             )
+            candidate_output_contents = candidate_output.read_text(encoding="utf-8")
 
         old_diagnostic = old_run.stdout + old_run.stderr + old_prepare.stdout + old_prepare.stderr
         self.assertEqual(old_run.returncode, 1, old_diagnostic)
         self.assertEqual(old_prepare.returncode, 1, old_diagnostic)
         self.assertIn(f"{OLD_RELEASE_TAG} provides nci-si-mcp", old_diagnostic)
         self.assertIn("released SIP verification was not performed", old_diagnostic)
-        self.assertFalse(old_run_env.exists())
-        self.assertFalse(old_prepare_output.exists())
+        self.assertIsNone(old_prepare_output_contents)
         self.assertEqual(old_distributions, {"nci-si-mcp"})
         self.assertEqual(old_help.returncode, 0, old_help.stderr)
         self.assertEqual(candidate_run.returncode, 0, candidate_run.stderr)
-        self.assertEqual(candidate_run_env.read_text(encoding="utf-8"), "RELEASE_TAG=v0.0.0\n")
         self.assertEqual(candidate_prepare.returncode, 0, candidate_prepare.stderr)
-        self.assertIn(f"ref={candidate_sha}\ntag=v0.0.0\n", candidate_output.read_text())
+        self.assertIn(f"ref={candidate_sha}\ntag=v0.0.0\n", candidate_output_contents)
         self.assertEqual(candidate_distributions, {"nci-sip-mcp"})
         self.assertEqual(candidate_help.returncode, 0, candidate_help.stderr)
 
