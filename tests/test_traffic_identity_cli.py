@@ -400,6 +400,35 @@ class CoreIdentityCLITest(unittest.TestCase):
             ),
         )
 
+    def test_corrupt_first_import_repair_restores_ordinary_version_lookup(self):
+        self._write_invalid_utf8_version()
+        metadata_path = json.dumps(str(self.metadata))
+        code = (
+            "import importlib, pathlib, nci_si_mcp\n"
+            "try:\n"
+            "    nci_si_mcp.__version__\n"
+            "except (AttributeError, UnicodeDecodeError):\n"
+            "    initial_access_failed = True\n"
+            "else:\n"
+            "    initial_access_failed = False\n"
+            f"path = pathlib.Path({metadata_path})\n"
+            "bad_version = b'Version: private-' + bytes([255]) + b'-canary'\n"
+            "metadata = path.read_bytes()\n"
+            "assert metadata.count(bad_version) == 1\n"
+            "path.write_bytes(metadata.replace(bad_version, b'Version: 7.7.7', 1))\n"
+            "importlib.reload(nci_si_mcp)\n"
+            "repaired_version = nci_si_mcp.__version__\n"
+            "del nci_si_mcp.__version__\n"
+            "print('|'.join((str(initial_access_failed), repaired_version, "
+            "str(hasattr(nci_si_mcp, '__version__')))))\n"
+        )
+        result = self._child(["-c", code])
+
+        self.assertEqual(
+            (result.returncode, result.stdout, result.stderr),
+            (0, "True|7.7.7|False\n", ""),
+        )
+
     def test_invalid_tokens_are_refused_without_echoing_them(self):
         version = self._installed_version()
         valid = self._module("show", token=TOKEN)
