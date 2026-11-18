@@ -22,7 +22,7 @@ from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
 from scripts.validation.mutation_gate import execute_job
 from scripts.validation.mutation_run import coverage_map, program, run_domain, selection, snapshot
-from scripts.validation.mutation_source import allowlist, candidates, diff_lines, scope
+from scripts.validation.mutation_source import allowlist, candidates, diff_lines, digest, scope
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,6 +53,14 @@ def command(root, *args):
 
 def mutant_rows(rows):
     return [row for row in rows if "site" in row]
+
+
+def isolated_shard(mutants, target):
+    for count in range(len(mutants) + 1, len(mutants) + 100):
+        index = int(digest(json.dumps(target.key(), sort_keys=True)), 16) % count + 1
+        if mutation_gate.partition(mutants, (index, count)) == [target]:
+            return f"{index}/{count}"
+    raise AssertionError("Could not isolate the intended mutation shard")
 
 
 def domain_routes(rows):
@@ -1247,6 +1255,51 @@ class MutationExecutionTest(unittest.TestCase):
         self.assertEqual(result["confirmation"], "unreached", result)
         self.assertNotIn("kind", result)
         self.assertNotIn("node", result)
+
+    def test_cli_continues_from_unreached_unit_to_independent_fixture_kill(self):
+        source = "def answer():\n    return True\n"
+        unit = (
+            "if example.answer():\n"
+            "        assert example.answer() is True\n"
+            "    else:\n"
+            "        import pytest\n"
+            "        pytest.skip('unit owner does not pass for this mutation')"
+        )
+        contract = "assert example.answer() is True"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, source, unit, contract)
+            source_path = root / "src/example.py"
+            original = source_path.read_bytes()
+            mutants, _ = candidates("src/example.py", original)
+            target = next(
+                mutant
+                for mutant in mutants
+                if (mutant.operator, mutant.before, mutant.after)
+                == ("boolean:literal", "True", "False")
+            )
+            shard = isolated_shard(mutants, target)
+
+            status, rows = command(root, "--paths", "src/example.py", "--shard", shard)
+
+            selected = mutant_rows(rows)
+            self.assertEqual(status, 0, rows)
+            self.assertEqual(len(selected), 1, rows)
+            result = selected[0]
+            self.assertEqual(
+                {key: result[key] for key in target.key()},
+                target.key(),
+            )
+            self.assertEqual(result["outcome"], "KILLED", result)
+            self.assertEqual(result["domain"], "fixture", result)
+            self.assertEqual(result["node"], "tests/test_contract.py::test_contract", result)
+            self.assertEqual(result["confirmation"], "fixture", result)
+            self.assertIs(result["restored"], True)
+            self.assertEqual(
+                [(row["domain"], row["outcome"]) for row in result["domains"]],
+                [("unit", "NO_TESTS"), ("fixture", "KILLED")],
+            )
+            self.assertEqual(source_path.read_bytes(), original)
 
     def test_fixture_only_child_line_selects_its_one_owner_and_kills_without_unit_coverage(self):
         # Given a line reached only in a fixture test's real child program, run
