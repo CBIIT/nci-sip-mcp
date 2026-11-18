@@ -99,10 +99,13 @@ on loopback.
 
 ### Pre-SIP package release
 
-For a pre-SIP tag (the latest is `v0.39.2` at this documentation date), use its historical
-distribution and installer executable even though the GitHub repository now has the new origin:
+For a pre-SIP tag from `v0.29.1` or later while still pre-SIP, use its historical
+distribution and installer executable even though the GitHub repository now has the new origin.
+The latest pre-SIP release at this documentation date is `v0.39.2`; set `PRE_SIP_TAG` to a real
+released tag in that range before running the copyable commands:
 
 ```bash
+PRE_SIP_TAG=v0.39.2
 "$PYTHON" -m venv "$INSTALLER_VENV"
 "$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"
 "$INSTALLER_VENV/bin/nci-si-install" check --target local

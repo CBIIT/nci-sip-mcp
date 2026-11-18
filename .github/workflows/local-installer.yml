@@ -76,6 +76,13 @@ jobs:
             git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
             git merge-base --is-ancestor "$ref" refs/remotes/origin/main
           fi
+          if [ "$EVENT_NAME" = "schedule" ] || [ -n "$INPUT_REF" ]; then
+            distribution="$(git show "$ref:pyproject.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["name"])')"
+            if [ "$distribution" != "nci-sip-mcp" ]; then
+              echo "::error::Selected release $tag provides $distribution; no compatible NCI SIP release is available, so released SIP verification was not performed."
+              exit 1
+            fi
+          fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 

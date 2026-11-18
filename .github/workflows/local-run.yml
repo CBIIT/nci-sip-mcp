@@ -206,6 +206,11 @@ jobs:
           set -euo pipefail
           if [ "$EVENT_NAME" = "schedule" ]; then
             RELEASE_TAG="$(git describe --tags --abbrev=0)"
+            RELEASE_DISTRIBUTION="$(git show "$RELEASE_TAG:pyproject.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["name"])')"
+            if [ "$RELEASE_DISTRIBUTION" != "nci-sip-mcp" ]; then
+              echo "::error::Scheduled tag $RELEASE_TAG provides $RELEASE_DISTRIBUTION; no compatible NCI SIP release is available, so released SIP verification was not performed."
+              exit 1
+            fi
           else
             RELEASE_TAG=v0.0.0
             git tag "$RELEASE_TAG" HEAD
