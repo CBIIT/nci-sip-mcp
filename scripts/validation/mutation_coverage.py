@@ -215,7 +215,7 @@ def valid_shard(shard: str | None, domain: str) -> bool:
     if parts is None:
         return False
     index, count = parts
-    return count == SHARDS[domain] and 1 <= index <= count
+    return shard == f"{index}/{count}" and count == SHARDS[domain] and 1 <= index <= count
 
 
 def shard_parts(shard: str | None) -> tuple[int, int] | None:
