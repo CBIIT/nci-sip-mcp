@@ -18,6 +18,8 @@ except UnicodeDecodeError:
         if name == "__version__":
             return version("nci-si-mcp")
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+else:
+    globals().pop("__getattr__", None)
 
 
 # Stay silent unless the application (the CLI or MCP server) configures logging.
