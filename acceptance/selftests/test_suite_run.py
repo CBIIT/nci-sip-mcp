@@ -39,8 +39,8 @@ def suite(pytester, monkeypatch):
     tests = pytester.mkdir("tests")
     stand_in(pytester)
     (tests / "conftest.py").write_text(SUITE_CONFTEST.read_text(encoding="utf-8"), encoding="utf-8")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "fixture")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_SERVER", f"{sys.executable} -m nci_si_mcp.cli serve")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "fixture")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_SERVER", f"{sys.executable} -m nci_sip_mcp.cli serve")
     return pytester
 
 
@@ -78,20 +78,20 @@ EAGER_SERVER = """
 import os, runpy, sys, urllib.error, urllib.request
 try:
     with urllib.request.urlopen(
-        os.environ["NCI_SI_EVS_BASE_URL"] + "/api/v1/metadata/terminologies"
+        os.environ["NCI_SIP_EVS_BASE_URL"] + "/api/v1/metadata/terminologies"
     ):
         pass
 except urllib.error.HTTPError as error:
     with error:
         pass
-sys.argv = ["nci-si-mcp", "serve"]
-runpy.run_module("nci_si_mcp.cli", run_name="__main__")
+sys.argv = ["nci-sip-mcp", "serve"]
+runpy.run_module("nci_sip_mcp.cli", run_name="__main__")
 """
 
 
 def eager(suite, monkeypatch):
     (suite.path / "eager.py").write_text(EAGER_SERVER, encoding="utf-8")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_SERVER", f"{sys.executable} {suite.path / 'eager.py'}")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_SERVER", f"{sys.executable} {suite.path / 'eager.py'}")
 
 
 def test_requests_without_a_fixture_while_the_server_starts_fail_every_test_using_it(
@@ -174,7 +174,7 @@ def test_a_live_run_reports_its_mode_and_a_tool_with_only_fixture_tests_as_not_r
     suite, monkeypatch
 ):
     synthetic_live(suite)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "live")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "live")
 
     result = run(suite, PROBE.format(marker=""), "--report=report.json")
 
@@ -229,7 +229,7 @@ def test_after(tools, upstream):
 def test_a_scenario_starts_its_server_with_its_settings(suite):
     scenario = suite.path / "fixtures" / "scenarios" / "probe" / "single-attempt"
     fixture(scenario, "terminologies.json", {"status": 503, "body": {"message": "down"}})
-    (scenario / "settings.json").write_text('{"NCI_SI_EVS_MAX_ATTEMPTS": "1"}', encoding="utf-8")
+    (scenario / "settings.json").write_text('{"NCI_SIP_EVS_MAX_ATTEMPTS": "1"}', encoding="utf-8")
     test = """
 import pytest
 
@@ -279,12 +279,12 @@ def test_the_report_gives_each_required_tool_its_outcome(suite, monkeypatch):
     # Keep the absent-tool case deliberate as the furnished server gains capabilities.
     server = suite.path / "without_form.py"
     server.write_text(
-        "import sys\nfrom nci_si_mcp import cli, server\n"
+        "import sys\nfrom nci_sip_mcp import cli, server\n"
         "server.SPECS = tuple(s for s in server.SPECS if s.name != 'get_form')\n"
-        "sys.argv = ['nci-si-mcp', 'serve']\nraise SystemExit(cli.main())\n",
+        "sys.argv = ['nci-sip-mcp', 'serve']\nraise SystemExit(cli.main())\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_SERVER", shlex.join([sys.executable, str(server)]))
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_SERVER", shlex.join([sys.executable, str(server)]))
     test = """
 import pytest
 
@@ -392,7 +392,7 @@ def prepare(suite, monkeypatch, script):
 
     (suite.path / "fixtures" / "manifest.yaml").write_text(INDEXED, encoding="utf-8")
     command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PREPARE", command)
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PREPARE", command)
 
 
 def test_the_prepare_command_runs_once_and_every_server_starts_from_its_data(suite, monkeypatch):
@@ -402,8 +402,8 @@ def test_the_prepare_command_runs_once_and_every_server_starts_from_its_data(sui
         monkeypatch,
         "import os, pathlib\n"
         f"with open({str(runs)!r}, 'a') as runs: runs.write('run\\n')\n"
-        "codes = pathlib.Path(os.environ['NCI_SI_ACCEPTANCE_INDEX_CODES']).read_text()\n"
-        "pathlib.Path(os.environ['NCI_SI_DATA_DIR'], 'codes.txt').write_text(codes)\n",
+        "codes = pathlib.Path(os.environ['NCI_SIP_ACCEPTANCE_INDEX_CODES']).read_text()\n"
+        "pathlib.Path(os.environ['NCI_SIP_DATA_DIR'], 'codes.txt').write_text(codes)\n",
     )
 
     result = run(suite, PREPARED_PROBE)
@@ -429,7 +429,7 @@ def test_without_a_prepare_command_a_test_that_needs_it_is_not_run(suite):
         ),
         (
             "import os, urllib.error, urllib.request\n"
-            "url = os.environ['NCI_SI_EVS_BASE_URL'] + '/api/v1/metadata/terminologies'\n"
+            "url = os.environ['NCI_SIP_EVS_BASE_URL'] + '/api/v1/metadata/terminologies'\n"
             "try:\n"
             "    with urllib.request.urlopen(url): pass\n"
             "except urllib.error.HTTPError as error:\n"
@@ -469,7 +469,7 @@ def test_a_prepare_command_failure_is_reported_for_each_dependent_test(
 def test_a_live_prepare_failure_is_reported_without_aborting_the_run(suite, monkeypatch, workers):
     synthetic_live(suite)
     prepare(suite, monkeypatch, "raise SystemExit('live preparation unavailable')")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "live")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "live")
     test = (
         PROBE.format(marker="@pytest.mark.live_capable")
         + """

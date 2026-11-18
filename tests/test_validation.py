@@ -3,8 +3,8 @@ import types
 import unittest
 from unittest.mock import patch
 
-from nci_si_mcp.errors import InputValidationError
-from nci_si_mcp.validation import (
+from nci_sip_mcp.errors import InputValidationError
+from nci_sip_mcp.validation import (
     validate_ncit_code,
     validate_ncit_codes,
     validate_search,
@@ -168,7 +168,7 @@ class EmbeddingConfigurationTest(unittest.TestCase):
                 self.assertRaises(ValueError) as raised,
             ):
                 create_embedding_provider(provider, model)
-            self.assertIn("NCI_SI_EMBEDDING_", str(raised.exception))
+            self.assertIn("NCI_SIP_EMBEDDING_", str(raised.exception))
 
     def test_hashing_needs_at_least_one_dimension(self):
         with self.assertRaises(ValueError):

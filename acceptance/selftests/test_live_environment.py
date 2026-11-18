@@ -15,29 +15,29 @@ import pytest
 import yaml
 
 from conftest import FIXTURES, furnished_child
-from nci_si_acceptance import environments
-from nci_si_acceptance.client import Target, server_environment
-from nci_si_acceptance.fixture_server import (
+from nci_sip_acceptance import environments
+from nci_sip_acceptance.client import Target, server_environment
+from nci_sip_acceptance.fixture_server import (
     UPSTREAM_VARIABLES,
     FixtureServer,
     FixtureSet,
     load_fixtures,
 )
 
-ENVIRONMENT = "NCI_SI_ACCEPTANCE_ENVIRONMENT"
+ENVIRONMENT = "NCI_SIP_ACCEPTANCE_ENVIRONMENT"
 pytest_plugins = ["pytester"]
 
 
 @pytest.fixture(autouse=True)
 def clean_settings(monkeypatch):
     for key in os.environ:
-        if key.startswith("NCI_SI_") or environments.external_runtime_setting(key):
+        if key.startswith(("NCI_SIP_", "NCI_SI_")) or environments.external_runtime_setting(key):
             monkeypatch.delenv(key)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "live")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "live")
     popen = subprocess.Popen
 
     def local_process(command, *args, **kwargs):
-        if "nci_si_acceptance.live_launcher" in command:
+        if "nci_sip_acceptance.live_launcher" in command:
             env = kwargs.get("env") or {}
             assert all(
                 urlsplit(env.get(key, "")).hostname == "127.0.0.1" for key in UPSTREAM_VARIABLES
@@ -81,9 +81,9 @@ def test_selection_precedes_process_or_request(monkeypatch, name):
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("NCI_SI_EVS_BASE_URL", "http://127.0.0.1:1"),
-        ("NCI_SI_CADSR_FTP_URL", "http://127.0.0.1:1"),
-        ("NCI_SI_CADSR_CREDENTIAL", "private-marker"),
+        ("NCI_SIP_EVS_BASE_URL", "http://127.0.0.1:1"),
+        ("NCI_SIP_CADSR_FTP_URL", "http://127.0.0.1:1"),
+        ("NCI_SIP_CADSR_CREDENTIAL", "private-marker"),
         ("HTTP_PROXY", "http://127.0.0.1:1"),
         ("hTtPs_PrOxY", "http://127.0.0.1:1"),
         ("NO_PROXY", "*"),
@@ -93,18 +93,18 @@ def test_selection_precedes_process_or_request(monkeypatch, name):
         ("LD_LIBRARY_PATH", "private-marker"),
         ("DYLD_INSERT_LIBRARIES", "private-marker"),
         ("DYLD_LIBRARY_PATH", "private-marker"),
-        ("NCI_SI_ACCEPTANCE_SERVER", "python alternate-server.py"),
-        ("NCI_SI_ACCEPTANCE_SERVER", "nci-si-mcp serve; alternate"),
+        ("NCI_SIP_ACCEPTANCE_SERVER", "python alternate-server.py"),
+        ("NCI_SIP_ACCEPTANCE_SERVER", "nci-sip-mcp serve; alternate"),
         (
-            "NCI_SI_ACCEPTANCE_PREPARE",
-            'nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")',
+            "NCI_SIP_ACCEPTANCE_PREPARE",
+            'nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")',
         ),
-        ("NCI_SI_ACCEPTANCE_PREPARE", "nci-si-mcp index-sample C2991"),
-        ("NCI_SI_ACCEPTANCE_PROFILE", "evs"),
-        ("NCI_SI_ACCEPTANCE_SECURITY_SERVER", "python alternate.py"),
-        ("NCI_SI_ACCEPTANCE_FIXTURE_BIND", "127.0.0.1:1"),
-        ("NCI_SI_ACCEPTANCE_FIXTURE_URL", "http://127.0.0.1:1"),
-        ("NCI_SI_ACCEPTANCE_URL", "http://127.0.0.1:1/mcp"),
+        ("NCI_SIP_ACCEPTANCE_PREPARE", "nci-sip-mcp index-sample C2991"),
+        ("NCI_SIP_ACCEPTANCE_PROFILE", "evs"),
+        ("NCI_SIP_ACCEPTANCE_SECURITY_SERVER", "python alternate.py"),
+        ("NCI_SIP_ACCEPTANCE_FIXTURE_BIND", "127.0.0.1:1"),
+        ("NCI_SIP_ACCEPTANCE_FIXTURE_URL", "http://127.0.0.1:1"),
+        ("NCI_SIP_ACCEPTANCE_URL", "http://127.0.0.1:1/mcp"),
     ],
 )
 def test_unsupported_live_commands_and_overrides_are_refused(monkeypatch, key, value):
@@ -117,7 +117,7 @@ def test_unsupported_live_commands_and_overrides_are_refused(monkeypatch, key, v
 
 
 def test_fixture_mode_cannot_claim_a_live_selection(monkeypatch):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "fixture")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "fixture")
     monkeypatch.setenv(ENVIRONMENT, "evs-only")
     with pytest.raises(ValueError, match=ENVIRONMENT):
         Target.from_env()
@@ -129,7 +129,7 @@ def test_selected_live_server_uses_only_the_furnished_isolated_launcher(monkeypa
         sys.executable,
         "-I",
         "-m",
-        "nci_si_acceptance.live_launcher",
+        "nci_sip_acceptance.live_launcher",
         "serve",
     ]
 
@@ -153,7 +153,7 @@ def selected_policy(monkeypatch, tmp_path):
         path.write_text(yaml.safe_dump(policy))
         monkeypatch.setattr(environments, "POLICY", path)
         monkeypatch.setenv(ENVIRONMENT, "evs-only")
-        monkeypatch.setenv("NCI_SI_EVS_LICENSE_KEY", "selected-private-marker")
+        monkeypatch.setenv("NCI_SIP_EVS_LICENSE_KEY", "selected-private-marker")
         yield upstream, path
 
 
@@ -171,12 +171,12 @@ def test_selected_destinations_and_credentials_are_one_private_snapshot(
     assert "selected-private-marker" not in json.dumps(expected)
     with pytest.raises(TypeError):
         selected.origins["evs"] = "http://127.0.0.1:1"
-    monkeypatch.setenv("NCI_SI_EVS_LICENSE_KEY", "later-private-marker")
+    monkeypatch.setenv("NCI_SIP_EVS_LICENSE_KEY", "later-private-marker")
     with target.managed() as managed:
         env = server_environment(
             "live", tmp_path / "data", None, environment=selected, denied_url=managed.denied_url
         )
-        assert env["NCI_SI_EVS_LICENSE_KEY"] == "selected-private-marker"
+        assert env["NCI_SIP_EVS_LICENSE_KEY"] == "selected-private-marker"
         assert "selected-private-marker" not in repr(target)
         # This assertion guards the old/red and mutated implementation from nonlocal sends.
         for key in UPSTREAM_VARIABLES:
@@ -191,7 +191,7 @@ def test_selected_destinations_and_credentials_are_one_private_snapshot(
         with (
             pytest.raises(HTTPError) as error,
             build_opener(ProxyHandler({})).open(
-                env["NCI_SI_CADSR_BASE_URL"] + "/blocked", timeout=2
+                env["NCI_SIP_CADSR_BASE_URL"] + "/blocked", timeout=2
             ),
         ):
             pass
@@ -232,7 +232,7 @@ def test_actual_managed_preparation_and_mcp_keep_the_selected_item_origin(
     monkeypatch, tmp_path, tmp_path_factory, selected_policy
 ):
     upstream, _path = selected_policy
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PREPARE", "nci-si-mcp index-sample")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PREPARE", "nci-sip-mcp index-sample")
     target = Target.from_env()
     suite = runpy.run_path(str(FIXTURES.parent / "tests/conftest.py"))
     prepare = suite["prepared"].__wrapped__
@@ -258,14 +258,14 @@ def test_actual_managed_preparation_and_mcp_keep_the_selected_item_origin(
         assert all(row["fixture"] is not None for row in received)
 
 
-@pytest.mark.parametrize("variable", ["NCI_SI_CADSR_BASE_URL", "NCI_SI_SSIS_SPARQL_URL"])
+@pytest.mark.parametrize("variable", ["NCI_SIP_CADSR_BASE_URL", "NCI_SIP_SSIS_SPARQL_URL"])
 @pytest.mark.parametrize("credential", [None, "private-marker"])
 def test_prohibited_destination_attempts_reach_no_receiver(monkeypatch, variable, credential):
     with FixtureServer(FixtureSet({}, {})) as forbidden:
         monkeypatch.setenv(ENVIRONMENT, "evs-only")
         monkeypatch.setenv(variable, forbidden.url)
         if credential:
-            monkeypatch.setenv("NCI_SI_CADSR_CREDENTIAL", credential)
+            monkeypatch.setenv("NCI_SIP_CADSR_CREDENTIAL", credential)
         with pytest.raises(ValueError) as error:
             Target.from_env()
         assert forbidden.url not in str(error.value)

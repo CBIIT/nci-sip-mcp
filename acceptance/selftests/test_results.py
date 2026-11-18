@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from nci_si_acceptance.record import FIXTURES
-from nci_si_acceptance.results import (
+from nci_sip_acceptance.record import FIXTURES
+from nci_sip_acceptance.results import (
     CARRIED,
     EXPORT_LISTING,
     bare_code,
@@ -28,8 +28,8 @@ from nci_si_acceptance.results import (
     wrong_fields,
     wrong_origin,
 )
-from nci_si_acceptance.spec import items_of
-from nci_si_acceptance.tools import Result
+from nci_sip_acceptance.spec import items_of
+from nci_sip_acceptance.tools import Result
 
 RECORD = {"code": "invalid_request", "message": "no such include value"}
 

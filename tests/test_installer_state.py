@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from nci_si_mcp import installer_state
+from nci_sip_mcp import installer_state
 
 API = installer_state
 
@@ -52,7 +52,7 @@ class InstallerStateTest(unittest.TestCase):
         original = b'{"old":"state"}\n'
         self.path.write_bytes(original)
         with (
-            patch("nci_si_mcp.installer_state.os.replace", side_effect=OSError("PRIVATE-CANARY")),
+            patch("nci_sip_mcp.installer_state.os.replace", side_effect=OSError("PRIVATE-CANARY")),
             self.assertRaisesRegex(API.InstallerStateError, "Cannot write state"),
         ):
             API.write_state(self.data_dir, self.state)
@@ -176,16 +176,16 @@ class InstallerStateTest(unittest.TestCase):
             return descriptor
 
         with (
-            patch("nci_si_mcp.installer_state.os.open", side_effect=open_directory) as opened,
+            patch("nci_sip_mcp.installer_state.os.open", side_effect=open_directory) as opened,
             patch(
-                "nci_si_mcp.installer_state.os.fsync",
+                "nci_sip_mcp.installer_state.os.fsync",
                 side_effect=lambda fd: events.append(("fsync", fd)),
             ),
             patch(
-                "nci_si_mcp.installer_state.os.replace",
+                "nci_sip_mcp.installer_state.os.replace",
                 side_effect=lambda *_: events.append(("replace",)),
             ),
-            patch("nci_si_mcp.installer_state.os.close", wraps=API.os.close) as closed,
+            patch("nci_sip_mcp.installer_state.os.close", wraps=API.os.close) as closed,
         ):
             API.write_state(self.data_dir, self.state)
         opened.assert_any_call(self.data_dir, API.os.O_RDONLY)

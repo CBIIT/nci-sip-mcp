@@ -5,9 +5,9 @@ import json
 from unittest import TestCase
 from unittest.mock import patch
 
-from nci_si_mcp import cursor
-from nci_si_mcp.errors import InputValidationError
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp import cursor
+from nci_sip_mcp.errors import InputValidationError
+from nci_sip_mcp.registry import invoke
 from test_server import ServerFixture
 
 

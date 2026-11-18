@@ -21,8 +21,8 @@ class DeadlineBoundaryTest(ServerFixture, ServerTestCase):
         self.context.cadsr.http.on_request = lambda record: now.__setitem__(0, 51.0)
         logging.disable(logging.NOTSET)
         with (
-            patch("nci_si_mcp.bounds.monotonic", side_effect=lambda: now[0], create=True),
-            self.assertLogs("nci_si_mcp.audit", level="INFO") as captured,
+            patch("nci_sip_mcp.bounds.monotonic", side_effect=lambda: now[0], create=True),
+            self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured,
         ):
             failed, result = self.call("get_data_element", questionText="Patient question")
         self.assertTrue(failed)
@@ -42,7 +42,7 @@ class DeadlineBoundaryTest(ServerFixture, ServerTestCase):
         self.context.cadsr.http.base_url = server.url
         now = [0.0]
         self.context.cadsr.http.on_request = lambda record: now.__setitem__(0, 51.0)
-        with patch("nci_si_mcp.bounds.monotonic", side_effect=lambda: now[0], create=True):
+        with patch("nci_sip_mcp.bounds.monotonic", side_effect=lambda: now[0], create=True):
             failed, _ = self.call("get_data_element", questionText="Patient question")
             self.context.cadsr.http.on_request = None
             allowed, result = self.call("get_data_element", publicId="123")

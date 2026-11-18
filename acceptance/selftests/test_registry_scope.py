@@ -12,16 +12,16 @@ pytest_plugins = ["pytester"]
 def test_optional_suspends_exactly_the_approved_cases_in_the_complete_suite(
     pytester, monkeypatch, selection
 ):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "live" if selection == "live" else "fixture")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "live" if selection == "live" else "fixture")
     if selection == "live":
         # Collection-only simulation; no launcher or managed-policy claim.
-        monkeypatch.setattr("nci_si_acceptance.client.selection", lambda mode: None)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_REGISTRY_RELEASE", "optional")
+        monkeypatch.setattr("nci_sip_acceptance.client.selection", lambda mode: None)
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE", "optional")
     if selection == "remote":
-        monkeypatch.setenv("NCI_SI_ACCEPTANCE_URL", "http://server.example/mcp")
-        monkeypatch.delenv("NCI_SI_ACCEPTANCE_SERVER", raising=False)
+        monkeypatch.setenv("NCI_SIP_ACCEPTANCE_URL", "http://server.example/mcp")
+        monkeypatch.delenv("NCI_SIP_ACCEPTANCE_SERVER", raising=False)
     else:
-        monkeypatch.setenv("NCI_SI_ACCEPTANCE_PREPARE", "true")
+        monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PREPARE", "true")
     items, _ = pytester.inline_genitems(str(SUITE), "-p", "no:cacheprovider")
 
     skipped = {

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from nci_si_mcp import installer_state
+from nci_sip_mcp import installer_state
 
 API = installer_state
 

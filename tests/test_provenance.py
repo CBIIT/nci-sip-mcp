@@ -14,14 +14,14 @@ import yaml
 from pydantic import TypeAdapter
 
 from fakes import FakeEVS, concept, release
-from nci_si_mcp import results
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.errors import call_correlation_id, correlated
-from nci_si_mcp.http_client import UpstreamTooLargeError, UpstreamUnavailableError
-from nci_si_mcp.index_adapter import LocalIndexAdapter, results_truncation
-from nci_si_mcp.models import NcitConcept, TraversalProvenance, utc_now_iso
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp import results
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.errors import call_correlation_id, correlated
+from nci_sip_mcp.http_client import UpstreamTooLargeError, UpstreamUnavailableError
+from nci_sip_mcp.index_adapter import LocalIndexAdapter, results_truncation
+from nci_sip_mcp.models import NcitConcept, TraversalProvenance, utc_now_iso
+from nci_sip_mcp.registry import invoke
 from ncit_index.embeddings import HashingEmbeddingProvider
 from ncit_index.index import LocalIndex
 from test_index import normalized, synthetic_concepts
@@ -468,7 +468,7 @@ class TruncationTest(ProvenanceTestCase):
                 return super().get_concepts_by_codes(codes, release, include)
 
         self.context.evs = Hub([NEOPLASM])
-        with self.assertLogs("nci_si_mcp.traversal", level="WARNING"):
+        with self.assertLogs("nci_sip_mcp.traversal", level="WARNING"):
             truncation = self.traversal(edge_types=["child"])["truncation"]
 
         self.assert_record(
@@ -595,7 +595,7 @@ class CorrelationOfEveryResultTest(ProvenanceTestCase):
         invoke(self.context, "index_codes", ["C3262"])
         self.evs.errors = {"get_concept": UpstreamUnavailableError("down")}
 
-        with correlated("call-42"), self.assertLogs("nci_si_mcp", level="WARNING"):
+        with correlated("call-42"), self.assertLogs("nci_sip_mcp", level="WARNING"):
             fallback = invoke(self.context, "lookup", "C3262")["provenance"]
         with correlated("call-42"):
             report = invoke(
@@ -651,7 +651,7 @@ class ResultShapesTest(ProvenanceTestCase):
         invoke(self.context, "index_codes", ["C3262"])
         self.evs.errors = {"get_concept": UpstreamUnavailableError("down")}
 
-        with self.assertLogs("nci_si_mcp", level="WARNING"):
+        with self.assertLogs("nci_sip_mcp", level="WARNING"):
             fallback = invoke(self.context, "lookup", "C3262")
         hit = invoke(self.context, "search", "neoplasm")["hits"][0]
         del self.evs.errors["get_concept"]

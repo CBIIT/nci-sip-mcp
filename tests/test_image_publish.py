@@ -17,8 +17,8 @@ class PublicationService:
         self.public, self.fail = public, fail
         self.image = None
         self.local_images = {
-            "nci-si-mcp:verified": self.digest,
-            "nci-si-mcp:unverified": "ghcr.io/new-org/project@sha256:" + "b" * 64,
+            "nci-sip-mcp:verified": self.digest,
+            "nci-sip-mcp:unverified": "ghcr.io/new-org/project@sha256:" + "b" * 64,
         }
         self.assets = {}
         self.notes = "Release description\n"

@@ -11,7 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from nci_si_mcp import installer
+from nci_sip_mcp import installer
 
 OLD = "https://github.com/CBIIT/nci-si-mcp"
 NEW = "https://github.com/CBIIT/nci-sip-mcp"
@@ -25,7 +25,7 @@ def direct_url(origin):
 def write_distribution(record, direct, *, version="0.29.0"):
     record.mkdir(parents=True, exist_ok=True)
     (record / "METADATA").write_text(
-        f"Metadata-Version: 2.4\nName: nci-si-mcp\nVersion: {version}\n", encoding="utf-8"
+        f"Metadata-Version: 2.4\nName: nci-sip-mcp\nVersion: {version}\n", encoding="utf-8"
     )
     (record / "direct_url.json").write_text(json.dumps(direct), encoding="utf-8")
 
@@ -36,8 +36,10 @@ class InstallerOriginsTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         self.data = self.root / "installation"
-        self.bootstrap = self.root / "bootstrap/nci_si_mcp-0.29.0.dist-info"
-        self.installed = self.data / "venv/lib/python3.14/site-packages/nci_si_mcp-0.29.0.dist-info"
+        self.bootstrap = self.root / "bootstrap/nci_sip_mcp-0.29.0.dist-info"
+        self.installed = (
+            self.data / "venv/lib/python3.14/site-packages/nci_sip_mcp-0.29.0.dist-info"
+        )
         self.lock = self.root / "server-requirements.txt"
         self.lock.write_text("demo==1 --hash=sha256:" + "a" * 64 + "\n", encoding="utf-8")
         self.commands = []

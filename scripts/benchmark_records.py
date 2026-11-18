@@ -14,7 +14,7 @@ from scripts.evidence_envelope import EvidenceError
 from scripts.formats import SHA256_HEX
 from scripts.vocabulary import HttpStop, RunStop, is_run_stop
 
-from nci_si_mcp.errors import ErrorCode
+from nci_sip_mcp.errors import ErrorCode
 
 Transport = Literal["stdio", "streamable-http"]
 MAX_MEASUREMENT = 2**63 - 1

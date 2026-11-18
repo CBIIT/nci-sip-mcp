@@ -3,11 +3,11 @@
 from unittest.mock import patch
 
 from fakes import concept
-from nci_si_mcp import content
-from nci_si_mcp.bounds import Budget, check_deadline, deadline_scope
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.release import ReleaseContext
-from nci_si_mcp.traversal import traverse_ncit
+from nci_sip_mcp import content
+from nci_sip_mcp.bounds import Budget, check_deadline, deadline_scope
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.release import ReleaseContext
+from nci_sip_mcp.traversal import traverse_ncit
 from test_server import ServerFixture
 
 
@@ -141,7 +141,7 @@ class DeadlineProjectionTest(ServerFixture):
                 now[0] = 51.0
             return found
 
-        self.enterContext(patch("nci_si_mcp.bounds.monotonic", side_effect=lambda: now[0]))
+        self.enterContext(patch("nci_sip_mcp.bounds.monotonic", side_effect=lambda: now[0]))
         self.enterContext(patch.object(self.evs, "get_concepts_by_codes", side_effect=guarded))
         return batches
 

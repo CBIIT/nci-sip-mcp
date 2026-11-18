@@ -8,7 +8,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from nci_si_mcp import installer, installer_state
+from nci_sip_mcp import installer, installer_state
 
 
 class Input(io.StringIO):

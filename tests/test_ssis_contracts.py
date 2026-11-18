@@ -13,9 +13,9 @@ from pathlib import Path
 import yaml
 from scripts.ssis_contracts import REGISTER, request, validate
 
-from nci_si_acceptance.craft import craft
-from nci_si_mcp.registry import SPECS
-from nci_si_mcp.ssis import SSISClient
+from nci_sip_acceptance.craft import craft
+from nci_sip_mcp.registry import SPECS
+from nci_sip_mcp.ssis import SSISClient
 from test_http_client import Reply, ServerTestCase
 
 ROOT = Path(__file__).resolve().parents[1]

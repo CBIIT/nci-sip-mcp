@@ -10,9 +10,9 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from nci_si_acceptance import report as report_module
-from nci_si_acceptance.report import COLLECTOR, SUITE, Collector, render
-from nci_si_acceptance.suite_identity import (
+from nci_sip_acceptance import report as report_module
+from nci_sip_acceptance.report import COLLECTOR, SUITE, Collector, render
+from nci_sip_acceptance.suite_identity import (
     REPOSITORY,
     SuiteError,
     approved_digests,
@@ -34,7 +34,7 @@ FILES = {
     "acceptance/fixtures/crafted/version.json": b'{"kind": "crafted"}',
     "acceptance/pyproject.toml": b'[project]\ndynamic = ["version"]\n',
     "acceptance/request-forms/evs.md": b"# EVS\n",
-    "acceptance/src/nci_si_acceptance/client.py": b"VALUE = 1\n",
+    "acceptance/src/nci_sip_acceptance/client.py": b"VALUE = 1\n",
     "spec/tools.yaml": b"tools: []\n",
 }
 # The digest of FILES as the format defines it: a length before each name and each content.
@@ -48,7 +48,7 @@ COVERED = [
     "acceptance/fixtures/manifest.yaml",
     "spec/tools.yaml",
     "acceptance/request-forms/evs.md",
-    "acceptance/src/nci_si_acceptance/client.py",
+    "acceptance/src/nci_sip_acceptance/client.py",
 ]
 # What a change leaves the digest as it was.
 NOT_COVERED = [
@@ -67,7 +67,7 @@ NOT_COVERED = [
     "spec/._tools.yaml",
     "acceptance/README.md",
     "acceptance/CHANGELOG.md",
-    "src/nci_si_mcp/server.py",
+    "src/nci_sip_mcp/server.py",
 ]
 
 

@@ -5,8 +5,8 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from fakes import concept, release, terminology_row
-from nci_si_mcp.evs import EVSClient, EVSReleaseNotFoundError
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.evs import EVSClient, EVSReleaseNotFoundError
+from nci_sip_mcp.registry import invoke
 from ncit_index.embeddings import HashingEmbeddingProvider
 from ncit_index.scoring import rank_page
 from test_evs_client import FakeResponse
@@ -168,7 +168,7 @@ class LiveSearchTest(ServerFixture):
 
     def replies(self, bodies):
         return patch(
-            "nci_si_mcp.http_client._open",
+            "nci_sip_mcp.http_client._open",
             side_effect=[FakeResponse(json.dumps(body).encode()) for body in bodies],
         )
 

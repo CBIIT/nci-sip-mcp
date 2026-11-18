@@ -11,8 +11,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from nci_si_acceptance import fixture_server
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures, request_key
+from nci_sip_acceptance import fixture_server
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures, request_key
 
 VERSION = request_key("evs", "GET", "/api/v1/version", {})
 DELAY = 0.3
@@ -489,14 +489,14 @@ def write_settings(tmp_path, name, settings):
 
 
 def test_a_scenario_carries_the_settings_its_server_starts_with(tmp_path):
-    write_settings(tmp_path, "scenarios/evs/slow/settings.json", {"NCI_SI_TIMEOUT_SECONDS": "1"})
-    write_settings(tmp_path, "scenarios/cadsr/key/settings.json", {"NCI_SI_CADSR_KEY": "k"})
+    write_settings(tmp_path, "scenarios/evs/slow/settings.json", {"NCI_SIP_TIMEOUT_SECONDS": "1"})
+    write_settings(tmp_path, "scenarios/cadsr/key/settings.json", {"NCI_SIP_CADSR_KEY": "k"})
 
     fixtures = load_fixtures(tmp_path)
 
     assert fixtures.settings_of(("evs/slow", "cadsr/key")) == {
-        "NCI_SI_TIMEOUT_SECONDS": "1",
-        "NCI_SI_CADSR_KEY": "k",
+        "NCI_SIP_TIMEOUT_SECONDS": "1",
+        "NCI_SIP_CADSR_KEY": "k",
     }
     assert fixtures.settings_of(()) == {}
     with FixtureServer(fixtures) as running:
@@ -505,11 +505,11 @@ def test_a_scenario_carries_the_settings_its_server_starts_with(tmp_path):
 
 def test_a_scenario_may_not_override_what_the_harness_sets(tmp_path):
     write_settings(
-        tmp_path, "scenarios/evs/away/settings.json", {"NCI_SI_EVS_BASE_URL": "https://x"}
+        tmp_path, "scenarios/evs/away/settings.json", {"NCI_SIP_EVS_BASE_URL": "https://x"}
     )
 
     with pytest.raises(
-        ValueError, match=r"away/settings\.json: the harness sets NCI_SI_EVS_BASE_URL"
+        ValueError, match=r"away/settings\.json: the harness sets NCI_SIP_EVS_BASE_URL"
     ):
         load_fixtures(tmp_path)
 
@@ -517,7 +517,7 @@ def test_a_scenario_may_not_override_what_the_harness_sets(tmp_path):
 def test_scenarios_setting_the_same_setting_cannot_be_active_together(tmp_path):
     for scenario in ("evs/slow", "evs/slower"):
         write_settings(
-            tmp_path, f"scenarios/{scenario}/settings.json", {"NCI_SI_TIMEOUT_SECONDS": "1"}
+            tmp_path, f"scenarios/{scenario}/settings.json", {"NCI_SIP_TIMEOUT_SECONDS": "1"}
         )
 
     with (
@@ -530,21 +530,21 @@ def test_scenarios_setting_the_same_setting_cannot_be_active_together(tmp_path):
 @pytest.mark.parametrize(
     ("name", "settings", "problem"),
     [
-        ("settings.json", {"NCI_SI_TIMEOUT_SECONDS": "1"}, "settings belong to a scenario"),
+        ("settings.json", {"NCI_SIP_TIMEOUT_SECONDS": "1"}, "settings belong to a scenario"),
         (
             "scenarios/evs/slow/settings.json",
             {"TIMEOUT": "1"},
-            "settings are NCI_SI_\\* names with string values",
+            "settings are NCI_SIP_\\* names with string values",
         ),
         (
             "scenarios/evs/slow/settings.json",
-            {"NCI_SI_TIMEOUT_SECONDS": 1},
-            "settings are NCI_SI_\\* names with string values",
+            {"NCI_SIP_TIMEOUT_SECONDS": 1},
+            "settings are NCI_SIP_\\* names with string values",
         ),
         (
             "scenarios/evs/slow/settings.json",
-            ["NCI_SI_TIMEOUT_SECONDS"],
-            "settings are NCI_SI_\\* names with string values",
+            ["NCI_SIP_TIMEOUT_SECONDS"],
+            "settings are NCI_SIP_\\* names with string values",
         ),
     ],
 )

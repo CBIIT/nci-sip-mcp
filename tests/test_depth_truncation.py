@@ -2,8 +2,8 @@ import unittest
 from unittest.mock import patch
 
 from fakes import FakeEVS, concept
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.evs import EVSResponseError
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import EVSResponseError
 from test_bounds import BudgetEVS, BudgetHub
 from test_traversal import child, codes, descendant, related, walk
 
@@ -97,7 +97,7 @@ class DepthTruncationTest(unittest.TestCase):
                 concept("C3"),
             ]
         )
-        with patch("nci_si_mcp.traversal.BATCH_SIZE", 1):
+        with patch("nci_sip_mcp.traversal.BATCH_SIZE", 1):
             result = walk(client, max_depth=1, edge_types=["child"], requests=2)
         self.assertEqual((result.truncation.bound, result.truncation.omitted), ("depth", 1))
         self.assertEqual(len(client.calls), 2)
@@ -267,7 +267,7 @@ class DepthTruncationTest(unittest.TestCase):
                 concept("C2", children=[child("C1")]),
             ]
         )
-        with patch("nci_si_mcp.traversal.BATCH_SIZE", 1):
+        with patch("nci_sip_mcp.traversal.BATCH_SIZE", 1):
             result = walk(client, start_codes=["C1", "C2"], max_depth=0, edge_types=["child"])
         self.assertEqual(result.truncation.to_dict(), {"occurred": False})
         self.assertEqual(codes(result), ["C1", "C2"])

@@ -7,12 +7,12 @@ from unittest.mock import patch
 from mcp.shared.exceptions import MCPError
 
 from fakes import concept, terminology_row
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.registry import invoke
 from test_index import normalized
 from test_server import ServerFixture
 
 
-@patch("nci_si_mcp.server.configure_logging")
+@patch("nci_sip_mcp.server.configure_logging")
 class ResourceTest(ServerFixture):
     def error(self, uri):
         with self.assertRaises(MCPError) as raised:

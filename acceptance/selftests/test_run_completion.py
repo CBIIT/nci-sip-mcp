@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from conftest import STAND_IN
-from nci_si_acceptance.report import load_report
+from nci_sip_acceptance.report import load_report
 
 pytest_plugins = ["pytester"]
 SELECTED = 8
@@ -49,7 +49,7 @@ def produce(compliant, *options, body="assert case != 0", workers=2):
 
 def command(module, *arguments):
     return subprocess.run(  # noqa: S603 - fixed package entry points and test-owned paths
-        [sys.executable, "-m", f"nci_si_acceptance.{module}", *map(str, arguments)],
+        [sys.executable, "-m", f"nci_sip_acceptance.{module}", *map(str, arguments)],
         capture_output=True,
         text=True,
         check=False,
@@ -351,8 +351,8 @@ def test_workflow_run_steps_reject_status_one_with_an_incomplete_report(complete
     environment = os.environ | {
         "PATH": f"{root}:{os.environ['PATH']}",
         "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
-        "NCI_SI_EVS_LICENSE_KEY": "",
-        "NCI_SI_CADSR_CREDENTIAL": "",
+        "NCI_SIP_EVS_LICENSE_KEY": "",
+        "NCI_SIP_CADSR_CREDENTIAL": "",
     }
 
     result = subprocess.run(  # noqa: S603 - execute the checked-in workflow step with a test stand-in

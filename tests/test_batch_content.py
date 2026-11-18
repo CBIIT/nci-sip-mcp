@@ -5,9 +5,9 @@ from urllib.parse import urlsplit
 from jsonschema import Draft202012Validator
 
 from fakes import concept
-from nci_si_mcp.bounds import HARD_MAX_BATCH_CODES, MAX_BATCH_TARGET_BYTES
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.bounds import HARD_MAX_BATCH_CODES, MAX_BATCH_TARGET_BYTES
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.registry import invoke
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
 
@@ -168,7 +168,7 @@ class BatchBoundaryTest(ServerFixture):
         code = " A/B?#% "
         raw = concept(code, terminology="other", version="old", active=True)
         with patch(
-            "nci_si_mcp.http_client._open", return_value=FakeResponse(json.dumps([raw]).encode())
+            "nci_sip_mcp.http_client._open", return_value=FakeResponse(json.dumps([raw]).encode())
         ) as opened:
             result = self.batch([code, code], terminology="other", release="old")
         self.assertEqual([item["code"] for item in result["concepts"]], [code, code])
@@ -184,7 +184,7 @@ class BatchBoundaryTest(ServerFixture):
         url = urlsplit(self.client.uri("/api/v1/concept/ncit_26.06e", params))
         length = len(f"{url.path}?{url.query}".encode())
         code = "C" + "1" * (MAX_BATCH_TARGET_BYTES - length + 1)
-        with patch("nci_si_mcp.http_client._open", return_value=FakeResponse(b"[]")) as opened:
+        with patch("nci_sip_mcp.http_client._open", return_value=FakeResponse(b"[]")) as opened:
             accepted = self.batch([code], include=["synonyms", "definitions", "properties"])
             refused = self.batch([code + "1"], include=["synonyms", "definitions", "properties"])
         self.assertEqual(accepted["concepts"], [])
@@ -196,7 +196,7 @@ class BatchBoundaryTest(ServerFixture):
 
     def test_percent_encoding_counts_bytes_instead_of_input_characters(self):
         code = "é" * 1200
-        with patch("nci_si_mcp.http_client._open") as opened:
+        with patch("nci_sip_mcp.http_client._open") as opened:
             result = self.batch([code], terminology="other")
         self.assertEqual(result["error"]["code"], "invalid_request")
         self.assertEqual(opened.call_count, 0)
@@ -205,11 +205,11 @@ class BatchBoundaryTest(ServerFixture):
         self.client.http.max_response_bytes = 100
         raw = [concept("C1", active=True), concept("C2", active=True)]
         with patch(
-            "nci_si_mcp.http_client._open", return_value=FakeResponse(json.dumps(raw).encode())
+            "nci_sip_mcp.http_client._open", return_value=FakeResponse(json.dumps(raw).encode())
         ) as opened:
             result = self.batch(["C1", "C2"])
         self.assertEqual(result["error"]["code"], "bound_exceeded")
-        self.assertEqual(result["error"]["details"]["bound"], "NCI_SI_EVS_MAX_RESPONSE_BYTES")
+        self.assertEqual(result["error"]["details"]["bound"], "NCI_SIP_EVS_MAX_RESPONSE_BYTES")
         self.assertEqual(result["error"]["details"]["limit"], 100)
         self.assertNotIn("concepts", result)
         self.assertEqual(opened.call_count, 1)

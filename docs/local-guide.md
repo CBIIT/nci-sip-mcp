@@ -48,27 +48,27 @@ Create a virtual environment and install the tagged server package:
 
 ```bash
 python3.14 -m venv "$SERVER_VENV"
-"$SERVER_VENV/bin/python" -m pip install "nci-si-mcp[server] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"
+"$SERVER_VENV/bin/python" -m pip install "nci-sip-mcp[server] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"
 ```
 
 Walk the stdio lifecycle:
 
 ```bash
-"$SERVER_VENV/bin/nci-si-install" check --target local
-"$SERVER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
-"$SERVER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
-"$SERVER_VENV/bin/nci-si-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" check --target local
+"$SERVER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
+"$SERVER_VENV/bin/nci-sip-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
 ```
 
 Walk the loopback HTTP lifecycle:
 
 ```bash
-"$SERVER_VENV/bin/nci-si-install" check --target local
-"$SERVER_VENV/bin/nci-si-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
-"$SERVER_VENV/bin/nci-si-install" status --target local --transport http --data-dir "$HTTP_ROOT"
-"$SERVER_VENV/bin/nci-si-install" start --target local --transport http --data-dir "$HTTP_ROOT"
-"$SERVER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
-"$SERVER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" check --target local
+"$SERVER_VENV/bin/nci-sip-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
+"$SERVER_VENV/bin/nci-sip-install" status --target local --transport http --data-dir "$HTTP_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" start --target local --transport http --data-dir "$HTTP_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
 ```
 
 The stdio `start` command prints the client configuration instead of opening a listener. The HTTP
@@ -81,12 +81,12 @@ start the one required-index server for this combination:
 
 ```bash
 python3.14 -m venv "$INDEX_VENV"
-"$INDEX_VENV/bin/python" -m pip install "nci-si-mcp[server,index] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"
-export NCI_SI_DATA_DIR="$INDEX_DATA"
-"$INDEX_VENV/bin/nci-si-mcp" index-sample C3262 C2991 C40704 C153397 C116938
-"$INDEX_VENV/bin/nci-si-mcp" evaluate
-export NCI_SI_HTTP_REQUIRE_INDEX=1
-"$INDEX_VENV/bin/nci-si-mcp" serve --transport streamable-http
+"$INDEX_VENV/bin/python" -m pip install "nci-sip-mcp[server,index] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"
+export NCI_SIP_DATA_DIR="$INDEX_DATA"
+"$INDEX_VENV/bin/nci-sip-mcp" index-sample C3262 C2991 C40704 C153397 C116938
+"$INDEX_VENV/bin/nci-sip-mcp" evaluate
+export NCI_SIP_HTTP_REQUIRE_INDEX=1
+"$INDEX_VENV/bin/nci-sip-mcp" serve --transport streamable-http
 ```
 
 Verify `http://127.0.0.1:8000/ready`, then call `search_concepts` with terminology `ncit`, query

@@ -8,8 +8,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from nci_si_mcp.cli import main
-from nci_si_mcp.config_snapshot import read_snapshot
+from nci_sip_mcp.cli import main
+from nci_sip_mcp.config_snapshot import read_snapshot
 
 
 class ConfigurationSnapshotCLITest(unittest.TestCase):
@@ -28,11 +28,11 @@ class ConfigurationSnapshotCLITest(unittest.TestCase):
                 return 0
 
             with (
-                patch.dict(os.environ, {"NCI_SI_TIMEOUT_SECONDS": "17"}, clear=True),
+                patch.dict(os.environ, {"NCI_SIP_TIMEOUT_SECONDS": "17"}, clear=True),
                 patch(
                     "sys.argv",
                     [
-                        "nci-si-mcp",
+                        "nci-sip-mcp",
                         "serve",
                         "--transport",
                         "streamable-http",
@@ -40,9 +40,9 @@ class ConfigurationSnapshotCLITest(unittest.TestCase):
                         str(path),
                     ],
                 ),
-                patch("nci_si_mcp.cli.Context"),
-                patch("nci_si_mcp.cli._serve", side_effect=serve),
-                patch("nci_si_mcp.cli.configure_logging"),
+                patch("nci_sip_mcp.cli.Context"),
+                patch("nci_sip_mcp.cli._serve", side_effect=serve),
+                patch("nci_sip_mcp.cli.configure_logging"),
             ):
                 self.assertEqual(main(), 0)
             self.assertFalse(path.exists())
@@ -56,10 +56,10 @@ class ConfigurationSnapshotCLITest(unittest.TestCase):
             output = io.StringIO()
             with (
                 patch.dict(os.environ, {}, clear=True),
-                patch("sys.argv", ["nci-si-mcp", "serve", "--configuration-snapshot", str(path)]),
-                patch("nci_si_mcp.cli.Context"),
-                patch("nci_si_mcp.cli._serve", side_effect=AssertionError("must not start")),
-                patch("nci_si_mcp.cli.configure_logging"),
+                patch("sys.argv", ["nci-sip-mcp", "serve", "--configuration-snapshot", str(path)]),
+                patch("nci_sip_mcp.cli.Context"),
+                patch("nci_sip_mcp.cli._serve", side_effect=AssertionError("must not start")),
+                patch("nci_sip_mcp.cli.configure_logging"),
                 redirect_stderr(output),
                 redirect_stdout(output),
             ):

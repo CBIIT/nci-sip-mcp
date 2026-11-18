@@ -236,7 +236,7 @@ class RemoteExecutionTest(unittest.TestCase):
                 "import json,os,sys\nfrom pathlib import Path\n"
                 'output = Path(sys.argv[sys.argv.index("--output") + 1])\n'
                 'output.write_text(json.dumps({"arguments":sys.argv[1:], '
-                '"authorization":os.environ.get("NCI_SI_BENCHMARK_AUTHORIZATION")}))\n'
+                '"authorization":os.environ.get("NCI_SIP_BENCHMARK_AUTHORIZATION")}))\n'
                 "raise SystemExit(9)\n"
             )
 

@@ -1,10 +1,10 @@
 from unittest.mock import patch
 
 from fakes import concept, release
-from nci_si_mcp import cursor as cursors
-from nci_si_mcp.bounds import Budget, current_budget
-from nci_si_mcp.evs import EVSReleaseNotFoundError
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp import cursor as cursors
+from nci_sip_mcp.bounds import Budget, current_budget
+from nci_sip_mcp.evs import EVSReleaseNotFoundError
+from nci_sip_mcp.registry import invoke
 from test_search_paging import reposition
 from test_server import ServerFixture, pinned
 from test_traversal import HubEVS
@@ -111,7 +111,7 @@ class HierarchyPagingTest(ServerFixture):
             return fetch(*args, **kwargs)
 
         with (
-            patch("nci_si_mcp.content.Budget", return_value=Budget(requests=1, paged=True)),
+            patch("nci_sip_mcp.content.Budget", return_value=Budget(requests=1, paged=True)),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=counted),
         ):
             result = self.page(cursor=first["nextCursor"])

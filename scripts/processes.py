@@ -46,7 +46,7 @@ def stop(process: subprocess.Popen[bytes], *, group: bool = False) -> None:
     always ends with a SIGKILL sweep of the group, even when the leader has already exited.
     """
 
-    # The same terminate, wait, kill sequence as OwnedServer.stop in nci_si_acceptance, kept
+    # The same terminate, wait, kill sequence as OwnedServer.stop in nci_sip_acceptance, kept
     # twice because that package must not import scripts.
 
     if not group and process.poll() is not None:

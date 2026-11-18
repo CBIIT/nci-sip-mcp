@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nci_si_acceptance.suite import (
+from nci_sip_acceptance.suite import (
     CANNOT_UNPREPARE,
     FIXTURES,
     LIVE_CAPABLE,
@@ -83,7 +83,7 @@ def test_registry_selection_precedes_live_selection_without_suspending_other_che
         if required
         else (
             "registry-release requirement suspended pending sponsor decision "
-            "(NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=optional)"
+            "(NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=optional)"
         )
     }
     assert [item.markers for item in (provenance, refusal, alignment)] == [
@@ -221,5 +221,5 @@ def test_the_index_codes_command_is_a_script_of_the_project():
     project = tomllib.loads(Path(__file__).parents[2].joinpath("pyproject.toml").read_text())
 
     assert project["tool"]["pdm"]["scripts"]["acceptance-index-codes"] == (
-        "python -m nci_si_acceptance.suite"
+        "python -m nci_sip_acceptance.suite"
     )

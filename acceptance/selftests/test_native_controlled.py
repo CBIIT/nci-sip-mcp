@@ -19,8 +19,8 @@ from coverage import Coverage, CoverageData
 from http_receiver import WireReceiver
 from test_request_release_selection import response
 
-from nci_si_acceptance import environments
-from nci_si_acceptance.suite_identity import identity
+from nci_sip_acceptance import environments
+from nci_sip_acceptance.suite_identity import identity
 
 NODE = "tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance"
 DISCOVERY = "/api/v1/metadata/terminologies?terminology=ncit&latest=true&tag=monthly"
@@ -73,7 +73,7 @@ def native_tree(monkeypatch, request):
             for key in ("PATH", "HOME", "TMPDIR", "LANG", "SYSTEMROOT")
             if key in os.environ
         }
-        env.update(NCI_SI_ACCEPTANCE_MODE="live", NCI_SI_ACCEPTANCE_ENVIRONMENT="evs-only")
+        env.update(NCI_SIP_ACCEPTANCE_MODE="live", NCI_SIP_ACCEPTANCE_ENVIRONMENT="evs-only")
         with _measured_native(tree, root, packages, env, request.node.nodeid):
             python = environment / "bin/python"
             probe = subprocess.run(  # noqa: S603 - fixed owned venv interpreter and isolated probe.
@@ -81,8 +81,8 @@ def native_tree(monkeypatch, request):
                     str(python),
                     "-I",
                     "-c",
-                    "import json,sys;import nci_si_acceptance.client as c;"
-                    "import nci_si_mcp.http_client as h;print(json.dumps([sys.prefix,"
+                    "import json,sys;import nci_sip_acceptance.client as c;"
+                    "import nci_sip_mcp.http_client as h;print(json.dumps([sys.prefix,"
                     "c.__file__,h.__file__,c.open_session.__wrapped__.__code__.co_filename,"
                     "h.HttpClient.get_json.__code__.co_filename]))",
                 ],
@@ -137,15 +137,15 @@ def local_policy(tree, receiver):
 @pytest.mark.parametrize("logical_limit", [None, 3])
 def test_native_serial_node_shares_controller_release_and_budget(native_tree, logical_limit):
     tree, python, env = native_tree
-    env["NCI_SI_EVS_LICENSE_KEY"] = "native-synthetic-key"
+    env["NCI_SIP_EVS_LICENSE_KEY"] = "native-synthetic-key"
     (tree / "acceptance/src/native_credentials_probe.py").write_text(
         "import os\n"
         "def pytest_sessionstart(session):\n"
-        "    os.environ['NCI_SI_EVS_LICENSE_KEY'] = 'later-synthetic-key'\n"
+        "    os.environ['NCI_SIP_EVS_LICENSE_KEY'] = 'later-synthetic-key'\n"
     )
     if logical_limit is not None:
         # Only this owned copy changes; controller and isolated child compile the same limit.
-        source = tree / "acceptance/src/nci_si_acceptance/request_authorization.py"
+        source = tree / "acceptance/src/nci_sip_acceptance/request_authorization.py"
         original = source.read_text()
         assert original.count("DEFAULT_LOGICAL = 256") == 1
         source.write_text(original.replace("DEFAULT_LOGICAL = 256", "DEFAULT_LOGICAL = 3"))
@@ -215,8 +215,8 @@ def test_native_publication_failure_keeps_an_incomplete_or_prior_report(native_t
         + """
 import json
 from pathlib import Path
-from nci_si_acceptance import report
-from nci_si_acceptance.request_native import NativeRun
+from nci_sip_acceptance import report
+from nci_sip_acceptance.request_native import NativeRun
 original, count = report._publish_native, 0
 original_complete = NativeRun.complete
 publication_error = OSError('owned native publication failure')
@@ -312,7 +312,7 @@ def pytest_collection_modifyitems(items):
 def test_initial_publication_failure_cannot_be_retried_by_framework_cleanup(native_tree):
     tree, python, env = native_tree
     (tree / "acceptance/src/initial_publication_probe.py").write_text("""
-from nci_si_acceptance import report
+from nci_sip_acceptance import report
 
 actual_publish = report._publish_native
 first_publication = True
@@ -347,7 +347,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import _pytest.main as main
 import pytest
-from nci_si_acceptance.request_native import NativeRun
+from nci_sip_acceptance.request_native import NativeRun
 
 actual_start = NativeRun.start
 native = None
@@ -416,9 +416,9 @@ def test_interrupted_native_closes_admission_before_framework_finalizers(native_
     (tree / "acceptance/src/native_admission_probe.py").write_text("""
 from pathlib import Path
 import pytest
-from nci_si_acceptance.request_native import NativeRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.http_client import HttpClient, RequestPolicyError
+from nci_sip_acceptance.request_native import NativeRun
+from nci_sip_acceptance.request_transport import ControlledHttpPolicy
+from nci_sip_mcp.http_client import HttpClient, RequestPolicyError
 
 actual_start = NativeRun.start
 native = None
@@ -475,7 +475,7 @@ def test_failed_native_controller_entry_preserves_each_failure_once(native_tree)
 import json
 from pathlib import Path
 import pytest
-from nci_si_acceptance import request_supervision
+from nci_sip_acceptance import request_supervision
 
 summary_failure = OSError('owned initial controller summary failure')
 close_failure = LookupError('owned persistent admission-close failure')
@@ -526,7 +526,7 @@ def test_native_cleanup_failure_marks_a_passing_case_failed(native_tree):
     (tree / "acceptance/src/native_cleanup_only_probe.py").write_text("""
 from pathlib import Path
 import pytest
-from nci_si_acceptance.request_native import NativeRun
+from nci_sip_acceptance.request_native import NativeRun
 
 actual_start = NativeRun.start
 cleanup_failure = LookupError('owned native listener cleanup failure')
@@ -590,7 +590,7 @@ import hashlib
 import json
 from pathlib import Path
 import pytest
-from nci_si_acceptance import request_native
+from nci_sip_acceptance import request_native
 
 failure = LookupError('owned sessionfinish failure')
 actual_complete = request_native.NativeRun.complete
@@ -643,7 +643,7 @@ def pytest_sessionfinish(session):
         assert receiver.contacts == len(expected_requests)
     directory = tree / "acceptance/tmp"
     observation = json.loads((directory / "sessionfinish-observation.json").read_text())
-    source = tree / "acceptance/src/nci_si_acceptance/request_native.py"
+    source = tree / "acceptance/src/nci_sip_acceptance/request_native.py"
     assert Path(observation["compiled"]).resolve() == source.resolve()
     assert observation["source_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
     report = json.loads((directory / "native-report.json").read_text())
@@ -728,7 +728,7 @@ def test_native_startup_or_effective_collection_failure_acquires_nothing(
 )
 def test_native_handoff_refuses_before_operational_imports(native_tree, origin):
     tree, python, env = native_tree
-    catalogue = tree / "acceptance/src/nci_si_acceptance/request_catalogue.py"
+    catalogue = tree / "acceptance/src/nci_sip_acceptance/request_catalogue.py"
     catalogue.with_name("foreign_catalogue.py").write_bytes(catalogue.read_bytes())
     (tree / "acceptance/src/foreign_wrapper.py").write_text(
         "from functools import wraps\n"
@@ -744,14 +744,14 @@ from pathlib import Path
 root = Path.cwd()
 if sys.argv[1] == 'interpreter':
     sys.path[:0] = [str(root / 'src'), str(root / 'acceptance/src')]
-from nci_si_acceptance.environments import selection
-from nci_si_acceptance.request_catalogue import compile_policy
-from nci_si_acceptance.request_budget import ControlledRun
-from nci_si_acceptance import request_native as native
-from nci_si_acceptance.request_native import _handoff_run, native_policy
-from nci_si_mcp.errors import RequestPolicyError
-blocked = {'nci_si_mcp.http_client', 'nci_si_mcp.evs', 'nci_si_mcp.registry',
-           'nci_si_acceptance.request_transport', 'nci_si_acceptance.client'}
+from nci_sip_acceptance.environments import selection
+from nci_sip_acceptance.request_catalogue import compile_policy
+from nci_sip_acceptance.request_budget import ControlledRun
+from nci_sip_acceptance import request_native as native
+from nci_sip_acceptance.request_native import _handoff_run, native_policy
+from nci_sip_mcp.errors import RequestPolicyError
+blocked = {'nci_sip_mcp.http_client', 'nci_sip_mcp.evs', 'nci_sip_mcp.registry',
+           'nci_sip_acceptance.request_transport', 'nci_sip_acceptance.client'}
 class Guard:
     def find_spec(self, fullname, path=None, target=None):
         assert fullname not in blocked, fullname
@@ -767,11 +767,11 @@ try:
     record = {'environment': environment.to_record(), 'run': run.descriptor.to_record(),
               'participant': 'native-serial'}
     path.write_text(json.dumps(record))
-    os.environ['NCI_SI_ACCEPTANCE_RUN_HANDOFF'] = str(path)
+    os.environ['NCI_SIP_ACCEPTANCE_RUN_HANDOFF'] = str(path)
     origin = sys.argv[1]
     if origin == 'module':
         spec = importlib.util.spec_from_file_location(compile_policy.__module__,
-            root / 'acceptance/src/nci_si_acceptance/foreign_catalogue.py')
+            root / 'acceptance/src/nci_sip_acceptance/foreign_catalogue.py')
         foreign = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(foreign)
         sys.modules[compile_policy.__module__] = foreign
@@ -780,8 +780,8 @@ try:
         native.compile_policy = decorate(native.compile_policy)
     elif origin == 'unattributed':
         native.compile_policy = runpy.run_path(
-            str(root / 'acceptance/src/nci_si_acceptance/request_catalogue.py'))['compile_policy']
-    expected = root / 'acceptance/src/nci_si_acceptance/request_catalogue.py'
+            str(root / 'acceptance/src/nci_sip_acceptance/request_catalogue.py'))['compile_policy']
+    expected = root / 'acceptance/src/nci_sip_acceptance/request_catalogue.py'
     module = inspect.getmodule(native.compile_policy)
     origins = [Path(sys.prefix).resolve() == (root / '.venv').resolve(),
         module is not None and Path(module.__file__).resolve() == expected,
@@ -851,8 +851,8 @@ def test_native_postspawn_failure_reaps_child_and_closes_transferred_stderr(nati
     (tree / "acceptance/src/native_postspawn_probe.py").write_text("""
 import json
 from pathlib import Path
-from nci_si_acceptance.request_stdio import StdioOwner, StderrTransfer
-from nci_si_mcp.errors import RequestPolicyError
+from nci_sip_acceptance.request_stdio import StdioOwner, StderrTransfer
+from nci_sip_mcp.errors import RequestPolicyError
 original_finish, original_stderr = StdioOwner.finish, StderrTransfer.finish
 async def fail_after_handle(self, portal):
     assert self.process is not None
@@ -1031,7 +1031,7 @@ def test_native_measurement_preserves_the_parent_source_scope(tmp_path, monkeypa
     for folder in (root, tree, packages):
         folder.mkdir()
     sources = {
-        "harness": ["nci_si_acceptance"],
+        "harness": ["nci_sip_acceptance"],
         "mutation": [str(root / name) for name in ("src", "scripts", "acceptance/src")],
         "missing": None,
         "foreign": [str(tmp_path / "another-checkout/src")],
@@ -1053,7 +1053,7 @@ def test_native_measurement_preserves_the_parent_source_scope(tmp_path, monkeypa
         monkeypatch.setenv("NATIVE_COVERAGE_CONTEXT", "owner|setup")
         child = Coverage(config_file=environment["COVERAGE_PROCESS_START"])
         assert child.get_option("run:source") == (
-            ["nci_si_acceptance"]
+            ["nci_sip_acceptance"]
             if scope == "harness"
             else [str(tree / name) for name in ("src", "scripts", "acceptance/src")]
         )

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from nci_si_acceptance.spec import prompts_of
+from nci_sip_acceptance.spec import prompts_of
 
 CASES = {
     "evs": ("get_concept", {"terminology": "ncit", "code": "C4817", "include": ["definitions"]}),

@@ -5,8 +5,8 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from fakes import concept
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.registry import invoke
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
 
@@ -14,7 +14,7 @@ from test_server import ServerFixture
 class RetiredCodeTest(ServerFixture):
     def mcp_replies(self):
         responses = [FakeResponse(json.dumps(item).encode()) for item in (self.raw, self.history)]
-        with patch("nci_si_mcp.http_client._open", side_effect=responses):
+        with patch("nci_sip_mcp.http_client._open", side_effect=responses):
             return self.call(
                 "resolve_retired_code", code=self.raw["code"], release=self.raw["version"]
             )
@@ -92,7 +92,7 @@ class RetiredCodeTest(ServerFixture):
 
     def replies(self, **arguments):
         responses = [FakeResponse(json.dumps(item).encode()) for item in (self.raw, self.history)]
-        with patch("nci_si_mcp.http_client._open", side_effect=responses) as opened:
+        with patch("nci_sip_mcp.http_client._open", side_effect=responses) as opened:
             result = self.resolve(**arguments)
         return result, opened
 
@@ -159,7 +159,7 @@ class RetiredCodeTest(ServerFixture):
             FakeResponse(json.dumps(self.raw).encode()),
             http_error(404, b'{"message":"No history"}'),
         ]
-        with patch("nci_si_mcp.http_client._open", side_effect=responses):
+        with patch("nci_sip_mcp.http_client._open", side_effect=responses):
             result = self.resolve()
         self.assertEqual(result["error"]["code"], "upstream_unavailable")
         self.assertNotIn("replacements", result)
@@ -206,7 +206,7 @@ class RetiredCodeTest(ServerFixture):
         ):
             with (
                 self.subTest(expected=expected),
-                patch("nci_si_mcp.http_client._open", side_effect=http_error(404, body)),
+                patch("nci_sip_mcp.http_client._open", side_effect=http_error(404, body)),
             ):
                 result = self.resolve()
                 self.assertEqual(result["error"]["code"], expected)
@@ -217,13 +217,13 @@ class RetiredCodeTest(ServerFixture):
             FakeResponse(json.dumps(self.raw).encode()),
             http_error(503, b'{"message":"Unavailable"}'),
         ]
-        with patch("nci_si_mcp.http_client._open", side_effect=replies):
+        with patch("nci_sip_mcp.http_client._open", side_effect=replies):
             result = self.resolve()
         self.assertEqual(result["error"]["code"], "upstream_unavailable")
         self.assertNotIn("active", result)
 
     def test_invalid_identifier_is_rejected_without_network(self):
-        with patch("nci_si_mcp.http_client._open") as opened:
+        with patch("nci_sip_mcp.http_client._open") as opened:
             result = self.resolve(code="C0")
         self.assertEqual(result["error"]["code"], "invalid_request")
         self.assertEqual(result["error"]["details"]["parameter"], "code")

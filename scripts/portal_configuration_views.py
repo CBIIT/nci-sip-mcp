@@ -6,7 +6,7 @@ from urllib.parse import parse_qs
 from scripts.portal_configuration import MAX_VALUE, LocalConfiguration, SnapshotInvalidError
 from scripts.portal_views import page, table, text
 
-from nci_si_mcp.config_snapshot import PROPOSABLE
+from nci_sip_mcp.config_snapshot import PROPOSABLE
 
 
 def configuration_page(configuration: LocalConfiguration) -> tuple[int, str]:

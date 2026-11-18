@@ -5,9 +5,9 @@ import sys
 
 import pytest
 
-from nci_si_acceptance import quickstart
-from nci_si_acceptance.quickstart import BEGIN, END, QUICKSTART, current, render
-from nci_si_acceptance.spec import TOOLS
+from nci_sip_acceptance import quickstart
+from nci_sip_acceptance.quickstart import BEGIN, END, QUICKSTART, current, render
+from nci_sip_acceptance.spec import TOOLS
 
 
 def test_the_table_has_a_row_per_tool_with_its_group_and_the_summary_of_the_specification():
@@ -63,7 +63,7 @@ def test_a_quickstart_that_is_not_current_fails_the_check_and_is_rewritten_witho
 
 def test_the_module_runs_as_a_command():
     ran = subprocess.run(
-        [sys.executable, "-m", "nci_si_acceptance.quickstart", "--check"],
+        [sys.executable, "-m", "nci_sip_acceptance.quickstart", "--check"],
         capture_output=True,
         text=True,
         check=False,

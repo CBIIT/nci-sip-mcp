@@ -5,9 +5,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.registry import invoke
 
 
 class DictionaryValidationTest(unittest.TestCase):
@@ -23,7 +23,7 @@ class DictionaryValidationTest(unittest.TestCase):
         )
         with (
             TemporaryDirectory() as directory,
-            patch("nci_si_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")),
+            patch("nci_sip_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")),
         ):
             context = Context(Settings(data_dir=Path(directory)))
             for column, parameter in cases:

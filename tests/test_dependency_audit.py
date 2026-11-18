@@ -19,7 +19,7 @@ from pip_audit._cli import audit
 from pip_audit._service.interface import Dependency, VulnerabilityID, VulnerabilityResult
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCAL_ACCEPTANCE = "-e ./acceptance#egg=nci-si-acceptance\n"
+LOCAL_ACCEPTANCE = "-e ./acceptance#egg=nci-sip-acceptance\n"
 # The exporter may be real or provide bounded fixtures; the audit always runs its real CLI.
 PDM_BOUNDARY = """
 pdm() {
@@ -114,7 +114,7 @@ class DependencyAuditInputTest(unittest.TestCase):
         local = [package for package in packages if "path" in package]
         self.assertEqual(
             [(p["name"], p["path"], p.get("editable")) for p in local],
-            [("nci-si-acceptance", "./acceptance", True)],
+            [("nci-sip-acceptance", "./acceptance", True)],
         )
         expected = {
             (canonicalize_name(package["name"]), package["version"])

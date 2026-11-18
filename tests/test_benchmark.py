@@ -19,8 +19,8 @@ import yaml
 from scripts import benchmark
 from scripts.benchmark_records import percentile, summarize
 
-from nci_si_acceptance import client, denied_surfaces, environments
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_sip_acceptance import client, denied_surfaces, environments
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures
 
 
 def sample(elapsed=1.0, *, error=False, requests=2, size=9):
@@ -72,29 +72,29 @@ def local_policy_inputs(selected, forbidden, directory):
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith("NCI_SI_") and not environments.external_runtime_setting(key)
+        if not key.startswith("NCI_SIP_") and not environments.external_runtime_setting(key)
     }
     env |= {
-        "NCI_SI_ACCEPTANCE_MODE": "fixture",
-        "NCI_SI_ACCEPTANCE_ENVIRONMENT": "local-measurement",
+        "NCI_SIP_ACCEPTANCE_MODE": "fixture",
+        "NCI_SIP_ACCEPTANCE_ENVIRONMENT": "local-measurement",
     }
     return path, expected, env
 
 
 class BenchmarkTest(unittest.TestCase):
     def test_live_selection_and_prepare_fail_before_process_or_report(self):
-        variable = "NCI_SI_ACCEPTANCE_ENVIRONMENT"
+        variable = "NCI_SIP_ACCEPTANCE_ENVIRONMENT"
         cases = [
             ({}, f"{variable} is required for live mode"),
             ({variable: ""}, f"{variable} is required for live mode"),
             ({variable: "unreviewed"}, f"{variable} does not name a reviewed environment"),
             (
-                {variable: "evs-only", "NCI_SI_ACCEPTANCE_PREPARE": "nci-si-mcp index-sample"},
-                "NCI_SI_ACCEPTANCE_PREPARE is not supported by the index-free benchmark",
+                {variable: "evs-only", "NCI_SIP_ACCEPTANCE_PREPARE": "nci-sip-mcp index-sample"},
+                "NCI_SIP_ACCEPTANCE_PREPARE is not supported by the index-free benchmark",
             ),
             (
-                {variable: "evs-only", "NCI_SI_ACCEPTANCE_URL": "http://private-marker.test/mcp"},
-                "NCI_SI_ACCEPTANCE_URL is incompatible with the selected live environment",
+                {variable: "evs-only", "NCI_SIP_ACCEPTANCE_URL": "http://private-marker.test/mcp"},
+                "NCI_SIP_ACCEPTANCE_URL is incompatible with the selected live environment",
             ),
         ]
         for settings, expected in cases:
@@ -128,7 +128,7 @@ class BenchmarkTest(unittest.TestCase):
                     )
 
     def test_explicit_target_mode_does_not_mutate_ambient_or_change_default_callers(self):
-        settings = {"NCI_SI_ACCEPTANCE_MODE": "live"}
+        settings = {"NCI_SIP_ACCEPTANCE_MODE": "live"}
         with patch.dict(os.environ, settings, clear=True):
             failure = None
             selected = None
@@ -138,20 +138,20 @@ class BenchmarkTest(unittest.TestCase):
                 failure = str(error)
             self.assertIsNone(failure, "explicit mode must be supported without global mutation")
             self.assertEqual(selected.mode, "fixture")
-            self.assertEqual(os.environ["NCI_SI_ACCEPTANCE_MODE"], "live")
+            self.assertEqual(os.environ["NCI_SIP_ACCEPTANCE_MODE"], "live")
             with self.assertRaisesRegex(ValueError, "is required for live mode"):
                 client.Target.from_env()
-        with patch.dict(os.environ, {"NCI_SI_ACCEPTANCE_MODE": "fixture"}, clear=True):
+        with patch.dict(os.environ, {"NCI_SIP_ACCEPTANCE_MODE": "fixture"}, clear=True):
             self.assertEqual(client.Target.from_env().mode, "fixture")
 
     def test_fixture_producer_ignores_acceptance_only_target_selectors(self):
         settings = {
-            "NCI_SI_ACCEPTANCE_MODE": "live",
-            "NCI_SI_ACCEPTANCE_ENVIRONMENT": "unreviewed",
-            "NCI_SI_ACCEPTANCE_SERVER": "must-not-execute",
-            "NCI_SI_ACCEPTANCE_PROFILE": "evs",
-            "NCI_SI_ACCEPTANCE_PREPARE": "must-not-prepare",
-            "NCI_SI_ACCEPTANCE_URL": "http://must-not-contact.test/mcp",
+            "NCI_SIP_ACCEPTANCE_MODE": "live",
+            "NCI_SIP_ACCEPTANCE_ENVIRONMENT": "unreviewed",
+            "NCI_SIP_ACCEPTANCE_SERVER": "must-not-execute",
+            "NCI_SIP_ACCEPTANCE_PROFILE": "evs",
+            "NCI_SIP_ACCEPTANCE_PREPARE": "must-not-prepare",
+            "NCI_SIP_ACCEPTANCE_URL": "http://must-not-contact.test/mcp",
         }
         with patch.dict(os.environ, settings), tempfile.TemporaryDirectory() as d:
             output = Path(d) / "report.json"
@@ -196,20 +196,20 @@ class BenchmarkTest(unittest.TestCase):
                 {
                     key: value
                     for key, value in env.items()
-                    if key.startswith("NCI_SI_")
+                    if key.startswith("NCI_SIP_")
                     and key.endswith(("_BASE_URL", "_FTP_URL", "_SPARQL_URL"))
                 },
                 {
-                    "NCI_SI_EVS_BASE_URL": expected["origins"]["evs"],
-                    "NCI_SI_EVS_FHIR_BASE_URL": expected["origins"]["evs-fhir"],
-                    "NCI_SI_CADSR_BASE_URL": listeners[0][1],
-                    "NCI_SI_CADSR_FTP_URL": listeners[0][1],
-                    "NCI_SI_SSIS_SPARQL_URL": listeners[0][1],
+                    "NCI_SIP_EVS_BASE_URL": expected["origins"]["evs"],
+                    "NCI_SIP_EVS_FHIR_BASE_URL": expected["origins"]["evs-fhir"],
+                    "NCI_SIP_CADSR_BASE_URL": listeners[0][1],
+                    "NCI_SIP_CADSR_FTP_URL": listeners[0][1],
+                    "NCI_SIP_SSIS_SPARQL_URL": listeners[0][1],
                 },
             )
             self.assertEqual(
                 list(command[:5]),
-                [sys.executable, "-I", "-m", "nci_si_acceptance.live_launcher", "serve"],
+                [sys.executable, "-I", "-m", "nci_sip_acceptance.live_launcher", "serve"],
             )
             launches.append(dict(env))
             return real_process(command, *args, **kwargs)
@@ -264,7 +264,7 @@ class BenchmarkTest(unittest.TestCase):
             with socket.socket() as probe:
                 probe.settimeout(2)
                 self.assertNotEqual(probe.connect_ex(("127.0.0.1", urlsplit(url).port)), 0)
-            self.assertTrue(all(row["NCI_SI_UPSTREAM_MODE"] == "live" for row in launches))
+            self.assertTrue(all(row["NCI_SIP_UPSTREAM_MODE"] == "live" for row in launches))
 
     def assert_producer_phases(self, cases):
         rates = {"get_concept": 0, "expand_value_set": 0, "get_data_element": 1}

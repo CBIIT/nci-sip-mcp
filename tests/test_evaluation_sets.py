@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from nci_si_mcp.evaluation_sets import load_set, parse_set, production_set
+from nci_sip_mcp.evaluation_sets import load_set, parse_set, production_set
 
 
 def sample_set_payload():

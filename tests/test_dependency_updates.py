@@ -60,7 +60,7 @@ def registry_images(path):
     images = {
         service["image"] for service in compose.get("services", {}).values() if "image" in service
     }
-    local = {"nci-si-admin:local", "nci-si-docs:local", "nci-si-mcp:verified"}
+    local = {"nci-si-admin:local", "nci-si-docs:local", "nci-sip-mcp:verified"}
     return images - local
 
 
@@ -202,7 +202,7 @@ class DependencyAuditWorkflowTest(unittest.TestCase):
                     "run": (
                         "pdm export -G :all --without-hashes --no-extras "
                         '-o "$RUNNER_TEMP/all-requirements.txt"\n'
-                        "sed -e '\\|^-e \\./acceptance#egg=nci-si-acceptance$|d' "
+                        "sed -e '\\|^-e \\./acceptance#egg=nci-sip-acceptance$|d' "
                         "-e 's/;.*//' "
                         '"$RUNNER_TEMP/all-requirements.txt" > "$RUNNER_TEMP/requirements.txt"\n'
                         'pdm run pip-audit -r "$RUNNER_TEMP/requirements.txt" '

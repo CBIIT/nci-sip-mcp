@@ -18,7 +18,7 @@ from pathlib import Path
 from mcp.client import Client
 from scripts.processes import wait_until
 
-from nci_si_mcp.registry import SPECS
+from nci_sip_mcp.registry import SPECS
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCKER = shutil.which("docker") or "docker"
@@ -68,11 +68,11 @@ def mounted(image: str, assets: Path, *args: str) -> list[str]:
         "-v",
         f"{assets}:/assets",
         "-e",
-        "NCI_SI_DATA_DIR=/assets/data",
+        "NCI_SIP_DATA_DIR=/assets/data",
         "-e",
-        "NCI_SI_EMBEDDING_MODEL=/assets/model",
+        "NCI_SIP_EMBEDDING_MODEL=/assets/model",
         "-e",
-        "NCI_SI_HTTP_AUTH_MODE=trusted-local",
+        "NCI_SIP_HTTP_AUTH_MODE=trusted-local",
         *args,
         image,
     ]
@@ -118,7 +118,7 @@ def request(port: int, path: str) -> dict:
 def default_auth_refusal(image: str, assets: Path) -> None:
     name = "nci-si-auth-" + uuid.uuid4().hex
     command = mounted(image, assets, "--name", name, "--network", "none")
-    explicit = command.index("NCI_SI_HTTP_AUTH_MODE=trusted-local")
+    explicit = command.index("NCI_SIP_HTTP_AUTH_MODE=trusted-local")
     del command[explicit - 1 : explicit + 1]  # Exercise the image default, not the smoke opt-out.
     try:
         result = docker(*command, check=False)
@@ -231,7 +231,7 @@ def main() -> None:
             failure(args.image, assets, "index")
             prepare(args.image, assets)
             default_auth_refusal(args.image, assets)
-            failure(args.image, assets, "index", "-e", "NCI_SI_EMBEDDING_MODEL=wrong-model")
+            failure(args.image, assets, "index", "-e", "NCI_SIP_EMBEDDING_MODEL=wrong-model")
             serve(args.image, assets)
             retained_builds(args.image, assets)
             (assets / "model").rename(assets / "held-model")

@@ -11,11 +11,11 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs
 
-from nci_si_mcp.config import Settings
-from nci_si_mcp.errors import InputValidationError, PlatformError
-from nci_si_mcp.http_client import UpstreamTimeoutError, UpstreamTooLargeError
-from nci_si_mcp.invocation import call
-from nci_si_mcp.ssis import CADSR_GRAPH, NCIT_GRAPH, SSISClient
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.errors import InputValidationError, PlatformError
+from nci_sip_mcp.http_client import UpstreamTimeoutError, UpstreamTooLargeError
+from nci_sip_mcp.invocation import call
+from nci_sip_mcp.ssis import CADSR_GRAPH, NCIT_GRAPH, SSISClient
 from test_evs_client import FakeResponse
 from test_http_client import Reply, ServerTestCase
 
@@ -276,7 +276,7 @@ VALUES ?role { cadsr:main_concept cadsr:minor_concept }
 class SSISValidationTest(unittest.TestCase):
     def test_identifiers_rejected_before_any_transport(self):
         client = SSISClient(Settings())
-        with patch("nci_si_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")):
+        with patch("nci_sip_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")):
             for method in (
                 client.find_data_elements,
                 client.find_permissible_values,
@@ -449,7 +449,7 @@ class SSISValidationContractsTest(unittest.TestCase):
             (client.find_data_elements, "C1", {"expand_descendants": "true"}, "expandDescendants"),
             (client.find_permissible_values, "C1", {"expand_descendants": 1}, "expandDescendants"),
         ]
-        with patch("nci_si_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")):
+        with patch("nci_sip_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")):
             for operation, argument, options, parameter in cases:
                 with self.subTest(operation=operation.__name__, argument=argument):
                     with self.assertRaises(InputValidationError) as raised:
@@ -465,7 +465,7 @@ class SSISValidationContractsTest(unittest.TestCase):
             for maximum in (0, -1, True, 1.5, "2"):
                 with self.subTest(operation=operation.__name__, maximum=maximum):
                     with (
-                        patch("nci_si_mcp.http_client._open", side_effect=AssertionError("HTTP")),
+                        patch("nci_sip_mcp.http_client._open", side_effect=AssertionError("HTTP")),
                         self.assertRaises(InputValidationError) as raised,
                     ):
                         operation(argument, maximum=maximum)
@@ -478,7 +478,7 @@ class SSISValidationContractsTest(unittest.TestCase):
                 timeout_seconds=17,
             )
         )
-        with patch("nci_si_mcp.http_client._open") as transport:
+        with patch("nci_sip_mcp.http_client._open") as transport:
             transport.return_value = FakeResponse(b'{"results":{"bindings":[]}}')
             self.assertEqual(client.find_data_elements("C1"), [])
         self.assertEqual(
@@ -490,7 +490,7 @@ class SSISValidationContractsTest(unittest.TestCase):
         client = SSISClient(Settings(timeout_seconds=17))
         client.sparql_http.sleep = lambda _: None
         with (
-            patch("nci_si_mcp.http_client._open", side_effect=TimeoutError),
+            patch("nci_sip_mcp.http_client._open", side_effect=TimeoutError),
             self.assertRaises(UpstreamTimeoutError) as raised,
         ):
             client.find_data_elements("C1")
@@ -498,7 +498,7 @@ class SSISValidationContractsTest(unittest.TestCase):
         self.assertEqual(raised.exception.details["attempts"], 3)
         response = FakeResponse(b"", {"Content-Length": str(10 * 1024 * 1024 + 1)})
         with (
-            patch("nci_si_mcp.http_client._open", return_value=response),
+            patch("nci_sip_mcp.http_client._open", return_value=response),
             self.assertRaises(UpstreamTooLargeError) as raised,
         ):
             client.find_data_elements("C1")

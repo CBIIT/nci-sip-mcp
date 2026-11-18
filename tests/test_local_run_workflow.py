@@ -102,16 +102,16 @@ DOCUMENTS = {
 }
 
 CI_INDEX_INSTALL = (
-    '"$INDEX_VENV/bin/python" -m pip install "nci-si-mcp[server,index] @ '
+    '"$INDEX_VENV/bin/python" -m pip install "nci-sip-mcp[server,index] @ '
     'git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"'
 )
 CI_SERVER_INSTALL = (
-    '"$SERVER_VENV/bin/python" -m pip install "nci-si-mcp[server] @ '
+    '"$SERVER_VENV/bin/python" -m pip install "nci-sip-mcp[server] @ '
     'git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"'
 )
 
 FIXTURE_RUN = """# shellcheck disable=SC2016 # the single quotes are the documented form
-NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SI_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json
+NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SIP_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SIP_ACCEPTANCE_PREPARE='nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json
 status=$?
 [ "$status" -le 1 ] && [ -s acceptance/fixture.json ] || { echo "::error::The fixture run did not finish (exit status $status)."; exit 1; }
 """  # noqa: E501
@@ -183,11 +183,11 @@ CI_ONLY = {
     "curl --fail --silent http://127.0.0.1:8000/ready": "verifies the guide's documented HTTP "
     "readiness endpoint",
     "status=$?": "keeps the fixture run's exit status, which the next line judges",
-    'export NCI_SI_DATA_DIR="$INDEX_DATA"': "uses the workflow's temporary index directory in "
+    'export NCI_SIP_DATA_DIR="$INDEX_DATA"': "uses the workflow's temporary index directory in "
     "place of the document's /path/to/data placeholder",
-    '"$INDEX_VENV/bin/nci-si-mcp" index-sample C3262 C2991 C40704 C153397 C116938': "runs the "
+    '"$INDEX_VENV/bin/nci-sip-mcp" index-sample C3262 C2991 C40704 C153397 C116938': "runs the "
     "documented sample through the isolated tagged-release environment",
-    '"$INDEX_VENV/bin/nci-si-mcp" evaluate': "runs the documented evaluation through the same "
+    '"$INDEX_VENV/bin/nci-sip-mcp" evaluate': "runs the documented evaluation through the same "
     "isolated tagged-release environment",
     '[ "$status" -le 1 ] && [ -s acceptance/fixture.json ] || { echo "::error::The fixture run '
     'did not finish (exit status $status)."; exit 1; }': "exit status 1 means some tests did "
@@ -199,9 +199,9 @@ CI_ONLY = {
 # local-run.yml says what this does not cover; tests/test_workflow_containment.py ties both
 # installer jobs to the same design.
 LOOPBACK_ENV = {
-    "NCI_SI_CADSR_BASE_URL": "http://127.0.0.1:8767/cadsr",
-    "NCI_SI_CADSR_FTP_URL": "http://127.0.0.1:8767/cadsr-ftp",
-    "NCI_SI_SSIS_SPARQL_URL": "http://127.0.0.1:8767/ssis-sparql",
+    "NCI_SIP_CADSR_BASE_URL": "http://127.0.0.1:8767/cadsr",
+    "NCI_SIP_CADSR_FTP_URL": "http://127.0.0.1:8767/cadsr-ftp",
+    "NCI_SIP_SSIS_SPARQL_URL": "http://127.0.0.1:8767/ssis-sparql",
     "no_proxy": "127.0.0.1,localhost,::1,cadsrapi.cancer.gov,cadsrapi-stage.cancer.gov,"
     "cadsr.nci.nih.gov,shared.semantics.cancer.gov",
 }
@@ -268,7 +268,7 @@ PY
 PROBES = {
     "Serve over stdio and initialize (CI only)": (
         "QUICKSTART.md",
-        "pdm run nci-si-mcp serve",
+        "pdm run nci-sip-mcp serve",
         None,
     ),
     "Serve the validation dashboard until ready (CI only)": (
@@ -284,7 +284,7 @@ PROBES = {
 }
 
 DOCUMENTED_INDEX_INSTALL = (
-    '"$INDEX_VENV/bin/python" -m pip install "nci-si-mcp[server,index] @ '
+    '"$INDEX_VENV/bin/python" -m pip install "nci-sip-mcp[server,index] @ '
     'git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"'
 )
 REQUIRED_INDEX_RUN = r"""set -euo pipefail
@@ -311,9 +311,9 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
-export NCI_SI_DATA_DIR="$INDEX_DATA"
-export NCI_SI_HTTP_REQUIRE_INDEX=1
-"$INDEX_VENV/bin/nci-si-mcp" serve --transport streamable-http &
+export NCI_SIP_DATA_DIR="$INDEX_DATA"
+export NCI_SIP_HTTP_REQUIRE_INDEX=1
+"$INDEX_VENV/bin/nci-sip-mcp" serve --transport streamable-http &
 server=$!
 python3 "$RUNNER_TEMP/ready.py" http://127.0.0.1:8000/ready --pid "$server"
 "$INDEX_VENV/bin/python" - <<'PY'
@@ -335,7 +335,7 @@ asyncio.run(check())
 PY
 """
 
-SERVER_ONLY_RUN = r"""export NCI_SI_DATA_DIR="$RUNNER_TEMP/server-only-data"
+SERVER_ONLY_RUN = r"""export NCI_SIP_DATA_DIR="$RUNNER_TEMP/server-only-data"
 "$SERVER_VENV/bin/python" - <<'PY'
 import asyncio
 import os
@@ -344,9 +344,9 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 async def check():
     server = StdioServerParameters(
-        command=os.environ["SERVER_VENV"] + "/bin/nci-si-mcp",
+        command=os.environ["SERVER_VENV"] + "/bin/nci-sip-mcp",
         args=["serve"],
-        env={"NCI_SI_DATA_DIR": os.environ["RUNNER_TEMP"] + "/server-only-data"},
+        env={"NCI_SIP_DATA_DIR": os.environ["RUNNER_TEMP"] + "/server-only-data"},
     )
     async with Client(stdio_client(server)) as client:
         arguments = {"terminology": "ncit", "query": "Neoplasm", "mode": "semantic"}
@@ -606,7 +606,7 @@ import json, subprocess
 request = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
     "protocolVersion": "2025-06-18", "capabilities": {},
     "clientInfo": {"name": "local-run", "version": "0"}}}
-server = subprocess.Popen(["pdm", "run", "nci-si-mcp", "serve"], stdin=subprocess.PIPE,
+server = subprocess.Popen(["pdm", "run", "nci-sip-mcp", "serve"], stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, text=True)
 try:
     server.stdin.write(json.dumps(request) + "\n")

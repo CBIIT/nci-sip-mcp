@@ -148,8 +148,8 @@ class PackageDependenciesTest(unittest.TestCase):
         self.assertEqual(
             project["scripts"],
             {
-                "nci-si-install": "nci_si_mcp.installer:main",
-                "nci-si-mcp": "nci_si_mcp.cli:main",
+                "nci-sip-install": "nci_sip_mcp.installer:main",
+                "nci-sip-mcp": "nci_sip_mcp.cli:main",
             },
         )
 

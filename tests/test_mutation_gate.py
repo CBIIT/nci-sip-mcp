@@ -1151,7 +1151,7 @@ class MutationExecutionTest(unittest.TestCase):
             result, data = run_domain(scratch, "fixture", [node], 120, baseline=True)
             self.assertEqual(result["outcome"], "SURVIVED", result)
             mapping = coverage_map(data, scratch)
-            source = "src/nci_si_mcp/content.py"
+            source = "src/nci_sip_mcp/content.py"
             line = next(
                 number
                 for number, text in enumerate((scratch / source).read_text().splitlines(), 1)
@@ -1187,7 +1187,7 @@ class MutationExecutionTest(unittest.TestCase):
                 "import json, os\nfrom pathlib import Path\n"
                 "def pytest_addoption(parser):\n    parser.addoption('--report')\n"
                 "def pytest_sessionstart(session):\n"
-                "    if os.environ.get('NCI_SI_ACCEPTANCE_MODE') != 'fixture':\n        return\n"
+                "    if os.environ.get('NCI_SIP_ACCEPTANCE_MODE') != 'fixture':\n        return\n"
                 f"    with Path({str(log)!r}).open('a') as stream:\n"
                 "        stream.write(json.dumps(session.config.getoption('cov_context'))"
                 " + '\\n')\n"
@@ -1759,13 +1759,13 @@ class MutationExecutionTest(unittest.TestCase):
             "    child = subprocess.run([sys.executable, '-c', "
             "'import example; print(example.answer())'], capture_output=True, text=True)\n"
             "    assert child.stdout.strip() == 'True'\n"
-            "    console = subprocess.run(['nci-si-mcp'], capture_output=True, text=True)\n"
+            "    console = subprocess.run(['nci-sip-mcp'], capture_output=True, text=True)\n"
             "    assert console.stdout.strip() == 'True'"
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             project(root, source, unit)
-            package = root / "src/nci_si_mcp"
+            package = root / "src/nci_sip_mcp"
             package.mkdir()
             (package / "__init__.py").write_text("")
             (package / "cli.py").write_text(

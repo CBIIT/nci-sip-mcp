@@ -5,13 +5,13 @@ from dataclasses import FrozenInstanceError, replace
 import pytest
 from http_receiver import WireReceiver
 
-from nci_si_acceptance.environments import SURFACES, Environment
-from nci_si_acceptance.request_catalogue import compile_policy
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.http_client import HttpClient
-from nci_si_mcp.invocation import call
+from nci_sip_acceptance.environments import SURFACES, Environment
+from nci_sip_acceptance.request_catalogue import compile_policy
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.request_transport import ControlledHttpPolicy
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.http_client import HttpClient
+from nci_sip_mcp.invocation import call
 
 # Two separately correlated calls each receive the independently twelve-byte response.
 EXPECTED_CONTACTS = 2
@@ -24,7 +24,7 @@ def test_compiled_policy_keeps_private_fields_out_of_representation():
         Environment(
             "evs-only",
             dict.fromkeys(SURFACES) | {"evs": origin},
-            {"NCI_SI_EVS_LICENSE_KEY": credential},
+            {"NCI_SIP_EVS_LICENSE_KEY": credential},
             "e" * 64,
         )
     )

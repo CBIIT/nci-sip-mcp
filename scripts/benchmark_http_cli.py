@@ -49,7 +49,7 @@ def main() -> int:
             limits,
             args.output,
             allow_remote=True,
-            authorization=os.environ.get("NCI_SI_BENCHMARK_AUTHORIZATION"),
+            authorization=os.environ.get("NCI_SIP_BENCHMARK_AUTHORIZATION"),
         )
     )
     return 0 if report["complete"] else 1

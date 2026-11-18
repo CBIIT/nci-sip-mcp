@@ -9,7 +9,7 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from nci_si_mcp.transport import run_http
+from nci_sip_mcp.transport import run_http
 from test_server import ServerFixture
 
 
@@ -52,7 +52,7 @@ class HTTPLaunchTest(ServerFixture):
 
         app = Starlette(routes=[Route("/", identity)])
         with (
-            patch("nci_si_mcp.transport.create_http_app", return_value=app),
+            patch("nci_sip_mcp.transport.create_http_app", return_value=app),
             patch("uvicorn.run", serve),
         ):
             run_http(self.settings, self.context)

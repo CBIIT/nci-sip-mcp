@@ -8,9 +8,9 @@ from unittest.mock import patch
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.sentence_transformer.modules import BoW
 
-from nci_si_mcp.config import configure_logging
-from nci_si_mcp.evs import normalize_concept
-from nci_si_mcp.indexing import open_index
+from nci_sip_mcp.config import configure_logging
+from nci_sip_mcp.evs import normalize_concept
+from nci_sip_mcp.indexing import open_index
 from ncit_index.embeddings import SentenceTransformersProvider
 
 root = Path("/assets")

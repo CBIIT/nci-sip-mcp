@@ -12,7 +12,7 @@ PDM nor a Git checkout. Checks change nothing. Expected failures carry static co
 propagate. The index, documentation site and validation companion are installed independently
 with their documented local commands; they are not installer targets or flags.
 
-`nci-si-install plan --target local` describes the flow: **check prerequisites → install →
+`nci-sip-install plan --target local` describes the flow: **check prerequisites → install →
 configure → verify**
 
 The local target runs those stages through the same resumable state path. `run --transport stdio
@@ -35,7 +35,7 @@ claim.
 
 ## State and retry
 
-`run` and `status` require `--data-dir`; `NCI_SI_DATA_DIR` belongs to the server. Reconciliation
+`run` and `status` require `--data-dir`; `NCI_SIP_DATA_DIR` belongs to the server. Reconciliation
 and the status snapshot hold `installer-state.lock`. State version 2 binds the target,
 components, local transport and domain profile. Version 1 is refused without migration. State
 uses an fsynced temporary sibling, atomic replacement and a directory fsync.
@@ -57,7 +57,7 @@ rechecks and EOF returns BLOCKED JSON. Non-TTY stdin and `--non-interactive` nev
 
 `start --transport stdio` prints a JSON client configuration containing the owned executable,
 arguments and required environment; it opens no listener. HTTP binds `127.0.0.1`, uses
-trusted-local access and explicitly sets `NCI_SI_HTTP_REQUIRE_INDEX=0`: the installer stays
+trusted-local access and explicitly sets `NCI_SIP_HTTP_REQUIRE_INDEX=0`: the installer stays
 server-only, while the index uses the [independent local index path](local-guide.md#index). HTTP
 verification reuses a process whose PID and recorded start-time identity match. With no recorded
 running process, it starts a transient process, checks `/ready` and stops it; an unverifiable or
@@ -80,18 +80,18 @@ on loopback.
 
 ```bash
 "$PYTHON" -m venv "$INSTALLER_VENV"
-"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"
-"$INSTALLER_VENV/bin/nci-si-install" check --target local
-"$INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
-"$INSTALLER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
-"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport stdio --data-dir "$STDIO_ROOT"
-"$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
-"$INSTALLER_VENV/bin/nci-si-install" check --target local
-"$INSTALLER_VENV/bin/nci-si-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
-"$INSTALLER_VENV/bin/nci-si-install" status --target local --transport http --data-dir "$HTTP_ROOT"
-"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport http --data-dir "$HTTP_ROOT"
-"$INSTALLER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
-"$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
+"$INSTALLER_VENV/bin/python" -m pip install "nci-sip-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"
+"$INSTALLER_VENV/bin/nci-sip-install" check --target local
+"$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
+"$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$INSTALLER_VENV/bin/nci-sip-install" check --target local
+"$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
+"$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport http --data-dir "$HTTP_ROOT"
+"$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport http --data-dir "$HTTP_ROOT"
+"$INSTALLER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
+"$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
 ```
 
 For immutable v0.28.0 or v0.29.0 installers, keep the old origin: they accept only the

@@ -9,9 +9,9 @@ from xml.etree import ElementTree
 import pytest
 from request_failure_observation import snapshot
 
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_acceptance.request_budget import ControlledRun
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_acceptance.request_budget import ControlledRun
+from nci_sip_mcp.http_client import RequestPolicyError
 
 pytest_plugins = ["pytester"]
 PROPERTY = "accounting_snapshot_diagnostic"
@@ -61,8 +61,8 @@ import sqlite3
 from contextlib import closing
 from threading import current_thread, main_thread
 import pytest
-from nci_si_acceptance.request_budget import ControlledRun
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_sip_acceptance.request_budget import ControlledRun
+from nci_sip_mcp.http_client import RequestPolicyError
 PRIVATE_CANARY = "{CANARY}"
 @pytest.fixture(autouse=True)
 def controlled_refusal(monkeypatch):

@@ -34,7 +34,7 @@ jobs:
       - name: Audit every locked dependency group
         run: |
           pdm export -G :all --without-hashes --no-extras -o "$RUNNER_TEMP/all-requirements.txt"
-          sed -e '\|^-e \./acceptance#egg=nci-si-acceptance$|d' -e 's/;.*//' "$RUNNER_TEMP/all-requirements.txt" > "$RUNNER_TEMP/requirements.txt"
+          sed -e '\|^-e \./acceptance#egg=nci-sip-acceptance$|d' -e 's/;.*//' "$RUNNER_TEMP/all-requirements.txt" > "$RUNNER_TEMP/requirements.txt"
           pdm run pip-audit -r "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip --strict
 
       - name: Audit the actual PDM tool environment

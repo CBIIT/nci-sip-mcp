@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nci_si_acceptance import document
-from nci_si_acceptance.document import DOCUMENT, GROUPS, render
-from nci_si_acceptance.requirements import citations, load_requirements, never_runs, problems
-from nci_si_acceptance.spec import PROMPTS, REQUIRED_TOOLS, RESOURCES, TOOLS, is_basis
+from nci_sip_acceptance import document
+from nci_sip_acceptance.document import DOCUMENT, GROUPS, render
+from nci_sip_acceptance.requirements import citations, load_requirements, never_runs, problems
+from nci_sip_acceptance.spec import PROMPTS, REQUIRED_TOOLS, RESOURCES, TOOLS, is_basis
 
 pytest_plugins = ["pytester"]
 
@@ -24,12 +24,12 @@ REQUIREMENTS = {
 
 
 def collect_suite(pytester, monkeypatch):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "fixture")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "fixture")
     # Audit the retained full contract, including the interim suspended requirements.
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_REGISTRY_RELEASE", "required")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE", "required")
     # A test that needs the operator's prepare step runs where one is given; collecting runs
     # no command, so any will do.
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PREPARE", "true")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PREPARE", "true")
     items, _ = pytester.inline_genitems(str(SUITE_TESTS), "-p", "no:cacheprovider")
     return items
 
@@ -191,7 +191,7 @@ def test_the_command_writes_the_rendered_specification(tmp_path):
     output = tmp_path / "specification.md"
 
     completed = subprocess.run(  # noqa: S603 - this interpreter, a module of the suite
-        [sys.executable, "-m", "nci_si_acceptance.document", "--output", str(output)],
+        [sys.executable, "-m", "nci_sip_acceptance.document", "--output", str(output)],
         capture_output=True,
         text=True,
         check=False,

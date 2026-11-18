@@ -7,9 +7,9 @@ from unittest.mock import patch
 from jsonschema import validate
 
 from fakes import FakeEVS, FakeSSIS, concept, primary_element
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.registry import invoke
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
 
@@ -18,7 +18,7 @@ def sourced_primary(code, **fields):
     return {"conceptCode": code, "primaryIndicator": "Yes"} | fields
 
 
-@patch("nci_si_mcp.server.configure_logging")
+@patch("nci_sip_mcp.server.configure_logging")
 class PrimaryAPIProtocolTest(ServerFixture):
     def setUp(self):
         super().setUp()
@@ -48,7 +48,7 @@ class PrimaryAPIProtocolTest(ServerFixture):
         terminologies = self.context.evs.get_terminologies()
         self.context.evs = EVSClient(self.settings.evs_base_url)
         with patch(
-            "nci_si_mcp.http_client._open",
+            "nci_sip_mcp.http_client._open",
             return_value=FakeResponse(json.dumps(terminologies).encode()),
         ) as requests:
             # The registry exercises the tool's validation without MCP's schema guard.
@@ -304,7 +304,7 @@ class PrimaryAPIProtocolTest(ServerFixture):
             with (
                 self.subTest(version=version),
                 patch(
-                    "nci_si_mcp.http_client._open",
+                    "nci_sip_mcp.http_client._open",
                     return_value=FakeResponse(json.dumps(body).encode()),
                 ),
             ):

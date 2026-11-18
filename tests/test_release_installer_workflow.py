@@ -16,7 +16,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "local-installer.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 DOCUMENT = ROOT / "docs" / "installer-targets.md"
 STDIO_CAPTURE = (
-    'STDIO_CLIENT="$("$INSTALLER_VENV/bin/nci-si-install" start '
+    'STDIO_CLIENT="$("$INSTALLER_VENV/bin/nci-sip-install" start '
     '--target local --transport stdio --data-dir "$STDIO_ROOT")"'
 )
 CI_BOOTSTRAP_NOTE = (
@@ -36,9 +36,9 @@ strategy:
   fail-fast: false
   matrix: {os: [macos-latest, ubuntu-24.04]}
 env:
-  NCI_SI_CADSR_BASE_URL: http://127.0.0.1:8767/cadsr
-  NCI_SI_CADSR_FTP_URL: http://127.0.0.1:8767/cadsr-ftp
-  NCI_SI_SSIS_SPARQL_URL: http://127.0.0.1:8767/ssis-sparql
+  NCI_SIP_CADSR_BASE_URL: http://127.0.0.1:8767/cadsr
+  NCI_SIP_CADSR_FTP_URL: http://127.0.0.1:8767/cadsr-ftp
+  NCI_SIP_SSIS_SPARQL_URL: http://127.0.0.1:8767/ssis-sparql
   no_proxy: 127.0.0.1,localhost,::1,cadsrapi.cancer.gov,cadsrapi-stage.cancer.gov,cadsr.nci.nih.gov,shared.semantics.cancer.gov
 steps:
   - name: Resolve prohibited caDSR and Shared SI hosts to loopback (CI only)
@@ -77,7 +77,7 @@ steps:
       PYTHON: ${{ steps.python.outputs.python-path }}
     run: |
       "$PYTHON" -m venv "$INSTALLER_VENV"
-      "$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${INSTALL_REF}"
+      "$INSTALLER_VENV/bin/python" -m pip install "nci-sip-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${INSTALL_REF}"
   - name: Install the acceptance suite (CI only)
     env: {PYTHON: '${{ steps.python.outputs.python-path }}'}
     run: |
@@ -110,8 +110,8 @@ steps:
           netstat -anv -p tcp | grep '\.8000 ' || true
         fi
         if [ -f "$HTTP_ROOT/installer-state.json" ]; then
-          "$INSTALLER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT" || cleanup_status=$?
-          "$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT" || cleanup_status=$?
+          "$INSTALLER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT" || cleanup_status=$?
+          "$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT" || cleanup_status=$?
         fi
         if [ -n "$original_tag" ]; then
           git -C "$GITHUB_WORKSPACE" tag -f "$RELEASE_TAG" "$original_tag" || cleanup_status=$?
@@ -140,21 +140,21 @@ steps:
       export HTTP_REQUIRED_TESTS="test_a_resolved_release_is_never_cached test_a_discovered_release_identifies_the_concept_and_its_provenance"
       mkdir -p "$STDIO_ROOT"
       touch "$STDIO_ROOT/unowned"
-      "$INSTALLER_VENV/bin/nci-si-install" check --target local
-      "$INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
-      "$INSTALLER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
-      STDIO_CLIENT="$("$INSTALLER_VENV/bin/nci-si-install" start --target local --transport stdio --data-dir "$STDIO_ROOT")"
+      "$INSTALLER_VENV/bin/nci-sip-install" check --target local
+      "$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
+      "$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
+      STDIO_CLIENT="$("$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport stdio --data-dir "$STDIO_ROOT")"
       STDIO_SERVER="$(printf '%s' "$STDIO_CLIENT" | "$ACCEPTANCE_VENV/bin/python" -c 'import json,shlex,sys; r=json.load(sys.stdin); print(shlex.join(["env", *(f"{k}={v}" for k,v in r["env"].items()), r["command"], *r["args"]]))')"
-      NCI_SI_ACCEPTANCE_MODE=fixture NCI_SI_ACCEPTANCE_SERVER="$STDIO_SERVER" "$ACCEPTANCE_VENV/bin/pytest" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_resolved_release_is_never_cached" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_an_index_mode_without_an_index_is_unavailable" --report="$RUNNER_TEMP/stdio.json"
-      "$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
+      NCI_SIP_ACCEPTANCE_MODE=fixture NCI_SIP_ACCEPTANCE_SERVER="$STDIO_SERVER" "$ACCEPTANCE_VENV/bin/pytest" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_resolved_release_is_never_cached" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_an_index_mode_without_an_index_is_unavailable" --report="$RUNNER_TEMP/stdio.json"
+      "$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
       test -f "$STDIO_ROOT/unowned"
       test ! -e "$STDIO_ROOT/venv"
       test ! -e "$STDIO_ROOT/installer-state.json"
       mkdir -p "$HTTP_ROOT"
       touch "$HTTP_ROOT/unowned"
-      "$INSTALLER_VENV/bin/nci-si-install" check --target local
-      "$INSTALLER_VENV/bin/nci-si-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
-      "$INSTALLER_VENV/bin/nci-si-install" status --target local --transport http --data-dir "$HTTP_ROOT"
+      "$INSTALLER_VENV/bin/nci-sip-install" check --target local
+      "$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
+      "$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport http --data-dir "$HTTP_ROOT"
       kill "$recorder"
       wait "$recorder" || [ $? -eq 143 ]
       recorder=""
@@ -174,23 +174,23 @@ steps:
       assert ("GET", "/cadsr", "404") in records, records
       print("loopback requests:", records)
       PY
-      if "$INSTALLER_VENV/bin/nci-si-install" check --target local > "$RUNNER_TEMP/unreachable.json"; then unreachable=0; else unreachable=$?; fi
+      if "$INSTALLER_VENV/bin/nci-sip-install" check --target local > "$RUNNER_TEMP/unreachable.json"; then unreachable=0; else unreachable=$?; fi
       [ "$unreachable" -eq 1 ] || { echo "::error::check against the stopped recorder exited $unreachable, not 1."; exit 1; }
       python3 - "$RUNNER_TEMP/unreachable.json" <<'PY'
       import json, sys
       record = json.load(open(sys.argv[1], encoding="utf-8"))
-      assert record == {"target": "local", "components": ["server"], "status": "failed", "results": [{"name": "supported_os", "status": "passed"}, {"name": "git", "status": "passed"}, {"name": "python", "status": "passed"}, {"name": "evs_reachable", "status": "passed"}, {"name": "cadsr_reachable", "status": "failed", "fix": "Restore network access to NCI_SI_CADSR_BASE_URL."}]}, record
+      assert record == {"target": "local", "components": ["server"], "status": "failed", "results": [{"name": "supported_os", "status": "passed"}, {"name": "git", "status": "passed"}, {"name": "python", "status": "passed"}, {"name": "evs_reachable", "status": "passed"}, {"name": "cadsr_reachable", "status": "failed", "fix": "Restore network access to NCI_SIP_CADSR_BASE_URL."}]}, record
       PY
-      export NCI_SI_UPSTREAM_MODE=fixture
-      export NCI_SI_EVS_BASE_URL=http://127.0.0.1:8766/evs
-      export NCI_SI_EVS_FHIR_BASE_URL=http://127.0.0.1:8766/evs-fhir
-      export NCI_SI_CADSR_BASE_URL=http://127.0.0.1:8766/cadsr
-      export NCI_SI_CADSR_FTP_URL=http://127.0.0.1:8766/cadsr-ftp
-      export NCI_SI_SSIS_SPARQL_URL=http://127.0.0.1:8766/ssis-sparql
-      "$INSTALLER_VENV/bin/nci-si-install" start --target local --transport http --data-dir "$HTTP_ROOT"
-      NCI_SI_ACCEPTANCE_URL=http://127.0.0.1:8000/mcp NCI_SI_ACCEPTANCE_FIXTURE_BIND=127.0.0.1:8766 NCI_SI_ACCEPTANCE_FIXTURE_URL=http://127.0.0.1:8766 "$ACCEPTANCE_VENV/bin/pytest" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_resolved_release_is_never_cached" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance" --report="$RUNNER_TEMP/http.json"
-      "$INSTALLER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
-      "$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
+      export NCI_SIP_UPSTREAM_MODE=fixture
+      export NCI_SIP_EVS_BASE_URL=http://127.0.0.1:8766/evs
+      export NCI_SIP_EVS_FHIR_BASE_URL=http://127.0.0.1:8766/evs-fhir
+      export NCI_SIP_CADSR_BASE_URL=http://127.0.0.1:8766/cadsr
+      export NCI_SIP_CADSR_FTP_URL=http://127.0.0.1:8766/cadsr-ftp
+      export NCI_SIP_SSIS_SPARQL_URL=http://127.0.0.1:8766/ssis-sparql
+      "$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport http --data-dir "$HTTP_ROOT"
+      NCI_SIP_ACCEPTANCE_URL=http://127.0.0.1:8000/mcp NCI_SIP_ACCEPTANCE_FIXTURE_BIND=127.0.0.1:8766 NCI_SIP_ACCEPTANCE_FIXTURE_URL=http://127.0.0.1:8766 "$ACCEPTANCE_VENV/bin/pytest" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_resolved_release_is_never_cached" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance" --report="$RUNNER_TEMP/http.json"
+      "$INSTALLER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
+      "$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
       test -f "$HTTP_ROOT/unowned"
       test ! -e "$HTTP_ROOT/venv"
       test ! -e "$HTTP_ROOT/installer-state.json"
@@ -207,12 +207,12 @@ steps:
           assert set(actual.values()) == {"passed"}, (name, actual)
           assert actual == {key: expected[key] for key in actual}, (name, actual)
       PY
-      export NCI_SI_UPSTREAM_MODE=fixture
-      export NCI_SI_EVS_BASE_URL=http://127.0.0.1:8767/evs
-      export NCI_SI_EVS_FHIR_BASE_URL=http://127.0.0.1:8767/evs-fhir
-      export NCI_SI_CADSR_BASE_URL=http://127.0.0.1:8767/cadsr
-      export NCI_SI_CADSR_FTP_URL=http://127.0.0.1:8767/cadsr-ftp
-      export NCI_SI_SSIS_SPARQL_URL=http://127.0.0.1:8767/ssis-sparql
+      export NCI_SIP_UPSTREAM_MODE=fixture
+      export NCI_SIP_EVS_BASE_URL=http://127.0.0.1:8767/evs
+      export NCI_SIP_EVS_FHIR_BASE_URL=http://127.0.0.1:8767/evs-fhir
+      export NCI_SIP_CADSR_BASE_URL=http://127.0.0.1:8767/cadsr
+      export NCI_SIP_CADSR_FTP_URL=http://127.0.0.1:8767/cadsr-ftp
+      export NCI_SIP_SSIS_SPARQL_URL=http://127.0.0.1:8767/ssis-sparql
       python3 -m http.server 8767 --bind 127.0.0.1 --directory "$RUNNER_TEMP/upstream-recorder" < /dev/null > "$RUNNER_TEMP/negative-upstream.out" 2> "$RUNNER_TEMP/negative-upstream.log" &
       recorder=$!
       for attempt in $(seq 1 100); do
@@ -222,13 +222,13 @@ steps:
         sleep 0.1
       done
       "$PYTHON" -m venv "$NEGATIVE_INSTALLER_VENV"
-      "$NEGATIVE_INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${INSTALL_REF}"
+      "$NEGATIVE_INSTALLER_VENV/bin/python" -m pip install "nci-sip-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${INSTALL_REF}"
       git config --file "$RUNNER_TEMP/moved-tag.gitconfig" --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-si-mcp
       git config --file "$RUNNER_TEMP/moved-tag.gitconfig" --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-sip-mcp
       original_tag="$(git -C "$GITHUB_WORKSPACE" rev-parse "$RELEASE_TAG^{commit}")"
       expected_commit="$original_tag"
       git -C "$GITHUB_WORKSPACE" tag -f "$RELEASE_TAG" "$original_tag^"
-      if GIT_CONFIG_GLOBAL="$RUNNER_TEMP/moved-tag.gitconfig" "$NEGATIVE_INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$MOVED_TAG_ROOT" --non-interactive > "$RUNNER_TEMP/moved-tag.json" 2> "$RUNNER_TEMP/moved-tag.err"; then moved_status=0; else moved_status=$?; fi
+      if GIT_CONFIG_GLOBAL="$RUNNER_TEMP/moved-tag.gitconfig" "$NEGATIVE_INSTALLER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$MOVED_TAG_ROOT" --non-interactive > "$RUNNER_TEMP/moved-tag.json" 2> "$RUNNER_TEMP/moved-tag.err"; then moved_status=0; else moved_status=$?; fi
       git -C "$GITHUB_WORKSPACE" tag -f "$RELEASE_TAG" "$original_tag"
       original_tag=""
       [ "$moved_status" -eq 1 ] || { echo "::error::moved-tag run exited $moved_status, not 1."; exit 1; }
@@ -241,7 +241,7 @@ steps:
       assert re.fullmatch(r"[0-9a-f]{40}", sys.argv[3]), sys.argv[3]
       assert "release tag may have moved" in error and sys.argv[3] in error, error
       PY
-      lock="$NEGATIVE_INSTALLER_VENV/lib/python3.14/site-packages/nci_si_mcp/server-requirements.txt"
+      lock="$NEGATIVE_INSTALLER_VENV/lib/python3.14/site-packages/nci_sip_mcp/server-requirements.txt"
       cp "$lock" "$RUNNER_TEMP/server-requirements.txt"
       python3 - "$lock" <<'PY'
       import re, sys
@@ -250,7 +250,7 @@ steps:
       text = re.sub(r"--hash=sha256:[0-9a-f]{64}", "--hash=sha256:" + "0" * 64, text)
       open(path, "w", encoding="utf-8").write(text)
       PY
-      if "$NEGATIVE_INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$TAMPERED_HASH_ROOT" --non-interactive > "$RUNNER_TEMP/tampered-hash.json"; then hash_status=0; else hash_status=$?; fi
+      if "$NEGATIVE_INSTALLER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$TAMPERED_HASH_ROOT" --non-interactive > "$RUNNER_TEMP/tampered-hash.json"; then hash_status=0; else hash_status=$?; fi
       cp "$RUNNER_TEMP/server-requirements.txt" "$lock"
       lock=""
       [ "$hash_status" -eq 1 ] || { echo "::error::tampered-hash run exited $hash_status, not 1."; exit 1; }
@@ -357,7 +357,7 @@ def workflow_operator_lines(run):
     selected = [
         line
         for line in lines
-        if line.startswith('"$INSTALLER_VENV/bin/nci-si-install"') or line == STDIO_CAPTURE
+        if line.startswith('"$INSTALLER_VENV/bin/nci-sip-install"') or line == STDIO_CAPTURE
     ]
     return [line for line in selected if "|| cleanup_status=$?" not in line]
 
@@ -481,19 +481,19 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
             public,
             [
                 '"$PYTHON" -m venv "$INSTALLER_VENV"',
-                '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ '
+                '"$INSTALLER_VENV/bin/python" -m pip install "nci-sip-mcp @ '
                 'git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"',
-                '"$INSTALLER_VENV/bin/nci-si-install" check --target local',
-                '"$INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive',
-                '"$INSTALLER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"',
-                '"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport stdio --data-dir "$STDIO_ROOT"',
-                '"$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"',
-                '"$INSTALLER_VENV/bin/nci-si-install" check --target local',
-                '"$INSTALLER_VENV/bin/nci-si-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive',
-                '"$INSTALLER_VENV/bin/nci-si-install" status --target local --transport http --data-dir "$HTTP_ROOT"',
-                '"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport http --data-dir "$HTTP_ROOT"',
-                '"$INSTALLER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT"',
-                '"$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" check --target local',
+                '"$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive',
+                '"$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport stdio --data-dir "$STDIO_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" check --target local',
+                '"$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive',
+                '"$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"',
             ],
         )
         self.assertEqual(
@@ -504,7 +504,7 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
         lifecycle = steps["Verify stdio and HTTP installer lifecycles"]
         self.assertEqual(lifecycle["working-directory"], "${{ runner.temp }}")
         stdio_start = (
-            '"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport stdio '
+            '"$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport stdio '
             '--data-dir "$STDIO_ROOT"'
         )
         expected = [STDIO_CAPTURE if line == stdio_start else line for line in public[2:]]

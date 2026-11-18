@@ -11,16 +11,16 @@ from threading import Event, current_thread
 import pytest
 from http_receiver import WireReceiver
 
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_acceptance.request_budget import AttemptLease
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy, TransportCleanupError
-from nci_si_mcp import bounds
-from nci_si_mcp.bounds import CallDeadlineError, deadline_scope
-from nci_si_mcp.cadsr import CaDSRClient
-from nci_si_mcp.config import Settings
-from nci_si_mcp.errors import PlatformError, correlated
-from nci_si_mcp.http_client import (
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_acceptance.request_budget import AttemptLease
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.request_transport import ControlledHttpPolicy, TransportCleanupError
+from nci_sip_mcp import bounds
+from nci_sip_mcp.bounds import CallDeadlineError, deadline_scope
+from nci_sip_mcp.cadsr import CaDSRClient
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.errors import PlatformError, correlated
+from nci_sip_mcp.http_client import (
     HttpClient,
     RequestPolicyError,
     UpstreamError,
@@ -28,8 +28,8 @@ from nci_si_mcp.http_client import (
     UpstreamTimeoutError,
     UpstreamUnavailableError,
 )
-from nci_si_mcp.invocation import call
-from nci_si_mcp.request_policy import using_request_policy
+from nci_sip_mcp.invocation import call
+from nci_sip_mcp.request_policy import using_request_policy
 
 # The independently scripted JSON document below has twelve wire bytes.
 JSON_BYTES = 12

@@ -1,6 +1,6 @@
 # Content-injection threat model
 
-The NCI Semantic Infrastructure MCP server retrieves governed content; it contains no LLM.
+The NCI Semantic Infrastructure Program MCP server retrieves governed content; it contains no LLM.
 An assistant consuming its results may nevertheless act on hostile instructions in a concept
 definition, CDE name, question text or permissible value. Structured fields are not sanitisation.
 The server preserves upstream-managed content rather than detecting, rewriting or removing it.

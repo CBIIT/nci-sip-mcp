@@ -230,6 +230,6 @@ class InstallerSourceAuthorizationTest(unittest.TestCase):
                         "-m",
                         "pip",
                         "install",
-                        f"nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@{self.approved}",
+                        f"nci-sip-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@{self.approved}",
                     ],
                 )

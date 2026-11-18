@@ -11,8 +11,8 @@ from http import HTTPStatus
 
 import pytest
 
-from nci_si_acceptance.citations import verify_citations
-from nci_si_acceptance.results import (
+from nci_sip_acceptance.citations import verify_citations
+from nci_sip_acceptance.results import (
     EXPORT,
     EXPORT_LISTING,
     error_code,
@@ -21,7 +21,7 @@ from nci_si_acceptance.results import (
     release_of,
     requests_naming,
 )
-from nci_si_acceptance.spec import RECORDS, TOOLS
+from nci_sip_acceptance.spec import RECORDS, TOOLS
 
 # Recorded both ways: recorded/cadsr/data-element-2200604.json answers a request that names
 # Accept: application/json, data-element-2200604-html.json, with HTML, any other.
@@ -880,7 +880,7 @@ def test_matching_slower_than_the_match_timeout_is_a_timeout(tools, recorded, na
         recorded(f"scenarios/cadsr/match-timeout/{file}")["response"]["delay_seconds"]
         for file in ("vm-match.json", "cde-match.json")
     }
-    assert min(delays) > float(settings["NCI_SI_MATCH_TIMEOUT_SECONDS"])
+    assert min(delays) > float(settings["NCI_SIP_MATCH_TIMEOUT_SECONDS"])
 
     result = tools.call(name, arguments)
 

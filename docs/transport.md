@@ -1,13 +1,13 @@
 # Remote transport
 
-Run `pdm run nci-si-mcp serve --transport streamable-http` and connect an MCP client to
+Run `pdm run nci-sip-mcp serve --transport streamable-http` and connect an MCP client to
 `http://127.0.0.1:8000/mcp`. Plain `serve` retains stdio. The registry, profiles, tools,
 resources, prompts, error records and caching policy are shared by both transports.
 The [settings table](../QUICKSTART.md#settings) lists bind address, allow-lists and bounds.
 
 ## Sessions and several replicas
 
-`NCI_SI_HTTP_SESSIONS=stateful` is the default. For handshake protocols such as 2025-11-25,
+`NCI_SIP_HTTP_SESSIONS=stateful` is the default. For handshake protocols such as 2025-11-25,
 the SDK creates a session ID and stores its state in the process that answered initialization.
 That state includes the first successful implicit NCIt release resolution (X-22). Explicit
 release arguments override only their own calls. A content error does not clear the pin;
@@ -22,7 +22,7 @@ Restarting the process
 also loses its sessions. Reinitialize after session loss; the new session can select a newer
 implicit release. There is no distributed session store or transparent session migration.
 
-Use `NCI_SI_HTTP_SESSIONS=stateless` behind a load balancer without affinity. Either replica
+Use `NCI_SIP_HTTP_SESSIONS=stateless` behind a load balancer without affinity. Either replica
 can answer a call. Omitted releases resolve independently on each call, and every result
 names the effective release. Name a release explicitly when calls must agree across time or
 replicas. Implicit results remain uncached/private (0/private); explicitly pinned results keep
@@ -102,7 +102,7 @@ and HTTP-runner diagnostics are JSON on stderr in both transports.
 `{"status":"ready"}` or HTTP 503 with `{"status":"not_ready"}`. Neither calls upstream or
 discloses settings, paths or credentials. Context initialization opens the database and loads
 the configured embedding provider before the HTTP app can serve. If deployment supplies an
-index, set `NCI_SI_HTTP_REQUIRE_INDEX=1`: readiness also requires its active completed build
+index, set `NCI_SIP_HTTP_REQUIRE_INDEX=1`: readiness also requires its active completed build
 and validates compatibility with the runtime embedding provider/model and field-search schema.
 Checks run locally on each readiness probe, so activation or storage failures are reflected.
 The first failing probe and each transition from ready to not ready emit one JSON

@@ -6,9 +6,9 @@ build-backend = "pdm.backend"
 # report names the tag of the suite it ran (docs/specification.md §5). The fixture set is
 # versioned apart, by its pin and recording dates.
 [project]
-name = "nci-si-acceptance"
+name = "nci-sip-acceptance"
 dynamic = ["version"]
-description = "Behavioural acceptance suite and upstream fixture server for the NCI SI MCP tools"
+description = "Behavioural acceptance suite and upstream fixture server for the NCI SIP MCP tools"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.14"
@@ -47,7 +47,7 @@ markers = [
 # Share this absolute destination across xdist workers and their Python children.
 data_file = "${PDM_PROJECT_ROOT?}/tmp/coverage/harness/.coverage"
 branch = true
-source = ["nci_si_acceptance"]
+source = ["nci_sip_acceptance"]
 # Renderer and report CLI tests execute in child interpreters.
 patch = ["subprocess"]
 

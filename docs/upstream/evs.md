@@ -43,7 +43,7 @@ Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/4
 
 **Observation.** The catalogue exposes relationship codes and names; the exclusion scenario deliberately gives misleading names. That crafted scenario is a regression probe, not an observed production mislabelling.
 
-**Reproduction.** Read the pinned role catalogue (OP-E02); run the traversal/exclusions scenario, crafted in memory by traversal_exclusions in acceptance/src/nci_si_acceptance/craft.py, to distinguish classification by code from name matching.
+**Reproduction.** Read the pinned role catalogue (OP-E02); run the traversal/exclusions scenario, crafted in memory by traversal_exclusions in acceptance/src/nci_sip_acceptance/craft.py, to distinguish classification by code from name matching.
 
 **Expected.** Publish a versioned machine-readable exclusion/polarity classification keyed by stable relationship code.
 
@@ -85,7 +85,7 @@ Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/4
 Evidence (linked request/response files retain their original form):
 
 - [docs/retrieval-evaluation.md](../../docs/retrieval-evaluation.md) — document; SHA-256 `32f98e22180a728a88ba40a6796be7c87cb18a27a92964ee149c2606d13d74c9`.
-- [acceptance/request-forms/evs.md](../../acceptance/request-forms/evs.md) — document; SHA-256 `f7d0dc379d5b959f9348eb0710186669f7500761901164c10ade06994ff515b0`.
+- [acceptance/request-forms/evs.md](../../acceptance/request-forms/evs.md) — document; SHA-256 `69ff7219080985879da44bf1f9f8f595d267772cd6414b8b6f095b4a21c0b895`.
 
 | Affected test function | Fixture | Live |
 |---|---|---|
@@ -147,7 +147,7 @@ Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/4
 Evidence (linked request/response files retain their original form):
 
 - [acceptance/fixtures/recorded/evs/terminologies.json](../../acceptance/fixtures/recorded/evs/terminologies.json) — recorded on 2026-10-02; GET evs /api/v1/metadata/terminologies; SHA-256 `ba9c019d97d677bdf68dee2f119f62047d6448f715ec4b3157fb9c59e1b7fe4e`.
-- [acceptance/request-forms/evs.md](../../acceptance/request-forms/evs.md) — document; SHA-256 `f7d0dc379d5b959f9348eb0710186669f7500761901164c10ade06994ff515b0`.
+- [acceptance/request-forms/evs.md](../../acceptance/request-forms/evs.md) — document; SHA-256 `69ff7219080985879da44bf1f9f8f595d267772cd6414b8b6f095b4a21c0b895`.
 
 | Affected test function | Fixture | Live |
 |---|---|---|
@@ -175,7 +175,7 @@ Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/4
 
 Evidence (linked request/response files retain their original form):
 
-- [acceptance/request-forms/evs.md](../../acceptance/request-forms/evs.md) — document; SHA-256 `f7d0dc379d5b959f9348eb0710186669f7500761901164c10ade06994ff515b0`.
+- [acceptance/request-forms/evs.md](../../acceptance/request-forms/evs.md) — document; SHA-256 `69ff7219080985879da44bf1f9f8f595d267772cd6414b8b6f095b4a21c0b895`.
 - [acceptance/fixtures/crafted/OP-E06/subset-gdc.json](../../acceptance/fixtures/crafted/OP-E06/subset-gdc.json) — crafted; GET evs /api/v1/subset/ncit_26.09d/C177537; SHA-256 `4a2ad1a01962939f03d09147f91a0ca446717df1e72bbf08eb35b1afb06620ae`.
 - [acceptance/fixtures/crafted/OP-F05/expand-c85492.json](../../acceptance/fixtures/crafted/OP-F05/expand-c85492.json) — crafted; GET evs-fhir /ValueSet/$expand; SHA-256 `007f987080252d9294440a22f54c3cc4a21dc3879bed70f412da4f337ccb533c`.
 
@@ -207,7 +207,7 @@ Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/4
 Evidence (linked request/response files retain their original form):
 
 - [acceptance/fixtures/recorded/evs-fhir/expand-c85492.json](../../acceptance/fixtures/recorded/evs-fhir/expand-c85492.json) — recorded on 2026-10-02; GET evs-fhir /ValueSet/$expand; SHA-256 `836a85af27adff039bc0ba948313dc3e62f31ff9aca3d03ec2091f0331bd840e`.
-- [acceptance/request-forms/evs.md](../../acceptance/request-forms/evs.md) — document; SHA-256 `f7d0dc379d5b959f9348eb0710186669f7500761901164c10ade06994ff515b0`.
+- [acceptance/request-forms/evs.md](../../acceptance/request-forms/evs.md) — document; SHA-256 `69ff7219080985879da44bf1f9f8f595d267772cd6414b8b6f095b4a21c0b895`.
 
 | Affected test function | Fixture | Live |
 |---|---|---|

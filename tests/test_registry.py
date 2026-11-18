@@ -9,16 +9,16 @@ import yaml
 from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter
 
-from nci_si_mcp import cli, results
-from nci_si_mcp.caching import cache_call, select_cache_hint
-from nci_si_mcp.context import Context
-from nci_si_mcp.http_client import (
+from nci_sip_mcp import cli, results
+from nci_sip_mcp.caching import cache_call, select_cache_hint
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.http_client import (
     UpstreamRejectedError,
     UpstreamTimeoutError,
     UpstreamTooLargeError,
     UpstreamUnavailableError,
 )
-from nci_si_mcp.registry import OPERATIONS, ToolSpec, cli_arguments, invoke
+from nci_sip_mcp.registry import OPERATIONS, ToolSpec, cli_arguments, invoke
 from test_server import ServerFixture
 
 
@@ -111,8 +111,8 @@ class RegistryTest(ServerFixture):
 
         spec = ToolSpec(echo, "evs", Echo, False, name="echo", command="echo")
         with (
-            patch("nci_si_mcp.server.SPECS", (spec,)),
-            patch("nci_si_mcp.cli.SPECS", (spec,)),
+            patch("nci_sip_mcp.server.SPECS", (spec,)),
+            patch("nci_sip_mcp.cli.SPECS", (spec,)),
             patch.dict(OPERATIONS, {spec.operation: spec}),
         ):
             parser = cli.build_parser()

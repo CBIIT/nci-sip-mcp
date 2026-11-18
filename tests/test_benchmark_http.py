@@ -19,7 +19,7 @@ from scripts.benchmark_limits import Limits, RunStoppedError
 from scripts.evidence_benchmark import project_benchmark
 from scripts.http_measurement import MeasurementError
 
-from nci_si_mcp.transport import create_http_app
+from nci_sip_mcp.transport import create_http_app
 from test_evidence_envelope import envelope
 from test_server import ServerFixture, pinned
 
