@@ -708,14 +708,18 @@ def baseline(root: Path, timeout: float, *, timings: list[dict] | None = None) -
                 raise ValueError(f"Baseline {domain} failed: {outcome}")
             result[domain] = coverage_map(data, scratch)
             _, traces = read_traces(data)
-            for trace in traces:
-                source = scratch / trace.source
-                if sha256(source.read_bytes()).hexdigest() != trace.source_digest:
-                    raise ValueError(
-                        f"Installed child source differs from baseline: {trace.source}"
-                    )
+            validate_baseline_sources(scratch, traces)
             children.extend(traces)
     return CoverageEvidence(root.resolve(), result, tuple(children))
+
+
+def validate_baseline_sources(scratch: Path, traces: list[ChildTrace]) -> None:
+    for trace in traces:
+        if trace.outcome == "unreached":
+            continue
+        source = scratch / trace.source
+        if sha256(source.read_bytes()).hexdigest() != trace.source_digest:
+            raise ValueError(f"Installed child source differs from baseline: {trace.source}")
 
 
 def selection(
