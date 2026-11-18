@@ -38,6 +38,10 @@ class InstallerSourceAuthorizationTest(unittest.TestCase):
             "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
         }
         self.git(self.root, "init", "-q", "-b", "main", str(self.origin))
+        (self.origin / "pyproject.toml").write_text(
+            '[project]\nname = "nci-sip-mcp"\nversion = "0.0.0"\n', encoding="utf-8"
+        )
+        self.git(self.origin, "add", "pyproject.toml")
         self.approved = self.commit(self.origin)
         self.git(self.origin, "tag", "v1.2.3")
         self.git(self.root, "clone", "-q", str(self.origin), str(self.checkout))

@@ -1042,6 +1042,34 @@ class DocumentationTest(unittest.TestCase):
             ],
         )
 
+    def test_container_attestation_examples_keep_current_and_historical_identities(self):
+        commands = [
+            line.strip()
+            for line in read("docs/container.md").splitlines()
+            if line.strip().startswith("`gh attestation verify ")
+        ]
+        self.assertEqual(
+            commands,
+            [
+                "`gh attestation verify oci://ghcr.io/cbiit/nci-sip-mcp@sha256:<digest> "
+                "--repo CBIIT/nci-sip-mcp --signer-workflow "
+                "CBIIT/nci-sip-mcp/.github/workflows/release.yml`.",
+                "`gh attestation verify oci://ghcr.io/cbiit/nci-si-mcp@sha256:<digest> "
+                "--repo CBIIT/nci-si-mcp --signer-workflow "
+                "CBIIT/nci-si-mcp/.github/workflows/release.yml`.",
+            ],
+        )
+
+    def test_implementation_plan_keeps_its_dated_pre_sip_package_and_settings(self):
+        plan = read("docs/implementation-plan.md")
+        dated_baseline = plan.split("\n## 9. Acceptance suite", 1)[0]
+        self.assertIn("how `nci_si_mcp` is extended", dated_baseline)
+        self.assertIn("`nci_si_mcp.platform`", dated_baseline)
+        self.assertIn("src/nci_si_mcp/", dated_baseline)
+        self.assertIn("Settings after the change. `NCI_SI_EVS_BASE_URL`", dated_baseline)
+        self.assertIn("`NCI_SI_CADSR_CREDENTIAL`", dated_baseline)
+        self.assertNotIn("NCI_SIP_", dated_baseline)
+
     def test_pre_sip_canonical_origin_command_sets_a_real_compatible_tag(self):
         document = (ROOT / "docs/installer-targets.md").read_text(encoding="utf-8")
         section = document.split("### Pre-SIP package release\n", 1)[1]

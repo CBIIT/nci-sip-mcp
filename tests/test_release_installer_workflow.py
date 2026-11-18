@@ -396,6 +396,7 @@ def local_git(repository, *arguments):
 
 
 def clone_release_fixture(parent):
+    candidate_sha = local_git(ROOT, "rev-parse", "HEAD")
     repository = parent / "release-era-repo"
     subprocess.run(  # noqa: S603 - local clone of this repository into a temporary directory
         ["git", "clone", "--quiet", "--shared", str(ROOT), str(repository)],  # noqa: S607
@@ -403,6 +404,7 @@ def clone_release_fixture(parent):
         capture_output=True,
         text=True,
     )
+    local_git(repository, "checkout", "--quiet", "--detach", candidate_sha)
     local_git(repository, "update-ref", "refs/heads/main", BASE)
     local_git(repository, "remote", "set-url", "origin", str(repository))
     return repository
@@ -708,6 +710,16 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
                 '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ '
                 'git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"',
                 '"$INSTALLER_VENV/bin/nci-si-install" check --target local',
+                '"$INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive',
+                '"$INSTALLER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport stdio --data-dir "$STDIO_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-si-install" check --target local',
+                '"$INSTALLER_VENV/bin/nci-si-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive',
+                '"$INSTALLER_VENV/bin/nci-si-install" status --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"',
             ],
         )
         self.assertEqual(
