@@ -1206,6 +1206,48 @@ class MutationExecutionTest(unittest.TestCase):
             self.assertEqual(len(launches), 5, launches)
             self.assertEqual(launches, ["test"] * 5)
 
+    def test_unreached_domains_do_not_hide_survival_or_claim_fixture_confirmation(self):
+        orderings = (
+            ("fixture", "unit"),
+            ("unit", "fixture"),
+        )
+        for ordering in orderings:
+            with self.subTest(ordering=ordering):
+                selected = {domain: ["tests/test_owner.py::test_value"] for domain in ordering}
+                results = [
+                    (
+                        {
+                            "outcome": "NO_TESTS" if domain == "fixture" else "SURVIVED",
+                            "domain": domain,
+                            "elapsed_seconds": 0.01,
+                        },
+                        Path("coverage"),
+                    )
+                    for domain in ordering
+                ]
+                with patch.object(mutation_gate, "run_domain", side_effect=results):
+                    result = mutation_gate.measure(Path("."), selected, 1)
+
+                self.assertEqual(result["outcome"], "SURVIVED", result)
+                self.assertEqual(result["domain"], "unit", result)
+                self.assertEqual(result["confirmation"], "unreached", result)
+                self.assertEqual([row["domain"] for row in result["domains"]], list(ordering))
+
+    def test_fixture_timeout_is_not_reported_as_fixture_confirmation(self):
+        selected = {"fixture": ["tests/test_owner.py::test_value"]}
+        timed_out = {
+            "outcome": "TIMEOUT",
+            "domain": "fixture",
+            "elapsed_seconds": 0.01,
+        }
+        with patch.object(mutation_gate, "run_domain", return_value=(timed_out, Path("coverage"))):
+            result = mutation_gate.measure(Path("."), selected, 1)
+
+        self.assertEqual(result["outcome"], "TIMEOUT", result)
+        self.assertEqual(result["confirmation"], "unreached", result)
+        self.assertNotIn("kind", result)
+        self.assertNotIn("node", result)
+
     def test_fixture_only_child_line_selects_its_one_owner_and_kills_without_unit_coverage(self):
         # Given a line reached only in a fixture test's real child program, run
         # that owner alone after the clean three-domain baseline, never NO_TESTS.
