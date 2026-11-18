@@ -14,11 +14,13 @@ pdm run python -m nci_si_mcp.traffic_identity generate
 pdm run python -m nci_si_acceptance.traffic_identity generate
 ```
 
-Each `generate` command prints one UUID4 value as 32 lowercase hexadecimal characters. Save each
-value in durable deployment configuration under its matching variable:
+Each `generate` command prints one UUID4 value as 32 lowercase hexadecimal characters. For a
+persistent installation, save each value in durable deployment configuration under its matching
+variable:
 `NCI_SI_INSTALLATION_ID` for the core package or `NCI_SI_ACCEPTANCE_INSTALLATION_ID` for the
 acceptance package. It does not write configuration or change the process environment. Keep the
-saved value across restarts and upgrades; do not generate a fresh value at startup.
+saved value across restarts and upgrades; do not generate a fresh value at startup. For isolated
+CI jobs, use the job-scoped lifecycle described below instead.
 
 Before running `show`, set the corresponding variable to its previously saved value. For a local
 shell, replace the placeholders below with those saved values:
@@ -66,8 +68,8 @@ export NCI_SI_ACCEPTANCE_INSTALLATION_ID='<saved-acceptance-value>'
 
 ## Persist and rotate
 
-Keep the same value in durable deployment configuration across restarts and upgrades when they
-represent the same installation. Replicas of one deployment may deliberately share that configuration.
+For a persistent installation, keep the same value in durable deployment configuration across
+restarts and upgrades. Replicas of one deployment may deliberately share that configuration.
 Independent deployments should use independent values. These commands do not persist or compare
 identities and do not detect duplicates.
 
@@ -75,9 +77,23 @@ A copied configuration keeps its identity. Before using a clone as a separate de
 the value in its external configuration. Run `show` again to inspect the updated configuration;
 the utility does not retain a snapshot between invocations.
 
+## Images and ephemeral CI jobs
+
+A wheel or container image carries the software, not a real installation ID. Supply the value
+through runtime configuration; do not bake it into the artifact.
+
+For an isolated CI job that emits this label, provision one job-scoped value per independently
+configured emitting installation, and reuse it for that installation's processes and children.
+Configure server and direct acceptance independently, with a distinct value for each. Give each
+independent job a new value for each installation. This short-lived configuration is distinct from
+a persistent installation's durable value, which remains stable across restarts and upgrades. The
+value is not a credential.
+
 ## Current scope
 
 These commands only generate and inspect local configuration. The server does not yet read this
 identity or include it in HTTP requests. Server and acceptance request emission are separate work; do not
 rely on platform request traces carrying this label until that work is released. The identity
-does not replace the per-call correlation ID or change its behavior.
+does not replace the per-call correlation ID or change its behavior. The CI guidance above
+describes the configuration lifecycle for an emitting job; it does not mean emission is available
+in this release.

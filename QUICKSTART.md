@@ -228,9 +228,11 @@ A leading `~` is expanded, and an empty value is rejected. The other settings:
 | `NCI_SI_HTTP_REQUIRE_INDEX` | `0` | Boolean switch, read as `0` or `1` only (anything else is a configuration error). Set to 1 when deployment supplies an index: readiness requires an active build compatible with the configured embedding model. With 0 an absent index permits live tools; an existing active build is still verified |
 
 `NCI_SI_INSTALLATION_ID` is read only by the local identity utility, not by server settings or
-request emission. Generate one value, replace the placeholder below with that saved value, and
-retain it in durable deployment configuration across restarts and upgrades. This `export` lasts
-only in the current shell; do not generate a fresh value on every startup.
+request emission. For a persistent installation, generate one value, replace the placeholder
+below with that saved value, and retain it in durable deployment configuration across restarts and
+upgrades. This `export` lasts only in the current shell; do not generate a fresh value on every
+startup. The [request identification guide](docs/request-identification.md) covers artifact and
+ephemeral-job configuration.
 
 ```bash
 export NCI_SI_INSTALLATION_ID='<saved-generated-value>'
