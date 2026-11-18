@@ -104,7 +104,10 @@ class CoveragePolicyTest(unittest.TestCase):
             [
                 {
                     "name": "Configure shared selftest coverage",
-                    "env": {"SELFTEST_SHARD": "${{ matrix.shard }}"},
+                    "env": {
+                        "SELFTEST_SHARD": "${{ matrix.shard }}",
+                        "MUTATION_COVERAGE_RESERVATIONS": "${{ runner.temp }}/mutation-coverage-reservations",
+                    },
                     "run": 'pdm run python -m scripts.validation.mutation_coverage configure selftest --shard "$SELFTEST_SHARD" --output tmp/mutation-config',
                 },
                 {
@@ -121,6 +124,27 @@ class CoveragePolicyTest(unittest.TestCase):
                     "env": {"SELFTEST_SHARD": "${{ matrix.shard }}"},
                     "run": 'pdm run python -m scripts.validation.mutation_coverage export selftest --data acceptance/.coverage --shard "$SELFTEST_SHARD" --output tmp/mutation-coverage/selftest.json',
                 },
+            ],
+        )
+
+    def test_selftest_mutation_coverage_artifact_binds_its_attempt(self):
+        jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
+        self.assertEqual(
+            [
+                step
+                for step in jobs["selftest"]["steps"]
+                if step.get("with", {}).get("path") == "tmp/mutation-coverage/selftest.json"
+            ],
+            [
+                {
+                    "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+                    "with": {
+                        "name": "mutation-coverage-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-selftest-${{ strategy.job-index }}",
+                        "path": "tmp/mutation-coverage/selftest.json",
+                        "if-no-files-found": "error",
+                        "retention-days": 1,
+                    },
+                }
             ],
         )
 

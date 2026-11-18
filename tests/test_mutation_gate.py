@@ -196,6 +196,14 @@ class MutationOperatorsTest(unittest.TestCase):
     def test_ci_runs_every_pr_to_main_on_the_producers_merge_tree_with_read_only_arguments(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         self.assertEqual(
+            workflow.get("env"),
+            {
+                "MUTATION_COVERAGE_BATCH": (
+                    "gha-${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}"
+                )
+            },
+        )
+        self.assertEqual(
             workflow["jobs"]["mutation"],
             {
                 "name": "mutation (diff)",
@@ -219,7 +227,10 @@ class MutationOperatorsTest(unittest.TestCase):
                             "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
                         ),
                         "with": {
-                            "pattern": "mutation-coverage-${{ github.sha }}-*",
+                            "pattern": (
+                                "mutation-coverage-${{ github.sha }}-${{ github.run_id }}-"
+                                "${{ github.run_attempt }}-*"
+                            ),
                             "path": "tmp/mutation-coverage",
                         },
                     },
@@ -242,7 +253,10 @@ class MutationOperatorsTest(unittest.TestCase):
                             "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
                         ),
                         "with": {
-                            "name": "mutation-results-${{ github.sha }}-${{ matrix.shard }}",
+                            "name": (
+                                "mutation-results-${{ github.sha }}-${{ github.run_id }}-"
+                                "${{ github.run_attempt }}-${{ matrix.shard }}"
+                            ),
                             "path": "tmp/mutation-runs/",
                             "if-no-files-found": "warn",
                             "retention-days": 30,

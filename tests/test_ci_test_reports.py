@@ -116,7 +116,10 @@ class TestReportWorkflowTest(unittest.TestCase):
                     {"uses": "$/.github/actions/setup"},
                     {
                         "name": "Configure shared unit coverage",
-                        "env": {"UNIT_SHARD": "${{ matrix.shard }}"},
+                        "env": {
+                            "UNIT_SHARD": "${{ matrix.shard }}",
+                            "MUTATION_COVERAGE_RESERVATIONS": "${{ runner.temp }}/mutation-coverage-reservations",
+                        },
                         "run": 'pdm run python -m scripts.validation.mutation_coverage configure unit --shard "$UNIT_SHARD" --output tmp/mutation-config',
                     },
                     {
@@ -162,7 +165,7 @@ class TestReportWorkflowTest(unittest.TestCase):
                     {
                         "uses": UPLOAD,
                         "with": {
-                            "name": "mutation-coverage-${{ github.sha }}-unit-${{ strategy.job-index }}",
+                            "name": "mutation-coverage-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-unit-${{ strategy.job-index }}",
                             "path": "tmp/mutation-coverage/unit.json",
                             "if-no-files-found": "error",
                             "retention-days": 1,

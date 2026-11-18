@@ -667,6 +667,55 @@ class SharedCoverageTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertEqual(json.loads(result.stdout)["outcome"], "INFRA")
 
+    def test_consumer_requires_its_own_attempt_without_invalidating_a_retained_campaign(self):
+        prior_batch = "gha-123-456-1"
+        current_batch = "gha-123-456-2"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            repository(root)
+            prior = root / "prior"
+            current = root / "current"
+            fragments(root, prior, prior_batch)
+            fragments(root, current, current_batch)
+
+            def consume(fragment_dir, batch):
+                with patch.dict(os.environ, {"MUTATION_COVERAGE_BATCH": batch}):
+                    return cli(
+                        root,
+                        "--base",
+                        "HEAD",
+                        "--head",
+                        "HEAD",
+                        "--coverage-dir",
+                        str(fragment_dir),
+                    )
+
+            replayed = consume(prior, current_batch)
+            self.assertEqual(replayed.returncode, 2, replayed.stdout + replayed.stderr)
+            self.assertEqual(
+                json.loads(replayed.stdout),
+                {
+                    "outcome": "INFRA",
+                    "message": "Coverage fragment producer does not match the campaign batch",
+                },
+            )
+
+            fixture = current / "fixture-1.json"
+            retained = root / "retained-fixture.json"
+            fixture.rename(retained)
+            incomplete = consume(current, current_batch)
+            self.assertEqual(incomplete.returncode, 2, incomplete.stdout + incomplete.stderr)
+            self.assertEqual(
+                json.loads(incomplete.stdout),
+                {"outcome": "INFRA", "message": "Missing coverage shards: [('fixture', '1/1')]"},
+            )
+            retained.rename(fixture)
+            for fragment_dir, batch in ((current, current_batch), (prior, prior_batch)):
+                with self.subTest(batch=batch):
+                    result = consume(fragment_dir, batch)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(json.loads(result.stdout), {"outcome": "EMPTY", "mutants": 0})
+
     def test_export_rejects_a_producer_not_matching_the_external_batch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
