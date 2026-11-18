@@ -382,6 +382,65 @@ class MutationOperatorsTest(unittest.TestCase):
 
 
 class MutationExecutionTest(unittest.TestCase):
+    def test_child_attribution_uses_the_same_reaching_and_failing_node(self):
+        cases = (
+            ("passing child", False, "", "SURVIVED", None),
+            ("failing child", False, "child", "KILLED", "test_value"),
+            ("unreached child", True, "", "NO_TESTS", None),
+            ("unrelated failure", False, "unrelated", "NO_TESTS", None),
+            ("ordinary owner", True, "ordinary", "KILLED", "test_ordinary"),
+        )
+        for name, unreached, failing, outcome, node in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                project(root, "value = 1\n")
+                test = INSTALLED_CHILD_TEST
+                if unreached:
+                    test = test.replace(
+                        "'import example; print(example.__file__)'",
+                        "('pass' if 'value = 2' in package.read_text() "
+                        "else 'import example; print(example.__file__)')",
+                    ).replace(
+                        "    imported = Path(child.stdout.strip()).resolve()\n"
+                        "    assert imported.is_relative_to(environment.resolve())\n",
+                        "    assert child.returncode == 0\n",
+                    )
+                if failing == "child":
+                    test = test.replace(
+                        "'import example; print(example.__file__)'",
+                        "'import example; assert example.value == 1; print(example.__file__)'",
+                    )
+                if failing == "unrelated":
+                    test += (
+                        "def test_unrelated():\n"
+                        "    root = Path(__file__).resolve().parents[1]\n"
+                        "    assert (root / 'src/example.py').read_text() == 'value = 1\\n'\n"
+                    )
+                if failing == "ordinary":
+                    test += (
+                        "def test_ordinary():\n    import example\n    assert example.value == 1\n"
+                    )
+                path = "tests/test_installed_child.py"
+                (root / path).write_text(test)
+                base, data = run_domain(root, "unit", [path], 30, baseline=True)
+                self.assertEqual(base["outcome"], "SURVIVED", base["log"])
+                _, routes = child_trace.read_traces(data)
+                target = root / "src/example.py"
+                target.write_text("value = 2\n")
+                result, _ = run_domain(
+                    root,
+                    "unit",
+                    [path],
+                    30,
+                    mutated_file=target,
+                    mutated_span=(1, 1),
+                    expected_children=tuple(routes),
+                )
+                self.assertEqual(result["outcome"], outcome, result)
+                self.assertEqual(
+                    result.get("node"), f"{path}::{node}" if node is not None else None
+                )
+
     def test_configured_child_environment_passes_the_staged_trace_config(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
