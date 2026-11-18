@@ -980,6 +980,18 @@ class DocumentationTest(unittest.TestCase):
             " ".join(target_interface.read_text(encoding="utf-8").split()),
         )
 
+    def test_request_identification_guide_is_linked_from_entry_documents(self):
+        guide = "docs/request-identification.md"
+
+        self.assertTrue((ROOT / guide).is_file())
+        self.assertIn(f"[request identification guide]({guide})", read("README.md"))
+        self.assertIn(f"[request identification guide]({guide})", read("QUICKSTART.md"))
+        self.assertIn(
+            f"[request identification guide](../{guide})",
+            read("acceptance/README.md"),
+        )
+        self.assertIn("does not add an HTTP header or alter any request", read(guide))
+
     def test_every_repository_url_in_the_documents_names_this_repository(self):
         # Both canonical names remain in use during the released-installer transition.
         tracked = subprocess.run(
