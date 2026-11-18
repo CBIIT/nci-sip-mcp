@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import yaml
 from scripts.processes import stop, wait_until
+from scripts.validation import mutation_child_trace as child_trace
 from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
 from scripts.validation.mutation_gate import execute_job
@@ -100,6 +101,38 @@ def cli(root, *args):
         timeout=180,
         check=False,
     )
+
+
+def child_trace_fixture(root):
+    data_file = root / ".coverage"
+    trace_environment = child_trace.prepare_run(
+        data_file, root / "trace-hook", "unit", "candidate", "1/1"
+    )
+    trace_environment["MUTATION_COVERAGE_CONTEXT"] = "tests/test_trace.py::test_child|run"
+    route = child_trace.ChildRoute("src/example.py", "example", root / "owned-child")
+    with patch.dict(os.environ, trace_environment, clear=True):
+        environment = child_trace.child_environment(route)
+    directory = child_trace.trace_directory(data_file)
+    request_path = next(directory.glob("*.request.json"))
+    config_path = next(directory.glob("*.config.json"))
+    request = json.loads(request_path.read_text())
+    config = json.loads(config_path.read_text())
+    result_path = Path(config["record"])
+    result_path.write_text(
+        json.dumps(
+            {
+                **request,
+                "path": str(root / "owned-child/lib/python3.14/site-packages/example.py"),
+                "source_digest": "a" * 64,
+                "bytecode_digest": "b" * 64,
+                "executable": str(root / "owned-child/bin/python"),
+                "lines": [1],
+                "outcome": "reached",
+                "detail": "",
+            }
+        )
+    )
+    return data_file, request_path, config_path, result_path, environment, trace_environment
 
 
 class MutationOperatorsTest(unittest.TestCase):
@@ -349,6 +382,109 @@ class MutationOperatorsTest(unittest.TestCase):
 
 
 class MutationExecutionTest(unittest.TestCase):
+    def test_configured_child_environment_passes_the_staged_trace_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (
+                data_file,
+                request_path,
+                config_path,
+                _result_path,
+                environment,
+                trace_environment,
+            ) = child_trace_fixture(root)
+            self.assertEqual(
+                environment["PYTHONPATH"], trace_environment["MUTATION_CHILD_TRACE_HOOK"]
+            )
+            self.assertEqual(environment["MUTATION_CHILD_TRACE_CONFIG"], str(config_path))
+            self.assertEqual(
+                json.loads(request_path.read_text())["node"], "tests/test_trace.py::test_child"
+            )
+            _producer, traces = child_trace.read_traces(data_file)
+            self.assertEqual(
+                [(trace.node, trace.outcome) for trace in traces],
+                [("tests/test_trace.py::test_child", "reached")],
+            )
+
+    def test_read_traces_rejects_a_missing_child_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            result.unlink()
+            with self.assertRaisesRegex(
+                ValueError, "Installed child request is missing its result"
+            ):
+                child_trace.read_traces(data_file)
+
+    def test_read_traces_rejects_a_config_that_redirects_its_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, config_path, _result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            config = json.loads(config_path.read_text())
+            config["record"] = str(Path(temporary) / "other-result.json")
+            config_path.write_text(json.dumps(config))
+            with self.assertRaisesRegex(
+                ValueError, "Installed child trace config does not match its request"
+            ):
+                child_trace.read_traces(data_file)
+
+    def test_read_traces_rejects_a_request_from_another_producer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, request_path, config_path, _result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            request = json.loads(request_path.read_text())
+            request["run_id"] = "0" * 32
+            request_path.write_text(json.dumps(request))
+            config = json.loads(config_path.read_text())
+            config["run_id"] = request["run_id"]
+            config_path.write_text(json.dumps(config))
+            with self.assertRaisesRegex(
+                ValueError, "Installed child trace belongs to another producer or route"
+            ):
+                child_trace.read_traces(data_file)
+
+    def test_installed_module_must_be_in_the_active_venv_site_packages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            environment = root / "venv"
+            base_environment = root / "base"
+            site_packages = environment / "lib/python3.14/site-packages"
+            module = site_packages / "example.py"
+            process = SimpleNamespace(prefix=str(environment), base_prefix=str(base_environment))
+            with (
+                patch.object(child_trace, "sys", process),
+                patch.object(
+                    child_trace.sysconfig, "get_paths", return_value={"purelib": str(site_packages)}
+                ),
+            ):
+                self.assertTrue(
+                    child_trace.installed_module_path(module, environment, ("example.py",))
+                )
+                process.base_prefix = str(environment)
+                self.assertFalse(
+                    child_trace.installed_module_path(module, environment, ("example.py",))
+                )
+                process.base_prefix = str(base_environment)
+                self.assertFalse(
+                    child_trace.installed_module_path(
+                        root / "checkout/example.py", environment, ("example.py",)
+                    )
+                )
+                with patch.object(
+                    child_trace.sysconfig,
+                    "get_paths",
+                    return_value={"purelib": str(root / "other-site")},
+                ):
+                    self.assertFalse(
+                        child_trace.installed_module_path(module, environment, ("example.py",))
+                    )
+                self.assertFalse(
+                    child_trace.installed_module_path(module, environment, ("other.py",))
+                )
+
     def test_mutation_gate_credits_an_installed_child_to_its_failing_test(self):
         source = "assert 1 == 1\n"
         with tempfile.TemporaryDirectory() as temporary:

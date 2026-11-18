@@ -631,6 +631,30 @@ class SharedCoverageTest(unittest.TestCase):
 
             fragment_path = root / "coverage/unit-1.json"
             fragment = json.loads(fragment_path.read_text())
+            source_digest = fragment["children"][0]["source_digest"]
+            fragment["children"][0]["source_digest"] = "0" * 64
+            fragment_path.write_text(json.dumps(fragment))
+            stale_result = cli(
+                root,
+                "--paths",
+                "src/example.py",
+                "--coverage-dir",
+                str(root / "coverage"),
+                "-n",
+                "1",
+            )
+            record = json.loads(stale_result.stdout)
+            self.assertEqual(
+                (
+                    stale_result.returncode,
+                    record["outcome"],
+                    "source differs from producer" in record["message"],
+                ),
+                (2, "INFRA", True),
+                stale_result.stdout + stale_result.stderr,
+            )
+
+            fragment["children"][0]["source_digest"] = source_digest
             fragment["producer"]["run_id"] = "0" * 32
             fragment_path.write_text(json.dumps(fragment))
             stale_result = cli(
@@ -642,9 +666,16 @@ class SharedCoverageTest(unittest.TestCase):
                 "-n",
                 "1",
             )
-            self.assertEqual(stale_result.returncode, 2, stale_result.stdout + stale_result.stderr)
-            self.assertEqual(json.loads(stale_result.stdout)["outcome"], "INFRA")
-            self.assertIn("producer", json.loads(stale_result.stdout)["message"].lower())
+            record = json.loads(stale_result.stdout)
+            self.assertEqual(
+                (
+                    stale_result.returncode,
+                    record["outcome"],
+                    "producer" in record["message"].lower(),
+                ),
+                (2, "INFRA", True),
+                stale_result.stdout + stale_result.stderr,
+            )
 
     def test_fragment_membership_and_corruption_fail_before_selection(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -667,6 +698,14 @@ class SharedCoverageTest(unittest.TestCase):
                     )
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertEqual(json.loads(result.stdout)["outcome"], "INFRA")
+            fragment = json.loads(original)
+            for field, malformed in (("producer", []), ("children", None)):
+                with self.subTest(field=field):
+                    fragment[field] = malformed
+                    path.write_text(json.dumps(fragment))
+                    with self.assertRaisesRegex(ValueError, "Invalid coverage child trace records"):
+                        load(root, root / "coverage")
+                    fragment = json.loads(original)
             path.write_text(original)
             path.rename(root / "missing.json")
             with self.assertRaisesRegex(ValueError, "Missing coverage shards"):

@@ -327,7 +327,7 @@
   qualname: "schedule"
   operator: "boolean:literal"
   site: "/body/3/value/0/keywords/1/value/0"
-  context: "e2d74da89ecda1f0958e05eccb670fcb695149fad30e5b4ee78778bd4049ca6a"
+  context: "8d359b0bfcbdf2fd0de4e3feaaac07d97427a74054049e5eddd861d493ca25b6"
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Supported standard Python stderr is line-buffered and this EVIDENCE print ends with a newline. The real piped-announcement test owns publication before scheduler completion; explicit flush=False preserves that publication. No custom block-buffered stderr contract or general flush exemption is declared."
