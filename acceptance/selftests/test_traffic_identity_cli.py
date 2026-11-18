@@ -181,6 +181,14 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
         )
 
     @classmethod
+    def _write_invalid_utf8_version(cls):
+        metadata = cls.metadata.read_bytes()
+        version = f"Version: {cls.original_version}".encode()
+        if metadata.count(version) != 1:
+            raise RuntimeError("expected one installed acceptance version")
+        cls.metadata.write_bytes(metadata.replace(version, b"Version: private-\xff-canary", 1))
+
+    @classmethod
     def _remove_version(cls):
         lines = cls.metadata.read_text(encoding="utf-8").splitlines()
         cls.metadata.write_text(
@@ -261,6 +269,17 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
         )
         self._assert_no_configuration_writes()
 
+    def test_generate_does_not_read_malformed_installed_version(self):
+        self._write_invalid_utf8_version()
+
+        generated = self._module("generate")
+
+        self.assertRegex(generated.stdout, r"^[0-9a-f]{32}\n$")
+        self.assertEqual((generated.returncode, generated.stderr), (0, ""))
+        self.assertEqual(UUID(generated.stdout.strip()).version, 4)
+        self.assertNotIn("private-", generated.stdout + generated.stderr)
+        self._assert_no_configuration_writes()
+
     def test_show_uses_acceptance_metadata_and_rejects_ids_without_echoing_them(self):
         version = self._installed_version()
         valid = self._module("show", token=TOKEN)
@@ -292,6 +311,18 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
         )
         assert "Traceback" not in refused.stdout + refused.stderr
         assert "None" not in refused.stdout + refused.stderr
+
+    def test_show_reports_a_fixed_error_for_undecodable_installed_metadata(self):
+        self._write_invalid_utf8_version()
+
+        refused = self._module("show", token=TOKEN)
+
+        self.assertEqual(
+            (refused.returncode, refused.stdout, refused.stderr),
+            (1, "", VERSION_ERROR + "\n"),
+        )
+        self.assertNotIn("private-", refused.stdout + refused.stderr)
+        self.assertNotIn("UnicodeDecodeError", refused.stdout + refused.stderr)
 
     def test_installed_version_is_safe_and_the_complete_label_is_capped_at_256_bytes(self):
         version = self._installed_version()

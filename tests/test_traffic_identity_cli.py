@@ -177,6 +177,14 @@ class CoreIdentityCLITest(unittest.TestCase):
         )
 
     @classmethod
+    def _write_invalid_utf8_version(cls):
+        metadata = cls.metadata.read_bytes()
+        version = f"Version: {cls.original_version}".encode()
+        if metadata.count(version) != 1:
+            raise RuntimeError("expected one installed core version")
+        cls.metadata.write_bytes(metadata.replace(version, b"Version: private-\xff-canary", 1))
+
+    @classmethod
     def _remove_version(cls):
         lines = cls.metadata.read_text(encoding="utf-8").splitlines()
         cls.metadata.write_text(
@@ -255,6 +263,21 @@ class CoreIdentityCLITest(unittest.TestCase):
             },
         )
 
+    def test_package_import_without_an_installed_distribution_fails(self):
+        environment = self._environment()
+        environment["PYTHONPATH"] = str(ROOT / "src")
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", "import nci_si_mcp"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=self.working_directory,
+            env=environment,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PackageNotFoundError", result.stderr)
+
     def test_generate_prints_a_uuid4_without_provisioning_or_writing_files(self):
         for configured_id in (None, "PRIVATE-ID-CANARY"):
             with self.subTest(configured_id=configured_id):
@@ -272,7 +295,17 @@ class CoreIdentityCLITest(unittest.TestCase):
             "is missing",
         )
         self.assertIn("NCI_SI_INSTALLATION_ID", error["message"])
-        self.assertNotIn(generated.stdout.strip(), missing.stdout + missing.stderr)
+        self._assert_no_configuration_writes()
+
+    def test_generate_does_not_read_malformed_installed_version(self):
+        self._write_invalid_utf8_version()
+
+        generated = self._module("generate")
+
+        self.assertRegex(generated.stdout, r"^[0-9a-f]{32}\n$")
+        self.assertEqual((generated.returncode, generated.stderr), (0, ""))
+        self.assertEqual(UUID(generated.stdout.strip()).version, 4)
+        self.assertNotIn("private-", generated.stdout + generated.stderr)
         self._assert_no_configuration_writes()
 
     def test_show_uses_the_installed_version_and_configured_token_exactly(self):
@@ -301,6 +334,73 @@ class CoreIdentityCLITest(unittest.TestCase):
             VERSION_ERROR,
         )
         self.assertNotIn("Traceback", refused.stdout + refused.stderr)
+
+    def test_show_reports_a_fixed_error_for_undecodable_installed_metadata(self):
+        self._write_invalid_utf8_version()
+
+        refused = self._module("show", token=TOKEN)
+
+        self._error(
+            refused,
+            "nci-si-mcp installed version",
+            "must be a safe printable ASCII version and keep the complete label within 256 bytes",
+            VERSION_ERROR,
+        )
+        self.assertNotIn("private-", refused.stdout + refused.stderr)
+        self.assertNotIn("UnicodeDecodeError", refused.stdout + refused.stderr)
+
+    def test_package_version_reload_tracks_valid_corrupt_and_repaired_metadata(self):
+        metadata_path = json.dumps(str(self.metadata))
+        code = (
+            "import importlib, pathlib, nci_si_mcp\n"
+            f"path = pathlib.Path({metadata_path})\n"
+            "initial = nci_si_mcp.__version__\n"
+            "initial_attribute = '__version__' in nci_si_mcp.__dict__\n"
+            "metadata = path.read_bytes()\n"
+            "old = b'Version: ' + initial.encode()\n"
+            "assert metadata.count(old) == 1\n"
+            "metadata = metadata.replace(old, b'Version: snapshot-change', 1)\n"
+            "path.write_bytes(metadata)\n"
+            "snapshot = nci_si_mcp.__version__\n"
+            "metadata = path.read_bytes()\n"
+            "bad_version = b'Version: private-' + bytes([255]) + b'-canary'\n"
+            "metadata = metadata.replace(b'Version: snapshot-change', bad_version, 1)\n"
+            "path.write_bytes(metadata)\n"
+            "try:\n"
+            "    importlib.reload(nci_si_mcp)\n"
+            "except UnicodeDecodeError:\n"
+            "    reload_failed = True\n"
+            "else:\n"
+            "    reload_failed = False\n"
+            "present_after_corrupt = '__version__' in nci_si_mcp.__dict__\n"
+            "try:\n"
+            "    nci_si_mcp.__version__\n"
+            "except UnicodeDecodeError:\n"
+            "    explicit_failed = True\n"
+            "else:\n"
+            "    explicit_failed = False\n"
+            "deferred_after_corrupt = '__getattr__' in nci_si_mcp.__dict__\n"
+            "metadata = path.read_bytes()\n"
+            "metadata = metadata.replace(bad_version, b'Version: 7.7.7', 1)\n"
+            "path.write_bytes(metadata)\n"
+            "importlib.reload(nci_si_mcp)\n"
+            "print(f'{initial}|{initial_attribute}|{snapshot}|{reload_failed}|"
+            "{present_after_corrupt}|{explicit_failed}|{deferred_after_corrupt}|"
+            "{nci_si_mcp.__version__}|"
+            '{"__version__" in nci_si_mcp.__dict__}|'
+            '{"__getattr__" in nci_si_mcp.__dict__}\')\n'
+        )
+        result = self._child(["-c", code])
+
+        self.assertEqual(
+            (result.returncode, result.stdout, result.stderr),
+            (
+                0,
+                f"{self.original_version}|True|{self.original_version}|True|False|True|"
+                f"True|7.7.7|True|False\n",
+                "",
+            ),
+        )
 
     def test_invalid_tokens_are_refused_without_echoing_them(self):
         version = self._installed_version()

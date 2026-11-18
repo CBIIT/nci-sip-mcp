@@ -2,6 +2,7 @@
 
 import os
 import unittest
+from contextlib import suppress
 from unittest.mock import patch
 
 from nci_si_acceptance import traffic_identity
@@ -14,6 +15,22 @@ from nci_si_acceptance.traffic_identity import (
 
 
 class AcceptanceIdentitySnapshotTest(unittest.TestCase):
+    def test_captured_values_cannot_change_the_rendered_label(self):
+        with patch.dict(os.environ, {INSTALLATION_ID_ENV: "b" * 32}, clear=True):
+            for name, replacement in (("_raw_id", "c" * 32), ("version", "99.0")):
+                with self.subTest(field=name):
+                    captured = capture_identity()
+                    label = installation_label(captured)
+
+                    with suppress(AttributeError):
+                        setattr(captured, name, replacement)
+                    self.assertEqual(installation_label(captured), label)
+
+                    state = getattr(captured, "__dict__", None)
+                    if isinstance(state, dict):
+                        state[name] = replacement
+                        self.assertEqual(installation_label(captured), label)
+
     def test_snapshot_does_not_expose_a_captured_private_version(self):
         canary = "PRIVATE VERSION CANARY"
         with (

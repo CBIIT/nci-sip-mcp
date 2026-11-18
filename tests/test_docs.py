@@ -982,6 +982,7 @@ class DocumentationTest(unittest.TestCase):
 
     def test_request_identification_guide_is_linked_from_entry_documents(self):
         guide = "docs/request-identification.md"
+        guide_text = " ".join(read(guide).split())
 
         self.assertTrue((ROOT / guide).is_file())
         self.assertIn(f"[request identification guide]({guide})", read("README.md"))
@@ -990,8 +991,20 @@ class DocumentationTest(unittest.TestCase):
             read("acceptance/README.md"),
         )
         self.assertIn(
-            "does not yet add an HTTP header or alter any request",
-            " ".join(read(guide).split()),
+            '"$SERVER_VENV/bin/python" -m nci_si_mcp.traffic_identity show',
+            guide_text,
+        )
+        self.assertIn(
+            '"$ACCEPTANCE_VENV/bin/python" -m nci_si_acceptance.traffic_identity show',
+            guide_text,
+        )
+        self.assertIn(
+            "The server does not yet read this identity or add an HTTP header", guide_text
+        )
+        self.assertNotIn("pdm run --working-dir acceptance", guide_text)
+        self.assertIn(
+            "pdm run python -m nci_si_acceptance.traffic_identity show",
+            guide_text,
         )
 
     def test_every_repository_url_in_the_documents_names_this_repository(self):
