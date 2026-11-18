@@ -398,6 +398,11 @@ same test to reach the mutated bytes and fail; another node cannot lend its reac
 unreached routes are `NO_TESTS`, not evidence failures, and do not block an independent
 in-process owner. Candidates with child routes collect coverage to distinguish these owners.
 Malformed or missing trace evidence is `INFRA`; a timed-out run remains `TIMEOUT`.
+An opted-in child may declare several exact source/module routes for the same owning call and
+environment; each emits separate evidence. A module run with `python -m` is matched by its
+`__spec__.name` and verified installed path, not by treating `__main__` as an alias. An owned
+test hook can start the staged tracer alongside its existing network sentinel without adding
+checkout source or host site-packages to the child's product import path.
 Long-lived fixture servers retain the setup context present when they start; later RPCs
 cannot inherit changes to the parent's environment. Their setup-only lines therefore use
 the whole-fixture fallback, counted like the other domains, rather than claiming per-RPC ownership.
