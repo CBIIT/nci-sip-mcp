@@ -46,6 +46,34 @@ def project(root, source, unit="assert example.answer() is True", contract="asse
         path.write_text(value)
 
 
+INSTALLED_CHILD_TEST = (
+    "import os, subprocess, venv\n"
+    "from pathlib import Path\n"
+    "def test_value():\n"
+    "    root = Path(__file__).resolve().parents[1]\n"
+    "    environment = root / 'owned-child'\n"
+    "    venv.EnvBuilder(with_pip=False).create(environment)\n"
+    "    interpreter = environment / 'bin/python'\n"
+    "    site = subprocess.run(\n"
+    "        [str(interpreter), '-c', "
+    "\"import sysconfig; print(sysconfig.get_paths()['purelib'])\"],\n"
+    "        capture_output=True, text=True, check=True,\n"
+    "    )\n"
+    "    package = Path(site.stdout.strip()) / 'example.py'\n"
+    "    package.write_bytes((root / 'src/example.py').read_bytes())\n"
+    "    child_env = {key: value for key, value in os.environ.items() "
+    "if key != 'PYTHONPATH'}\n"
+    "    child_env['PYTHONNOUSERSITE'] = '1'\n"
+    "    child = subprocess.run(\n"
+    "        [str(interpreter), '-c', "
+    "'import example; print(example.__file__)'],\n"
+    "        env=child_env, capture_output=True, text=True, check=True,\n"
+    "    )\n"
+    "    imported = Path(child.stdout.strip()).resolve()\n"
+    "    assert imported.is_relative_to(environment.resolve())\n"
+)
+
+
 def command(root, *args):
     result = cli(root, *args)
     return result.returncode, [json.loads(line) for line in result.stdout.splitlines()]
@@ -321,6 +349,30 @@ class MutationOperatorsTest(unittest.TestCase):
 
 
 class MutationExecutionTest(unittest.TestCase):
+    def test_mutation_gate_credits_an_installed_child_to_its_failing_test(self):
+        source = "assert 1 == 1\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, source, unit="pass")
+            (root / "tests/test_example.py").write_text(
+                "def test_placeholder():\n    assert True\n"
+            )
+            (root / "acceptance/tests/test_contract.py").write_text(
+                "def test_contract():\n    assert True\n"
+            )
+            (root / "tests/test_installed_child.py").write_text(INSTALLED_CHILD_TEST)
+
+            result = cli(root, "--paths", "src/example.py", "--shard", "1/3", "-n", "1")
+            rows = mutant_rows([json.loads(line) for line in result.stdout.splitlines()])
+
+        self.assertEqual(
+            {row["outcome"] for row in rows}, {"KILLED"}, result.stdout + result.stderr
+        )
+        self.assertEqual(
+            {row["node"] for row in rows}, {"tests/test_installed_child.py::test_value"}
+        )
+        self.assertEqual({row["domain"] for row in rows}, {"unit"})
+
     def test_aggregate_cost_overflow_keeps_complete_summary_and_candidate_bytes(self):
         # Given valid individual timings, an unreportable aggregate must fail
         # closed after all candidate identities and summary counts are emitted.
