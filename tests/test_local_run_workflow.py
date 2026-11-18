@@ -882,6 +882,20 @@ class LocalRunWorkflowTest(unittest.TestCase):
                     "set -euo pipefail",
                     'if [ "$EVENT_NAME" = "schedule" ]; then',
                     '  RELEASE_TAG="$(git describe --tags --abbrev=0)"',
+                    (
+                        '  RELEASE_DISTRIBUTION="$(git show "$RELEASE_TAG:pyproject.toml" | '
+                        "python3 -c 'import sys, tomllib; "
+                        'print(tomllib.loads(sys.stdin.read())["project"]["name"])\')"'
+                    ),
+                    '  if [ "$RELEASE_DISTRIBUTION" != "nci-sip-mcp" ]; then',
+                    (
+                        '    echo "::error::Scheduled tag $RELEASE_TAG provides '
+                        "$RELEASE_DISTRIBUTION; no compatible NCI SIP release is available, so "
+                        "released SIP verification "
+                        'was not performed."'
+                    ),
+                    "    exit 1",
+                    "  fi",
                     "else",
                     "  RELEASE_TAG=v0.0.0",
                     '  git tag "$RELEASE_TAG" HEAD',
@@ -916,7 +930,9 @@ class LocalRunWorkflowTest(unittest.TestCase):
                     "with open(os.environ['GIT_CALLS'], 'a', encoding='utf-8') as stream:\n"
                     "    stream.write(' '.join(sys.argv[1:]) + '\\n')\n"
                     "if sys.argv[1:] == ['describe', '--tags', '--abbrev=0']:\n"
-                    "    print(os.environ['FAKE_TAG'])\n",
+                    "    print(os.environ['FAKE_TAG'])\n"
+                    "elif sys.argv[1:] == ['show', os.environ['FAKE_TAG'] + ':pyproject.toml']:\n"
+                    "    print('[project]\\nname = \"nci-si-mcp\"')\n",
                     encoding="utf-8",
                 )
                 fake_git.chmod(0o755)
@@ -940,18 +956,27 @@ class LocalRunWorkflowTest(unittest.TestCase):
                     check=False,
                 )
 
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(
-                    (root / "github-env").read_text(encoding="utf-8"),
-                    f"RELEASE_TAG={expected_tag}\n",
-                )
                 commands = calls.read_text(encoding="utf-8").splitlines()
                 if candidate:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(
+                        (root / "github-env").read_text(encoding="utf-8"),
+                        f"RELEASE_TAG={expected_tag}\n",
+                    )
                     self.assertEqual(len(commands), 3)
                     self.assertEqual(commands[0], "tag v0.0.0 HEAD")
                     self.assertTrue(all("file:///" in command for command in commands[1:]))
                 else:
-                    self.assertEqual(commands, ["describe --tags --abbrev=0"])
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("nci-si-mcp", result.stdout)
+                    self.assertIn("released SIP verification was not performed", result.stdout)
+                    self.assertEqual(
+                        commands,
+                        [
+                            "describe --tags --abbrev=0",
+                            "show v0.39.2:pyproject.toml",
+                        ],
+                    )
 
     def test_required_index_readiness_and_search_are_exact(self):
         by_name = run_by_name()

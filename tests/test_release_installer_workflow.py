@@ -1,3 +1,4 @@
+import importlib.metadata
 import json
 import os
 import re
@@ -14,7 +15,10 @@ import yaml
 ROOT = Path(__file__).parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "local-installer.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+LOCAL_RUN_WORKFLOW = ROOT / ".github" / "workflows" / "local-run.yml"
 DOCUMENT = ROOT / "docs" / "installer-targets.md"
+BASE = "f49b766bf33c67ae42afd9bbda18be8ce4f65b06"
+OLD_RELEASE_TAG = "v0.39.2"
 STDIO_CAPTURE = (
     'STDIO_CLIENT="$("$INSTALLER_VENV/bin/nci-sip-install" start '
     '--target local --transport stdio --data-dir "$STDIO_ROOT")"'
@@ -327,6 +331,13 @@ steps:
         git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
         git merge-base --is-ancestor "$ref" refs/remotes/origin/main
       fi
+      if [ "$EVENT_NAME" = "schedule" ] || [ -n "$INPUT_REF" ]; then
+        distribution="$(git show "$ref:pyproject.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["name"])')"
+        if [ "$distribution" != "nci-sip-mcp" ]; then
+          echo "::error::Selected release $tag provides $distribution; no compatible NCI SIP release is available, so released SIP verification was not performed."
+          exit 1
+        fi
+      fi
       echo "ref=$ref" >> "$GITHUB_OUTPUT"
       echo "tag=$tag" >> "$GITHUB_OUTPUT"
 """)
@@ -374,7 +385,200 @@ def moved_tag_verdict():
     return run[start:].split("\nPY\n", 1)[0]
 
 
+def local_git(repository, *arguments):
+    result = subprocess.run(  # noqa: S603 - fixed Git commands in a temporary local clone
+        ["git", "-C", str(repository), *arguments],  # noqa: S607
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def clone_release_fixture(parent):
+    repository = parent / "release-era-repo"
+    subprocess.run(  # noqa: S603 - local clone of this repository into a temporary directory
+        ["git", "clone", "--quiet", "--shared", str(ROOT), str(repository)],  # noqa: S607
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    local_git(repository, "update-ref", "refs/heads/main", BASE)
+    local_git(repository, "remote", "set-url", "origin", str(repository))
+    return repository
+
+
+def run_local_run_source_selection(repository, scratch, event):
+    workflow = yaml.safe_load(LOCAL_RUN_WORKFLOW.read_text(encoding="utf-8"))
+    step = next(
+        item
+        for item in workflow["jobs"]["local-run"]["steps"]
+        if item.get("name") == "Select release or candidate index source (CI only)"
+    )
+    environment = os.environ | {
+        "EVENT_NAME": event,
+        "GITHUB_WORKSPACE": str(repository),
+        "GITHUB_ENV": str(scratch / f"local-run-{event}.env"),
+        "GIT_CONFIG_GLOBAL": str(scratch / "local-run.gitconfig"),
+        "HOME": str(scratch),
+        "PATH": os.environ["PATH"],
+    }
+    result = subprocess.run(  # noqa: S603 - runs a repository-owned workflow step in a temp clone
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],  # noqa: S607
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return result, Path(environment["GITHUB_ENV"])
+
+
+def run_installer_source_selection(
+    repository, scratch, event, release_tag=None, input_ref="", input_tag=""
+):
+    workflow_data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    step = next(
+        item
+        for item in workflow_data["jobs"]["prepare"]["steps"]
+        if item.get("name") == "Select exact source"
+    )
+    binary = scratch / "bin"
+    binary.mkdir(exist_ok=True)
+    environment = os.environ | {
+        "DISPATCH_REF": local_git(repository, "rev-parse", "HEAD"),
+        "EVENT_NAME": event,
+        "GH_TOKEN": "fixture",
+        "GITHUB_OUTPUT": str(scratch / f"installer-{event}.output"),
+        "GIT_CONFIG_GLOBAL": str(scratch / "installer.gitconfig"),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_ALLOW_PROTOCOL": "file",
+        "HOME": str(scratch),
+        "INPUT_REF": input_ref,
+        "INPUT_TAG": input_tag,
+        "PATH": os.environ["PATH"],
+        "PR_REF": "",
+    }
+    if release_tag is not None:
+        gh = binary / "gh"
+        gh.write_text(
+            "#!/bin/sh\n"
+            '[ "$*" = "release view --json tagName --jq .tagName" ] || exit 2\n'
+            'printf "%s\\n" "$RELEASE_TAG_FIXTURE"\n',
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+        environment["PATH"] = str(binary) + os.pathsep + environment["PATH"]
+        environment["RELEASE_TAG_FIXTURE"] = release_tag
+    result = subprocess.run(  # noqa: S603 - runs a repository-owned workflow step in a temp clone
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],  # noqa: S607
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return result, Path(environment["GITHUB_OUTPUT"])
+
+
+def install_local_git_requirement(repository, ref, distribution, target):
+    environment = os.environ | {
+        "GIT_ALLOW_PROTOCOL": "file",
+        "GIT_CONFIG_GLOBAL": str(target.parent / "gitconfig"),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "HOME": str(target.parent),
+        "PIP_CACHE_DIR": str(target.parent / "pip-cache"),
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PIP_NO_INDEX": "1",
+    }
+    requirement = f"{distribution} @ git+{repository.as_uri()}@{ref}"
+    return subprocess.run(  # noqa: S603 - installs this repository's local Git source only
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-build-isolation",
+            "--target",
+            str(target),
+            requirement,
+        ],
+        check=False,
+        capture_output=True,
+        env=environment,
+        text=True,
+    )
+
+
+def installed_distribution_and_help(target, command):
+    distributions = {
+        item.metadata["Name"] for item in importlib.metadata.distributions(path=[str(target)])
+    }
+    result = subprocess.run(  # noqa: S603 - executes the locally installed release command
+        [str(target / "bin" / command), "--help"],
+        env=os.environ | {"PYTHONPATH": str(target)},
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return distributions, result
+
+
 class ReleaseInstallerWorkflowTest(unittest.TestCase):
+    def test_scheduled_release_preflight_rejects_old_distribution_and_installs_both_eras(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = clone_release_fixture(root)
+            candidate_sha = local_git(repository, "rev-parse", "HEAD")
+            local_git(repository, "checkout", "--quiet", "--detach", OLD_RELEASE_TAG)
+            old_run, old_run_env = run_local_run_source_selection(repository, root, "schedule")
+            old_prepare, old_prepare_output = run_installer_source_selection(
+                repository, root, "schedule", OLD_RELEASE_TAG
+            )
+            old_install = install_local_git_requirement(
+                repository, OLD_RELEASE_TAG, "nci-si-mcp", root / "old-installed"
+            )
+            self.assertEqual(old_install.returncode, 0, old_install.stderr)
+            old_distributions, old_help = installed_distribution_and_help(
+                root / "old-installed", "nci-si-install"
+            )
+
+            local_git(repository, "checkout", "--quiet", "--detach", candidate_sha)
+            candidate_run, candidate_run_env = run_local_run_source_selection(
+                repository, root, "workflow_dispatch"
+            )
+            candidate_prepare, candidate_output = run_installer_source_selection(
+                repository,
+                root,
+                "workflow_call",
+                input_ref=candidate_sha,
+                input_tag="v0.0.0",
+            )
+            candidate_install = install_local_git_requirement(
+                repository, "v0.0.0", "nci-sip-mcp", root / "candidate-installed"
+            )
+            self.assertEqual(candidate_install.returncode, 0, candidate_install.stderr)
+            candidate_distributions, candidate_help = installed_distribution_and_help(
+                root / "candidate-installed", "nci-sip-install"
+            )
+
+        old_diagnostic = old_run.stdout + old_run.stderr + old_prepare.stdout + old_prepare.stderr
+        self.assertEqual(old_run.returncode, 1, old_diagnostic)
+        self.assertEqual(old_prepare.returncode, 1, old_diagnostic)
+        self.assertIn(f"{OLD_RELEASE_TAG} provides nci-si-mcp", old_diagnostic)
+        self.assertIn("released SIP verification was not performed", old_diagnostic)
+        self.assertFalse(old_run_env.exists())
+        self.assertFalse(old_prepare_output.exists())
+        self.assertEqual(old_distributions, {"nci-si-mcp"})
+        self.assertEqual(old_help.returncode, 0, old_help.stderr)
+        self.assertEqual(candidate_run.returncode, 0, candidate_run.stderr)
+        self.assertEqual(candidate_run_env.read_text(encoding="utf-8"), "RELEASE_TAG=v0.0.0\n")
+        self.assertEqual(candidate_prepare.returncode, 0, candidate_prepare.stderr)
+        self.assertIn(f"ref={candidate_sha}\ntag=v0.0.0\n", candidate_output.read_text())
+        self.assertEqual(candidate_distributions, {"nci-sip-mcp"})
+        self.assertEqual(candidate_help.returncode, 0, candidate_help.stderr)
+
     def test_both_origin_rewrites_resolve_the_selected_local_commit(self):
         local_run = yaml.safe_load((WORKFLOW.parent / "local-run.yml").read_text())
         scripts = [step["run"] for step in named_steps() if "run" in step]
