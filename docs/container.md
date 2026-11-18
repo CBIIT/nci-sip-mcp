@@ -200,7 +200,7 @@ digest-bound provenance with
 `gh attestation verify oci://ghcr.io/cbiit/nci-sip-mcp@sha256:<digest> --repo CBIIT/nci-sip-mcp --signer-workflow CBIIT/nci-sip-mcp/.github/workflows/release.yml`.
 Historical images keep their original digest, release assets and attestation identities;
 for an image published under the old identity, the corresponding verification is
-`gh attestation verify oci://ghcr.io/cbiit/nci-sip-mcp@sha256:<digest> --repo CBIIT/nci-sip-mcp --signer-workflow CBIIT/nci-sip-mcp/.github/workflows/release.yml`.
+`gh attestation verify oci://ghcr.io/cbiit/nci-si-mcp@sha256:<digest> --repo CBIIT/nci-si-mcp --signer-workflow CBIIT/nci-si-mcp/.github/workflows/release.yml`.
 Verify the SBOM attestation with the same command plus
 `--predicate-type https://cyclonedx.org/bom`. Both attestations are stored in GitHub and GHCR;
 they bind the pushed image digest to the release workflow, not a mutable image tag. Older

@@ -109,6 +109,16 @@ PRE_SIP_TAG=v0.39.2
 "$PYTHON" -m venv "$INSTALLER_VENV"
 "$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"
 "$INSTALLER_VENV/bin/nci-si-install" check --target local
+"$INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
+"$INSTALLER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$INSTALLER_VENV/bin/nci-si-install" check --target local
+"$INSTALLER_VENV/bin/nci-si-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
+"$INSTALLER_VENV/bin/nci-si-install" status --target local --transport http --data-dir "$HTTP_ROOT"
+"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport http --data-dir "$HTTP_ROOT"
+"$INSTALLER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
+"$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
 ```
 
 Its settings are `NCI_SI_*`; they are not aliases for the `NCI_SIP_*` settings of the new package.

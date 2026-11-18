@@ -7,7 +7,7 @@ the dated implementation decisions and original baseline rather than a current s
 
 The work is tracked on GitHub as one milestone per phase and one for the furnished package (§11), with one issue per deliverable; issues cite this document by section. Where a section describes the code "today", it means `main` at the *Updated* date above.
 
-This document is the implementation plan: how `nci_sip_mcp` is extended from the original EVS-first implementation into the shared platform, the EVS module and the caDSR module, together with the acceptance suite that is the acceptance instrument for both. It is written against the code as it is, so every change is stated as a delta from a named module, and it is ordered so that each phase leaves the repository releasable.
+This document is the implementation plan: how `nci_si_mcp` is extended from the original EVS-first implementation into the shared platform, the EVS module and the caDSR module, together with the acceptance suite that is the acceptance instrument for both. It is written against the code as it is, so every change is stated as a delta from a named module, and it is ordered so that each phase leaves the repository releasable.
 
 The specification of the required tools and their behaviour is the source of record. It lives in this repository as data in `spec/` (conventions, tools, requirements), rendered as [`docs/specification.md`](specification.md), and is cited below by convention id (A1–A11, M1–M5) and requirement id. The requests to the platform teams are the [upstream requirements](upstream/README.md). Where this plan is more specific than the specification, it is because the code forces a decision the specification leaves open.
 
@@ -19,11 +19,11 @@ The specification of the required tools and their behaviour is the source of rec
 
 | Deliverable | Content | Owner |
 |---|---|---|
-| **Shared platform** | Transport, authentication/authorization hooks, audit, common error and provenance envelopes, configuration, deployment profiles, release model, bounds, caching hints, `outputSchema` generation | this repository, `nci_sip_mcp.platform` |
-| **EVS module** | 12 terminology tools over EVS REST, EVS FHIR and the interim NCIt index | `nci_sip_mcp.evs` |
-| **caDSR module** | 10 metadata tools over the caDSR Open APIs | `nci_sip_mcp.cadsr` |
-| **Cross-domain** | 4 seam tools over the Shared SI Service and the two REST surfaces | `nci_sip_mcp.seam` |
-| **Workflow** | 3 composite tools | `nci_sip_mcp.workflows` |
+| **Shared platform** | Transport, authentication/authorization hooks, audit, common error and provenance envelopes, configuration, deployment profiles, release model, bounds, caching hints, `outputSchema` generation | this repository, `nci_si_mcp.platform` |
+| **EVS module** | 12 terminology tools over EVS REST, EVS FHIR and the interim NCIt index | `nci_si_mcp.evs` |
+| **caDSR module** | 10 metadata tools over the caDSR Open APIs | `nci_si_mcp.cadsr` |
+| **Cross-domain** | 4 seam tools over the Shared SI Service and the two REST surfaces | `nci_si_mcp.seam` |
+| **Workflow** | 3 composite tools | `nci_si_mcp.workflows` |
 | **Acceptance suite** | Harness, fixture server, fixture set, direct tool dispatch, per-tool tests | `acceptance/` (separate package in this repository, separately versioned) |
 
 Twenty-nine tools in total, named and typed exactly as in the specification (`spec/tools.yaml`). Three profiles: `evs`, `cadsr`, `unified`. A profile selects the tools, resources and prompts the server serves (M1.5, M1.6); the surface within a profile is static (M1.2).
@@ -68,7 +68,7 @@ These hold today and continue to hold:
 ## 2. Package layout
 
 ```
-src/nci_sip_mcp/
+src/nci_si_mcp/
   __init__.py
   config.py                 settings, profiles, upstream base URLs, timeouts, credentials source
   cli.py                    thin adapter; gains cadsr-* and seam commands
@@ -329,8 +329,8 @@ Implemented in the existing flat package over `http_client.HttpClient`, injected
 No caDSR credentials have been issued: client tests use contract-crafted responses and recorded
 reference evidence, not live registry content or a runtime fixture fallback. JSON contract URLs
 are listed in `tests/fixtures/cadsr/README.md`. API transports use Basic auth when configured;
-the export transport never receives it. Matching uses `NCI_SIP_MATCH_TIMEOUT_SECONDS` (45 seconds
-by default), other requests `NCI_SIP_TIMEOUT_SECONDS` (30 seconds). The client caps responses at
+the export transport never receives it. Matching uses `NCI_SI_MATCH_TIMEOUT_SECONDS` (45 seconds
+by default), other requests `NCI_SI_TIMEOUT_SECONDS` (30 seconds). The client caps responses at
 10 MiB and transport attempts at three, with the shared backoff and audit path.
 
 The published Data Element contract advertises `/rad/NCIAPI.v1_0:NciApiRad`; the client retains
@@ -423,23 +423,23 @@ checked against the source by tests. Optional omitted arguments substitute empty
 
 ## 8. Configuration and profiles (`config.py`)
 
-Settings after the change. `NCI_SIP_EVS_BASE_URL`, `NCI_SIP_TIMEOUT_SECONDS`, `NCI_SIP_DATA_DIR` and the embedding pair exist today; QUICKSTART.md's other settings (EVS retries, backoff and response limit, index batch size, log level) stay as they are. Each is validated at startup with a message naming its variable, as the existing ones are.
+Settings after the change. `NCI_SI_EVS_BASE_URL`, `NCI_SI_TIMEOUT_SECONDS`, `NCI_SI_DATA_DIR` and the embedding pair exist today; QUICKSTART.md's other settings (EVS retries, backoff and response limit, index batch size, log level) stay as they are. Each is validated at startup with a message naming its variable, as the existing ones are.
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `NCI_SIP_PROFILE` | `unified` | `evs` · `cadsr` · `unified` |
-| `NCI_SIP_EVS_BASE_URL`, `NCI_SIP_EVS_FHIR_BASE_URL` | production | |
-| `NCI_SIP_CADSR_BASE_URL`, `NCI_SIP_CADSR_FTP_URL` | production | |
-| `NCI_SIP_SSIS_SPARQL_URL` | production | |
-| `NCI_SIP_UPSTREAM_MODE` | `live` | `live` · `fixture` — selects base URLs as a set so the acceptance suite switches everything with one variable |
-| `NCI_SIP_RELEASE_CHANNEL` | `monthly` | |
-| `NCI_SIP_EXCLUSION_ROLE_CODES` | `R135,…,R142` | validated against the requested release catalogue per relationship listing or neighborhood call |
-| `NCI_SIP_EVS_LICENSE_KEY`, `NCI_SIP_CADSR_CREDENTIAL` | unset | never logged |
-| `NCI_SIP_EMBEDDING_PROVIDER`, `NCI_SIP_EMBEDDING_MODEL` | unset | both required together (today both default to `hashing`) |
-| `NCI_SIP_DATA_DIR` | `.nci-si-mcp/` | |
-| `NCI_SIP_TIMEOUT_SECONDS`, `NCI_SIP_MATCH_TIMEOUT_SECONDS` | 30, 45 | |
+| `NCI_SI_PROFILE` | `unified` | `evs` · `cadsr` · `unified` |
+| `NCI_SI_EVS_BASE_URL`, `NCI_SI_EVS_FHIR_BASE_URL` | production | |
+| `NCI_SI_CADSR_BASE_URL`, `NCI_SI_CADSR_FTP_URL` | production | |
+| `NCI_SI_SSIS_SPARQL_URL` | production | |
+| `NCI_SI_UPSTREAM_MODE` | `live` | `live` · `fixture` — selects base URLs as a set so the acceptance suite switches everything with one variable |
+| `NCI_SI_RELEASE_CHANNEL` | `monthly` | |
+| `NCI_SI_EXCLUSION_ROLE_CODES` | `R135,…,R142` | validated against the requested release catalogue per relationship listing or neighborhood call |
+| `NCI_SI_EVS_LICENSE_KEY`, `NCI_SI_CADSR_CREDENTIAL` | unset | never logged |
+| `NCI_SI_EMBEDDING_PROVIDER`, `NCI_SI_EMBEDDING_MODEL` | unset | both required together (today both default to `hashing`) |
+| `NCI_SI_DATA_DIR` | `.nci-si-mcp/` | |
+| `NCI_SI_TIMEOUT_SECONDS`, `NCI_SI_MATCH_TIMEOUT_SECONDS` | 30, 45 | |
 
-The settings the acceptance suite gives a server under test, and their formats, are specified in the specification's §4 (`spec/acceptance.md`): `NCI_SIP_CADSR_CREDENTIAL` is `user:password`, sent as HTTP Basic.
+The settings the acceptance suite gives a server under test, and their formats, are specified in the specification's §4 (`spec/acceptance.md`): `NCI_SI_CADSR_CREDENTIAL` is `user:password`, sent as HTTP Basic.
 
 ---
 
@@ -451,8 +451,8 @@ The requirements it tests and its acceptance rules are in the specification's §
 
 ```
 acceptance/
-  pyproject.toml            separate package: nci-sip-acceptance, versioned on its own; pytest, mcp, jsonschema
-  src/nci_sip_acceptance/    the harness
+  pyproject.toml            separate package: nci-si-acceptance, versioned on its own; pytest, mcp, jsonschema
+  src/nci_si_acceptance/    the harness
     client.py               connect over stdio or streamable HTTP; tools/list, tools/call
     fixture_server.py       serves fixtures by (surface, method, path, params, headers, body), active scenarios first, with a request log endpoint
     concepts.py             composes EVS concept answers from one recording per concept (§9.6)
@@ -480,7 +480,7 @@ The root project installs the package editable (dependency group `acceptance`); 
 
 ### 9.2 Run modes
 
-`NCI_SIP_UPSTREAM_MODE=fixture` points the server under test at the fixture server; `live` at production. The harness sets the variable, launches the server (stdio) or connects (remote), and runs the suite. Tests marked `live_capable` run in both modes; the rest in `fixture` only.
+`NCI_SI_UPSTREAM_MODE=fixture` points the server under test at the fixture server; `live` at production. The harness sets the variable, launches the server (stdio) or connects (remote), and runs the suite. Tests marked `live_capable` run in both modes; the rest in `fixture` only.
 
 ### 9.3 The request log
 
