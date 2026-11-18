@@ -505,6 +505,64 @@ class MutationExecutionTest(unittest.TestCase):
             ):
                 child_trace.read_traces(data_file)
 
+    def test_read_traces_binds_each_child_identity_field_to_its_request(self):
+        foreign = {
+            "run_id": "0" * 32,
+            "invocation": "0" * 32,
+            "domain": "fixture",
+            "shard": "2/2",
+            "phase": "producer",
+            "test_phase": "setup",
+            "node": "tests/test_other.py::test_other",
+            "source": "src/other.py",
+            "module": "other",
+            "environment": "/other-environment",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            original = result.read_text()
+            for field, value in foreign.items():
+                with self.subTest(field=field):
+                    result.write_text(json.dumps({**json.loads(original), field: value}))
+                    with self.assertRaisesRegex(ValueError, "another producer or route"):
+                        child_trace.read_traces(data_file)
+            result.write_text(original)
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual(len(traces), 1)
+
+    def test_read_traces_rejects_malformed_result_fields(self):
+        invalid = (
+            ("version", True),
+            ("version", None),
+            ("node", None),
+            ("module", []),
+            ("lines", None),
+            ("lines", [True]),
+            ("lines", [0]),
+            ("lines", [1.0]),
+            ("lines", [2, 1]),
+            ("lines", [1, 1]),
+            ("outcome", None),
+            ("outcome", []),
+            ("outcome", {}),
+            ("outcome", "unknown"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            original = result.read_text()
+            for field, value in invalid:
+                with self.subTest(field=field, value=value):
+                    result.write_text(json.dumps({**json.loads(original), field: value}))
+                    with self.assertRaisesRegex(ValueError, "Invalid installed child trace record"):
+                        child_trace.read_traces(data_file)
+            result.write_text(original)
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual(len(traces), 1)
+
     def test_installed_module_must_be_in_the_active_venv_site_packages(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
