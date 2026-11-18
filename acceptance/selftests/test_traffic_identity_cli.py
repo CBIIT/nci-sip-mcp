@@ -246,12 +246,15 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
         )
 
     def test_generate_prints_a_uuid4_without_provisioning_or_writing_files(self):
-        generated = self._module("generate")
+        for configured_id in (None, "PRIVATE-ID-CANARY"):
+            with self.subTest(configured_id=configured_id):
+                generated = self._module("generate", configured_id=configured_id)
 
-        self.assertRegex(generated.stdout, r"^[0-9a-f]{32}\n$")
-        self.assertEqual((generated.returncode, generated.stderr), (0, ""))
-        parsed = UUID(generated.stdout.strip())
-        self.assertEqual(parsed.version, 4)
+                self.assertRegex(generated.stdout, r"^[0-9a-f]{32}\n$")
+                self.assertEqual((generated.returncode, generated.stderr), (0, ""))
+                parsed = UUID(generated.stdout.strip())
+                self.assertEqual(parsed.version, 4)
+                self.assertNotIn("PRIVATE-ID-CANARY", generated.stdout + generated.stderr)
         missing = self._module("show")
         self.assertEqual(
             (missing.returncode, missing.stdout, missing.stderr), (1, "", ID_ERROR + "\n")
@@ -333,9 +336,10 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
         self._assert_no_configuration_writes()
 
     def test_child_has_no_core_package_and_network_sentinel_records_caught_attempts(self):
-        """Only patched Python socket APIs are observed.
+        """Only the patched resolver and socket methods are observed.
 
-        Native extensions, subprocess networking, and direct syscalls are outside this sentinel.
+        Unpatched APIs such as gethostbyname, gethostbyaddr, getnameinfo, and sendmsg,
+        native extensions, subprocess networking, and direct syscalls are outside this sentinel.
         """
         isolated = self._child(
             [
