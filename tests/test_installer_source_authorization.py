@@ -12,6 +12,7 @@ import yaml
 
 ROOT = Path(__file__).parent.parent
 WORKFLOW = ROOT / ".github/workflows/local-installer.yml"
+PROJECT_METADATA = '[project]\nname = "nci-sip-mcp"\nversion = "0.0.0"\n'
 
 
 class InstallerSourceAuthorizationTest(unittest.TestCase):
@@ -38,9 +39,7 @@ class InstallerSourceAuthorizationTest(unittest.TestCase):
             "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
         }
         self.git(self.root, "init", "-q", "-b", "main", str(self.origin))
-        (self.origin / "pyproject.toml").write_text(
-            '[project]\nname = "nci-sip-mcp"\nversion = "0.0.0"\n', encoding="utf-8"
-        )
+        (self.origin / "pyproject.toml").write_text(PROJECT_METADATA, encoding="utf-8")
         self.git(self.origin, "add", "pyproject.toml")
         self.approved = self.commit(self.origin)
         self.git(self.origin, "tag", "v1.2.3")
@@ -99,6 +98,9 @@ class InstallerSourceAuthorizationTest(unittest.TestCase):
         option = "--orphan" if orphan else "-c"
         branch = "unrelated" if orphan else "unmerged"
         self.git(self.origin, "switch", option, branch)
+        if orphan:
+            (self.origin / "pyproject.toml").write_text(PROJECT_METADATA, encoding="utf-8")
+            self.git(self.origin, "add", "pyproject.toml")
         commit = self.commit(self.origin)
         tag = "v1.2.5" if orphan else "v1.2.4"
         self.git(self.origin, "tag", tag)
@@ -109,11 +111,15 @@ class InstallerSourceAuthorizationTest(unittest.TestCase):
     def test_scheduled_release_selects_the_exact_main_history_commit(self):
         self.assertEqual(self.select(), (0, {"ref": self.approved, "tag": "v1.2.3"}))
 
-    def test_scheduled_release_rejects_unmerged_and_unrelated_commits(self):
-        for orphan in (False, True):
-            with self.subTest(orphan=orphan):
-                _, tag = self.unmerged(orphan=orphan)
-                self.assertEqual(self.select(tag), (1, {}))
+    def test_scheduled_release_rejects_an_unmerged_commit(self):
+        _, tag = self.unmerged()
+        self.assertEqual(self.select(tag), (1, {}))
+
+    def test_scheduled_release_rejects_an_unrelated_orphan_with_valid_project_metadata(self):
+        commit, tag = self.unmerged(orphan=True)
+        project = self.git(self.origin, "show", f"{commit}:pyproject.toml")
+        self.assertEqual(project, PROJECT_METADATA.rstrip())
+        self.assertEqual(self.select(tag), (1, {}))
 
     def test_scheduled_release_rejects_invalid_missing_and_noncommit_tags(self):
         blob = self.git(self.origin, "hash-object", "-w", "--stdin", stdin="not a commit")

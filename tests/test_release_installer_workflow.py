@@ -15,7 +15,6 @@ import yaml
 ROOT = Path(__file__).parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "local-installer.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
-LOCAL_RUN_WORKFLOW = ROOT / ".github" / "workflows" / "local-run.yml"
 DOCUMENT = ROOT / "docs" / "installer-targets.md"
 BASE = "f49b766bf33c67ae42afd9bbda18be8ce4f65b06"
 OLD_RELEASE_TAG = "v0.39.2"
@@ -395,11 +394,23 @@ def local_git(repository, *arguments):
     return result.stdout.strip()
 
 
-def clone_release_fixture(parent):
-    candidate_sha = local_git(ROOT, "rev-parse", "HEAD")
+def source_checkout_on_main(parent: Path, candidate_sha: str) -> Path:
+    source = parent / "source-main"
+    subprocess.run(  # noqa: S603 - local clone of this repository into an owned temporary source.
+        ["git", "clone", "--quiet", "--shared", str(ROOT), str(source)],  # noqa: S607
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    local_git(source, "switch", "--quiet", "--force-create", "main", candidate_sha)
+    return source
+
+
+def clone_release_fixture(parent: Path, source_root: Path = ROOT) -> Path:
+    candidate_sha = local_git(source_root, "rev-parse", "HEAD")
     repository = parent / "release-era-repo"
     subprocess.run(  # noqa: S603 - local clone of this repository into a temporary directory
-        ["git", "clone", "--quiet", "--shared", str(ROOT), str(repository)],  # noqa: S607
+        ["git", "clone", "--quiet", "--shared", str(source_root), str(repository)],  # noqa: S607
         check=True,
         capture_output=True,
         text=True,
@@ -410,8 +421,8 @@ def clone_release_fixture(parent):
     return repository
 
 
-def run_local_run_source_selection(repository, scratch, event):
-    workflow = yaml.safe_load(LOCAL_RUN_WORKFLOW.read_text(encoding="utf-8"))
+def run_local_run_source_selection(repository, scratch, event, source_root: Path = ROOT):
+    workflow = yaml.safe_load((source_root / ".github/workflows/local-run.yml").read_text())
     step = next(
         item
         for item in workflow["jobs"]["local-run"]["steps"]
@@ -437,9 +448,17 @@ def run_local_run_source_selection(repository, scratch, event):
 
 
 def run_installer_source_selection(
-    repository, scratch, event, release_tag=None, input_ref="", input_tag=""
+    repository,
+    scratch,
+    event,
+    release_tag=None,
+    input_ref="",
+    input_tag="",
+    source_root: Path = ROOT,
 ):
-    workflow_data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    workflow_data = yaml.safe_load(
+        (source_root / ".github/workflows/local-installer.yml").read_text()
+    )
     step = next(
         item
         for item in workflow_data["jobs"]["prepare"]["steps"]
@@ -527,16 +546,31 @@ def installed_distribution_and_help(target, command):
     return distributions, result
 
 
+def installed_source_commit(target: Path, distribution_name: str) -> str:
+    distribution = next(
+        item
+        for item in importlib.metadata.distributions(path=[str(target)])
+        if item.metadata["Name"] == distribution_name
+    )
+    direct_url = json.loads(distribution.read_text("direct_url.json"))
+    return direct_url["vcs_info"]["commit_id"]
+
+
 class ReleaseInstallerWorkflowTest(unittest.TestCase):
     def test_scheduled_release_preflight_rejects_old_distribution_and_installs_both_eras(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            repository = clone_release_fixture(root)
+            original_candidate_sha = local_git(ROOT, "rev-parse", "HEAD")
+            source_root = source_checkout_on_main(root, original_candidate_sha)
+            self.assertEqual(local_git(source_root, "symbolic-ref", "--short", "HEAD"), "main")
+            self.assertEqual(local_git(source_root, "rev-parse", "HEAD"), original_candidate_sha)
+            repository = clone_release_fixture(root, source_root)
             candidate_sha = local_git(repository, "rev-parse", "HEAD")
+            self.assertEqual(candidate_sha, original_candidate_sha)
             local_git(repository, "checkout", "--quiet", "--detach", OLD_RELEASE_TAG)
-            old_run = run_local_run_source_selection(repository, root, "schedule")
+            old_run = run_local_run_source_selection(repository, root, "schedule", source_root)
             old_prepare, old_prepare_output = run_installer_source_selection(
-                repository, root, "schedule", OLD_RELEASE_TAG
+                repository, root, "schedule", OLD_RELEASE_TAG, source_root=source_root
             )
             old_install = install_local_git_requirement(
                 repository, OLD_RELEASE_TAG, "nci-si-mcp", root / "old-installed"
@@ -552,11 +586,14 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
             )
 
             local_git(repository, "checkout", "--quiet", "--detach", candidate_sha)
-            candidate_run = run_local_run_source_selection(repository, root, "workflow_dispatch")
+            candidate_run = run_local_run_source_selection(
+                repository, root, "workflow_dispatch", source_root
+            )
             candidate_prepare, candidate_output = run_installer_source_selection(
                 repository,
                 root,
                 "workflow_dispatch",
+                source_root=source_root,
             )
             candidate_install = install_local_git_requirement(
                 repository, candidate_sha, "nci-sip-mcp", root / "candidate-installed"
@@ -564,6 +601,9 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
             self.assertEqual(candidate_install.returncode, 0, candidate_install.stderr)
             candidate_distributions, candidate_help = installed_distribution_and_help(
                 root / "candidate-installed", "nci-sip-install"
+            )
+            candidate_install_sha = installed_source_commit(
+                root / "candidate-installed", "nci-sip-mcp"
             )
             candidate_output_contents = candidate_output.read_text(encoding="utf-8")
 
@@ -577,8 +617,9 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
         self.assertEqual(old_help.returncode, 0, old_help.stderr)
         self.assertEqual(candidate_run.returncode, 0, candidate_run.stderr)
         self.assertEqual(candidate_prepare.returncode, 0, candidate_prepare.stderr)
-        self.assertIn(f"ref={candidate_sha}\ntag=v0.0.0\n", candidate_output_contents)
+        self.assertIn(f"ref={original_candidate_sha}\ntag=v0.0.0\n", candidate_output_contents)
         self.assertEqual(candidate_distributions, {"nci-sip-mcp"})
+        self.assertEqual(candidate_install_sha, original_candidate_sha)
         self.assertEqual(candidate_help.returncode, 0, candidate_help.stderr)
 
     def test_both_origin_rewrites_resolve_the_selected_local_commit(self):
