@@ -285,19 +285,29 @@ adding exclusion pathspecs for generated files.
    1. **Code review:** the engineering standards above, the architecture, and the scope.
    2. **Silent failures:** swallowed exceptions, broad `except`, fallbacks that hide an error,
       results that look complete but are not.
-   3. **Tests:** apply the outside-in rules below to every changed behavioral claim. The existing
-      PR-CI mutation job is the one full catalogue campaign for a frozen candidate; do not run a
-      second full catalogue locally or as reviewer. Before opening the PR, sample about 20 items
-      from that workload, explain outliers and state the projection in the issue. Freeze and record
-      PR head H, event base B and the actual tested PR checkout T. A change to H, B, T, inputs or
-      toolchain requires re-establishing the affected proof. Independently review the raw campaign
-      results and retain their exact provenance
-      ([CONTRIBUTING.md](CONTRIBUTING.md#mutation-gate)); raw evidence review is not another
-      campaign. Producer and mutation-consumer evidence must belong to one workflow
-      attempt. An unrelated rerun that did not execute the mutation consumer does not by itself
-      invalidate a completed campaign when H/B/T and inputs are unchanged and raw results are
-      independently reviewed; an aggregate summary alone is insufficient. This does not reduce
-      ordinary test, self-test, fixture or hook gates.
+    3. **Tests:** apply the outside-in rules below to every changed behavioral claim. Before opening
+       the PR, complete the local caller/test-design and focused-sensitivity review, ordinary local
+       gates, and a campaign plan/readiness record. Select the sample from the actual mutation
+       workload for the exact candidate: use about 20 distinct available items, or every distinct
+       item once when the nonempty catalogue is smaller; do not repeat items to manufacture a
+       sample size. If the actual source-bound selection is empty, record the candidate/source and
+       empty selection and run no fabricated sample. Do not infer an empty selection from a
+       documentation-only diff or skip the actual selection. An empty sample is not a `NO_TESTS`
+       waiver; reachable-candidate requirements and the PR-CI outcome rules still apply. Explain
+       sample timing/outliers and the projection in the issue when a sample exists. This pre-PR
+       review does not establish a mutation verdict or review PR-CI raw evidence.
+
+       The existing PR-CI mutation job is the one full catalogue campaign for a frozen candidate;
+       do not run a second full catalogue locally or as reviewer. Once that campaign exists,
+       independently review its raw results and retain their exact provenance
+       ([CONTRIBUTING.md](CONTRIBUTING.md#mutation-gate)) before exact-head clearance. Freeze and
+       record PR head H, event base B and the actual tested PR checkout T, plus run/attempt,
+       job/shard, source/input/toolchain/lock/version identities. A change to H, B, T, inputs or
+       toolchain requires re-establishing the affected proof. Producer and mutation-consumer
+       evidence must belong to one workflow attempt. An unrelated rerun that did not execute the
+       mutation consumer does not by itself invalidate a completed campaign when H/B/T and inputs
+       are unchanged and raw results are independently reviewed; an aggregate summary alone is
+       insufficient. This does not reduce ordinary test, self-test, fixture or hook gates.
       Use focused follow-up tests/mutations for a concrete claim or finding.
       Fix every survivor or allowlist only reviewed equivalent `SURVIVED` results in
       `scripts/validation/mutation-allowlist.yaml` with their reasons. `NO_TESTS` is never
@@ -382,9 +392,12 @@ Rules learned the hard way:
 - A wait loop ends when the file or process it watches is gone, and never matches its own
   command line (`pgrep -f` on a string in the loop does).
 - Before a run projected to take over an hour (the one PR-CI mutation campaign, live audit,
-  benchmark), run about 20 items of that run's own workload, break down where the time goes and
-  explain every outlier. Launch the full campaign only with the projection from that sample stated
-  in the issue; do not substitute a separate full local campaign.
+  benchmark), sample that run's actual workload: about 20 distinct items, or all distinct items once
+  when the nonempty workload is smaller. If the actual source-bound selection is empty, record the
+  exact source and empty selection; do not fabricate a sample or infer emptiness from the change
+  type. Break down the available timing evidence and explain every outlier; do not invent a
+  projection when no sample can be run. State the projection in the issue before launching the full
+  campaign; do not substitute a separate full local campaign.
 - When a run falls more than 25% behind its projection, find the cause before waiting longer;
   a new estimate is not a cause.
 - Name roles, never people, in code, issues and pull requests.

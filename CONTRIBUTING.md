@@ -73,11 +73,22 @@ the issue and pull request, not a standing runtime promise.
 
 This PR-CI job is the one full catalogue campaign for each frozen candidate. Do not run a
 separate full local campaign before the PR, or repeat it as the reviewer. Before opening the PR,
-sample about 20 items from this workload, break down baseline/mutant time and explain outliers;
-record the projection and readiness in the issue. Bind the report to H (the PR head SHA), B (the
-event base SHA) and T (the actual tested PR merge checkout SHA), plus the CI run/attempt, job and
-shard, source/input/toolchain/lock/version identities. If H, B, T, inputs or toolchain change,
-re-establish the affected candidate evidence rather than reusing a matching-tree result.
+complete the ordinary local gates and caller/test-design and focused-sensitivity review, and record
+the campaign plan/readiness in the issue. Select the sample from the actual mutation workload for
+the exact candidate: use about 20 distinct available items, or every distinct item once when the
+nonempty catalogue is smaller; never repeat items to manufacture a sample size. If the actual
+source-bound selection is empty, record the candidate/source and empty result and run no fabricated
+sample. Do not infer emptiness from a documentation-only diff or skip the actual selection. An
+empty sample is not a `NO_TESTS` waiver: reachable-candidate requirements and PR-CI outcome rules
+remain in force. For a nonempty sample, break down baseline/mutant time and explain outliers; when
+the actual selection is empty, do not invent sample timings or a projection.
+
+The pre-PR review and sample do not establish a mutation verdict or review PR-CI raw evidence. Once
+the PR-CI campaign exists, independently review its raw per-mutant results and restoration receipts
+before exact-head clearance. Bind that evidence to H (the PR head SHA), B (the event base SHA), and T
+(the actual tested PR merge checkout SHA), plus the CI run/attempt, job and shard,
+source/input/toolchain/lock/version identities. If H, B, T, inputs or toolchain change, re-establish
+the affected candidate evidence rather than reusing a matching-tree result.
 Producer and mutation-consumer evidence must be coherent within the same workflow attempt, not
 assembled from whichever attempt is globally latest. An unrelated job rerun that did not execute
 the mutation consumer does not by itself invalidate a completed campaign when H/B/T and inputs are
@@ -456,14 +467,20 @@ original file, with its synthesized row in `result-N.infra.json`. Corruption fai
 even after scheduler exit zero; file permission failures remain diagnostic. An incomplete row
 never counts as a kill or verified scratch restoration. Retained runs are never resumed automatically.
 The PR mutation job uploads this directory on success or failure as
-`mutation-results-<merge-tree-sha>-<shard>` for 30 days. Before that artifact expires, the operator
-retains the exact tested Git object T in a verified self-contained bundle or an existing controlled
-durable ref, together with the original raw artifacts and their hashes. Record H/B/T, run/attempt,
-job/shard, source/input/toolchain/lock/version identities, retention owner and expiry. Keep this
-operator-owned and limited to existing evidence; do not add private authority records or secrets to
-public artifacts or build a transfer/attestation framework. An `EMPTY` shard creates no scheduler
-directory; missing or incomplete raw evidence for a nonempty shard blocks review clearance,
-regardless of the workflow's displayed status. The raw results do not contain every runner phase.
+`mutation-results-<merge-tree-sha>-<shard>` for 30 days; that is not the retention deadline. The
+tested synthetic PR merge ref can disappear when the PR closes, and producer coverage fragments
+expire after one day. Capture the exact tested Git object T and each required raw artifact as they
+become available, with their hashes, and verify retention before the earliest applicable loss
+opportunity. Complete retention before reviewer clearance/merge and before any applicable ref or
+artifact expiry, whichever comes first; do not wait for the 30-day mutation-artifact expiry. Retain
+T in a verified self-contained bundle or an existing controlled durable ref. Record H/B/T,
+run/attempt, job/shard, source/input/toolchain/lock/version identities, retention owner and expiry.
+Keep this operator-owned and limited to existing evidence; do not add private authority records or
+secrets to public artifacts or build a transfer/attestation framework. An `EMPTY` shard creates no
+scheduler directory; missing or incomplete raw evidence for a nonempty shard blocks review
+clearance, regardless of the workflow's displayed status. An empty pre-PR sample does not excuse a
+later `NO_TESTS` outcome for a reachable candidate. The raw results do not contain every runner
+phase.
 
 ## Coverage badges
 
