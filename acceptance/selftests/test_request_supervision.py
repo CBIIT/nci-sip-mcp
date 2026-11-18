@@ -249,7 +249,6 @@ def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypa
         for child in (first, second)
         for stream in (child.stdin, child.stdout, child.stderr)
     )
-    assert owner.pending_owners == ()
     assert wait_entered.is_set() and waits
     pending, remaining, timeout = waits[0]
     assert pending and remaining == 0
@@ -257,6 +256,7 @@ def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypa
     assert release_sent.is_set()
     assert failure is None
     assert (first.returncode, second.returncode) == (0, 0)
+    assert owner.pending_owners == ()
     assert not first_marker.exists()
     assert marker.read_bytes() == b"finish\n"
     summary = owner.snapshot()

@@ -541,9 +541,9 @@ def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(
     assert child.returncode is not None
     assert all(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
     assert not call.thread.is_alive()
-    assert owner.pending_owners == ()
     assert release_sent.is_set()
     assert failure is None
+    assert owner.pending_owners == ()
     assert marker.read_bytes() == b"finish\n"
     assert child.returncode == 0
     summary = json.loads((owner.run.directory / "summary.json").read_text())
