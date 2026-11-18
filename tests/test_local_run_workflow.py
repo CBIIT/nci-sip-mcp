@@ -1,6 +1,9 @@
 """The Local run workflow walks the documented setup as written, on both platforms."""
 
+import os
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -137,8 +140,8 @@ CI_ONLY = {
     "that the runner image ships takes over from the uv install",
     "Write the readiness probe (CI only)": "the helper that starts a documented server, waits "
     "for its readiness endpoint and stops it",
-    "Select the released index source (CI only)": "a pull request substitutes its checkout for "
-    "the tag in the documented release URL, while other runs select the latest release tag",
+    "Select the released index source (CI only)": "unreleased PR, push and dispatch candidates "
+    "use this checkout; scheduled runs select the latest published release",
     "Serve over stdio and initialize (CI only)": "an initialize round-trip that no one types",
     "Verify required-index HTTP and indexed search (CI only)": "starts the documented command "
     "under a readiness probe, then calls MCP and asserts the sampled concept and index provenance",
@@ -877,19 +880,78 @@ class LocalRunWorkflowTest(unittest.TestCase):
             "\n".join(
                 (
                     "set -euo pipefail",
-                    'if [ "$EVENT_NAME" = "pull_request" ]; then',
+                    'if [ "$EVENT_NAME" = "schedule" ]; then',
+                    '  RELEASE_TAG="$(git describe --tags --abbrev=0)"',
+                    "else",
                     "  RELEASE_TAG=v0.0.0",
                     '  git tag "$RELEASE_TAG" HEAD',
                     '  git config --global --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-si-mcp',
                     '  git config --global --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-sip-mcp',
-                    "else",
-                    '  RELEASE_TAG="$(git describe --tags --abbrev=0)"',
                     "fi",
                     'echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"',
                     "",
                 )
             ),
         )
+
+    def test_source_selection_uses_candidate_for_unreleased_events_and_tag_for_schedule(self):
+        script = run_by_name()["Select the released index source (CI only)"]
+        scenarios = (
+            ("pull_request", "refs/pull/42/merge", "v0.0.0", True),
+            ("push", "refs/heads/main", "v0.0.0", True),
+            ("workflow_dispatch", "refs/heads/issue/511-policy", "v0.0.0", True),
+            ("workflow_dispatch", "refs/heads/main", "v0.0.0", True),
+            ("schedule", "refs/heads/main", "v0.39.2", False),
+        )
+        for event, ref, expected_tag, candidate in scenarios:
+            with self.subTest(event=event, ref=ref), TemporaryDirectory() as directory:
+                root = Path(directory)
+                git_dir = root / "bin"
+                git_dir.mkdir()
+                fake_git = git_dir / "git"
+                calls = root / "git-calls"
+                fake_git.write_text(
+                    f"#!{sys.executable}\n"
+                    "import os, sys\n"
+                    "with open(os.environ['GIT_CALLS'], 'a', encoding='utf-8') as stream:\n"
+                    "    stream.write(' '.join(sys.argv[1:]) + '\\n')\n"
+                    "if sys.argv[1:] == ['describe', '--tags', '--abbrev=0']:\n"
+                    "    print(os.environ['FAKE_TAG'])\n",
+                    encoding="utf-8",
+                )
+                fake_git.chmod(0o755)
+                environment = {
+                    "EVENT_NAME": event,
+                    "GITHUB_REF": ref,
+                    "GITHUB_WORKSPACE": str(root),
+                    "GITHUB_ENV": str(root / "github-env"),
+                    "GIT_CONFIG_GLOBAL": str(root / "global.gitconfig"),
+                    "GIT_CALLS": str(calls),
+                    "FAKE_TAG": "v0.39.2",
+                    "HOME": str(root),
+                    "PATH": str(git_dir) + os.pathsep + os.environ["PATH"],
+                }
+                result = subprocess.run(  # noqa: S603 - executes a repository-owned workflow step in a temp dir
+                    ["bash", "-e", "-o", "pipefail", "-c", script],  # noqa: S607
+                    cwd=root,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    (root / "github-env").read_text(encoding="utf-8"),
+                    f"RELEASE_TAG={expected_tag}\n",
+                )
+                commands = calls.read_text(encoding="utf-8").splitlines()
+                if candidate:
+                    self.assertEqual(len(commands), 3)
+                    self.assertEqual(commands[0], "tag v0.0.0 HEAD")
+                    self.assertTrue(all("file:///" in command for command in commands[1:]))
+                else:
+                    self.assertEqual(commands, ["describe --tags --abbrev=0"])
 
     def test_required_index_readiness_and_search_are_exact(self):
         by_name = run_by_name()

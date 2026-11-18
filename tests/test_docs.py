@@ -1035,6 +1035,7 @@ class DocumentationTest(unittest.TestCase):
             commands,
             [
                 '"$INSTALLER_VENV/bin/python" -m pip install "nci-sip-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"',
+                '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"',
                 '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-si-mcp@${LEGACY_RELEASE_TAG}"',
                 '"$SERVER_VENV/bin/python" -m pip install "nci-sip-mcp[server] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"',
                 '"$INDEX_VENV/bin/python" -m pip install "nci-sip-mcp[server,index] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"',

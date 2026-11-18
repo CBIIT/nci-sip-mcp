@@ -1492,7 +1492,10 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                 "TMPDIR": str(root / ("long" * 30)),
                 "TMP": "parent-tmp",
                 "TEMP": "parent-temp",
+                "NCI_SI_DATA_DIR": str(caller / "legacy"),
+                "NCI_SI_EVS_LICENSE_KEY": "legacy-private-marker",
                 "NCI_SIP_DATA_DIR": str(caller),
+                "NCI_SIP_EVS_LICENSE_KEY": "current-private-marker",
                 "PYTHONDONTWRITEBYTECODE": "0",
                 "PATH": "/parent-search",
             }
@@ -1502,7 +1505,7 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                 "data.mkdir(parents=True, exist_ok=True)\n(data / 'written').write_text('owned')\n"
                 "print(json.dumps({'settings': {key: value for key, value in os.environ.items() "
                 "if key in ('TMPDIR', 'TMP', 'TEMP', 'PATH', 'PYTHONDONTWRITEBYTECODE') "
-                "or key.startswith('NCI_SIP_') or key.endswith('__mutated')}, "
+                "or key.startswith(('NCI_SI_', 'NCI_SIP_')) or key.endswith('__mutated')}, "
                 "'python': shutil.which('python')}))\n"
             )
             for has_path in (True, False):
@@ -1520,6 +1523,9 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                         check=True,
                     )
                     observed = json.loads(child.stdout)
+                    self.assertNotIn("NCI_SI_EVS_LICENSE_KEY", observed["settings"])
+                    self.assertNotIn("NCI_SIP_EVS_LICENSE_KEY", observed["settings"])
+                    self.assertNotIn("NCI_SI_DATA_DIR", observed["settings"])
                     self.assertEqual(
                         observed["settings"],
                         {
