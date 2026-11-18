@@ -31,6 +31,10 @@ from scripts.validation.mutation_run import (
 SHARDS = {"unit": 4, "selftest": 8, "fixture": 1}
 SHARD_COMPONENTS = 2
 VERSION = 2
+LOCAL_BATCH_PREFIX = "local-"
+GITHUB_BATCH_PREFIX = "gha-"
+LOCAL_BATCH_LENGTH = 32
+GITHUB_BATCH_FIELDS = 3
 
 
 def git(root: Path, *arguments: str) -> bytes:
@@ -49,6 +53,61 @@ def identity(root: Path) -> dict:
         path = root / name
         digest.update(name.encode() + b"\0" + path.read_bytes() + b"\0")
     return {"sha": git(root, "rev-parse", "HEAD").decode().strip(), "inputs": digest.hexdigest()}
+
+
+def campaign_batch() -> str:
+    value = os.environ.get("MUTATION_COVERAGE_BATCH")
+    if value is None or not valid_batch(value):
+        raise ValueError("Missing or invalid MUTATION_COVERAGE_BATCH")
+    return value
+
+
+def valid_batch(value: str | None) -> bool:
+    if not isinstance(value, str):
+        return False
+    if value.startswith(LOCAL_BATCH_PREFIX):
+        return valid_local_batch(value.removeprefix(LOCAL_BATCH_PREFIX))
+    return valid_github_batch(value)
+
+
+def valid_local_batch(suffix: str) -> bool:
+    return len(suffix) == LOCAL_BATCH_LENGTH and all(
+        character in "0123456789abcdef" for character in suffix
+    )
+
+
+def valid_github_batch(value: str) -> bool:
+    if value.startswith(GITHUB_BATCH_PREFIX):
+        return False
+    if not value.startswith(GITHUB_BATCH_PREFIX):
+        return False
+    fields = value.removeprefix(GITHUB_BATCH_PREFIX).split("-")
+    return len(fields) == GITHUB_BATCH_FIELDS and all(positive_decimal(field) for field in fields)
+
+
+def positive_decimal(value: str) -> bool:
+    return value.isascii() and value.isdecimal() and any(character != "0" for character in value)
+
+
+def producer_run_id(batch: str, domain: str, shard: str) -> str:
+    value = f"nci-mutation-producer-v1\0{batch}\0{domain}\0{shard}".encode()
+    return hashlib.sha256(value).hexdigest()[:32]
+
+
+def reserve_producer_slot(output: Path, batch: str, domain: str, shard: str) -> None:
+    configured = os.environ.get("MUTATION_COVERAGE_RESERVATIONS")
+    if not configured or not Path(configured).is_absolute():
+        raise ValueError("Missing or invalid MUTATION_COVERAGE_RESERVATIONS")
+    reservations = Path(configured).resolve()
+    destination = output.resolve()
+    if reservations.is_relative_to(destination) or destination.is_relative_to(reservations):
+        raise ValueError("Producer reservations must be separate from coverage output")
+    reservations.mkdir(parents=True, exist_ok=True)
+    slot = reservations / producer_run_id(batch, domain, shard)
+    try:
+        slot.mkdir()
+    except FileExistsError as error:
+        raise ValueError("Coverage producer slot is already reserved") from error
 
 
 def canonical_file(name: str) -> bool:
@@ -96,6 +155,7 @@ def has_calls(mapping: dict) -> bool:
 
 
 def export(root: Path, data: Path, domain: str, shard: str, output: Path) -> None:
+    batch = campaign_batch()
     mapping = coverage_map(data, root)
     validate_mapping(mapping, domain)
     if not valid_shard(shard, domain):
@@ -103,6 +163,8 @@ def export(root: Path, data: Path, domain: str, shard: str, output: Path) -> Non
     producer, children = read_traces(data)
     if (producer.domain, producer.shard, producer.phase) != (domain, shard, "producer"):
         raise ValueError("Child trace producer does not match coverage shard")
+    if producer.run_id != producer_run_id(batch, domain, shard):
+        raise ValueError("Child trace producer does not match the coverage batch")
     validate_source_digests(root, children)
     fragment = {
         "version": VERSION,
@@ -117,7 +179,7 @@ def export(root: Path, data: Path, domain: str, shard: str, output: Path) -> Non
     output.write_text(json.dumps(fragment) + "\n")
 
 
-def read_fragment(path: Path, expected: dict) -> dict:
+def read_fragment(path: Path, expected: dict, batch: str) -> dict:
     value = json.loads(path.read_text())
     if not isinstance(value, dict):
         raise ValueError("Invalid coverage fragment schema")
@@ -131,6 +193,8 @@ def read_fragment(path: Path, expected: dict) -> dict:
         "producer",
     ):
         raise ValueError("Child trace producer does not match coverage shard")
+    if producer.run_id != producer_run_id(batch, producer.domain, producer.shard):
+        raise ValueError("Coverage fragment producer does not match the campaign batch")
     validate_mapping(value["mapping"], value["domain"])
     return {**value, "producer_record": producer, "child_records": children}
 
@@ -191,11 +255,13 @@ def valid_membership_types(value: dict) -> bool:
         isinstance(value["domain"], str)
         and value["domain"] in SHARDS
         and isinstance(value["shard"], str)
+        and valid_shard(value["shard"], value["domain"])
     )
 
 
 def load(root: Path, directory: Path) -> CoverageEvidence:
     """Validate complete same-run producer membership before using any imported selection."""
+    batch = campaign_batch()
     if not directory.is_dir():
         raise ValueError(f"Missing coverage directory: {directory}")
     expected = identity(root)
@@ -204,7 +270,7 @@ def load(root: Path, directory: Path) -> CoverageEvidence:
     children = []
     producers = set()
     for path in sorted(directory.rglob("*.json")):
-        fragment = read_fragment(path, expected)
+        fragment = read_fragment(path, expected, batch)
         key = (fragment["domain"], fragment["shard"])
         if key not in remaining:
             raise ValueError("Duplicate or unexpected coverage shard")
@@ -265,6 +331,8 @@ def perform(args) -> None:
 def configure_producer(args, root: Path) -> None:
     if not valid_shard(args.shard, args.domain):
         raise ValueError("Invalid coverage shard membership")
+    batch = campaign_batch()
+    reserve_producer_slot(args.output, batch, args.domain, args.shard)
     args.output.mkdir(parents=True, exist_ok=True)
     # The producer's own data file: unit at the root, the harness domains in acceptance/.
     destination = root / DOMAINS[args.domain][0] / ".coverage"
@@ -274,6 +342,7 @@ def configure_producer(args, root: Path) -> None:
         args.domain,
         "producer",
         args.shard,
+        run_id=producer_run_id(batch, args.domain, args.shard),
     )
     if github_environment := os.environ.get("GITHUB_ENV"):
         with Path(github_environment).open("a") as stream:

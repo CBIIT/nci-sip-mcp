@@ -106,16 +106,23 @@ def stage_hook(directory: Path) -> None:
 
 
 def prepare_run(
-    data_file: Path, hook_directory: Path, domain: str, phase: str, shard: str
+    data_file: Path,
+    hook_directory: Path,
+    domain: str,
+    phase: str,
+    shard: str,
+    *,
+    run_id: str | None = None,
 ) -> dict[str, str]:
-    if domain not in DOMAINS or phase not in PHASES or not shard:
+    producer_id = uuid4().hex if run_id is None else run_id
+    if domain not in DOMAINS or phase not in PHASES or not shard or not valid_run_id(producer_id):
         raise ValueError("Invalid child trace run identity")
     directory = trace_directory(data_file)
     directory.mkdir(parents=True, exist_ok=True)
     if any(directory.iterdir()):
         raise ValueError(f"Child trace directory is not empty: {directory}")
     stage_hook(hook_directory)
-    producer = Producer(VERSION, uuid4().hex, domain, shard, phase)
+    producer = Producer(VERSION, producer_id, domain, shard, phase)
     write_json(directory / "producer.json", producer_record(producer))
     return {
         "MUTATION_CHILD_TRACE_DIR": str(directory.resolve()),
