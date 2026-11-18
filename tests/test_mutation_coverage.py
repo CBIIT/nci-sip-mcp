@@ -1,5 +1,6 @@
 """Shared CI baselines retain local routes and reject unusable inputs at the CLI."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -11,15 +12,23 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from coverage import CoverageData
-from scripts.validation.mutation_child_trace import prepare_run
+from scripts.validation.mutation_child_trace import prepare_run, trace_directory
 from scripts.validation.mutation_coverage import SHARDS, export, identity, load
 from scripts.validation.mutation_gate import manifest_data, schedule
 from scripts.validation.mutation_run import baseline, environment, run_domain, selection
 from scripts.validation.mutation_source import candidates
 
 from test_mutation_gate import INSTALLED_CHILD_TEST, ROOT, cli, project
+
+TEST_BATCH = f"local-{'a' * 32}"
+
+
+def expected_producer_id(batch, domain, shard):
+    value = f"nci-mutation-producer-v1\0{batch}\0{domain}\0{shard}".encode()
+    return hashlib.sha256(value).hexdigest()[:32]
 
 
 def repository(root):
@@ -42,7 +51,7 @@ def repository(root):
     )
 
 
-def fragments(root, directory):
+def fragments(root, directory, *, data_tag=""):
     directory.mkdir()
     for domain, count in SHARDS.items():
         node = {
@@ -51,7 +60,7 @@ def fragments(root, directory):
             "fixture": "tests/test_contract.py",
         }[domain]
         for index in range(1, count + 1):
-            data_file = root / f".coverage-{domain}-{index}"
+            data_file = root / f".coverage{data_tag}-{domain}-{index}"
             data = CoverageData(basename=str(data_file))
             data.set_context(f"{node}::test_value|run")
             data.add_lines({str(root / "src/example.py"): {2}})
@@ -59,6 +68,17 @@ def fragments(root, directory):
             shard = f"{index}/{count}"
             prepare_run(data_file, directory / f"hook-{domain}-{index}", domain, "producer", shard)
             export(root, data_file, domain, shard, directory / f"{domain}-{index}.json")
+
+
+def campaign_fragments(root, directory, batch):
+    fragments(root, directory, data_tag=f"-{directory.name}")
+    for path in directory.glob("*.json"):
+        fragment = json.loads(path.read_text())
+        run_id = expected_producer_id(batch, fragment["domain"], fragment["shard"])
+        fragment["producer"]["run_id"] = run_id
+        for child in fragment["children"]:
+            child["run_id"] = run_id
+        path.write_text(json.dumps(fragment) + "\n")
 
 
 FOLDERS = {"unit": "tests", "selftest": "acceptance/selftests", "fixture": "acceptance/tests"}
@@ -271,6 +291,290 @@ def cli_mutants(result):
 
 
 class SharedCoverageTest(unittest.TestCase):
+    def test_configure_binds_producer_to_the_external_batch_and_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            reservations = root / "reservations"
+            output = root / "config"
+            environment_file = root / "github-env"
+            env = {
+                **os.environ,
+                "GITHUB_ENV": str(environment_file),
+                "MUTATION_COVERAGE_BATCH": TEST_BATCH,
+                "MUTATION_COVERAGE_RESERVATIONS": str(reservations),
+            }
+            result = coverage_cli(
+                "configure",
+                "unit",
+                "--root",
+                str(root),
+                "--shard",
+                "1/4",
+                "--output",
+                str(output),
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            run_id = expected_producer_id(TEST_BATCH, "unit", "1/4")
+            trace_environment = dict(
+                line.split("=", 1) for line in environment_file.read_text().splitlines()
+            )
+            producer = json.loads(
+                (trace_directory(root / ".coverage") / "producer.json").read_text()
+            )
+            self.assertEqual(trace_environment["MUTATION_CHILD_TRACE_RUN"], run_id)
+            self.assertEqual(producer["run_id"], run_id)
+            self.assertEqual([path.name for path in reservations.iterdir()], [run_id])
+
+    def test_repeated_configure_in_another_output_cannot_reuse_a_reserved_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            reservations = root / "reservations"
+            env = {
+                **os.environ,
+                "MUTATION_COVERAGE_BATCH": TEST_BATCH,
+                "MUTATION_COVERAGE_RESERVATIONS": str(reservations),
+            }
+            arguments = ("configure", "unit", "--root", str(root), "--shard", "1/4")
+            first = coverage_cli(*arguments, "--output", str(root / "first"), env=env)
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            original = (trace_directory(root / ".coverage") / "producer.json").read_bytes()
+
+            repeated = coverage_cli(*arguments, "--output", str(root / "second"), env=env)
+
+            self.assertEqual(repeated.returncode, 2, repeated.stdout + repeated.stderr)
+            self.assertEqual(json.loads(repeated.stdout)["outcome"], "INFRA")
+            self.assertFalse((root / "second").exists())
+            self.assertEqual(
+                (trace_directory(root / ".coverage") / "producer.json").read_bytes(), original
+            )
+
+    def test_configure_rejects_missing_or_malformed_campaign_inputs_before_output(self):
+        cases = (
+            ("missing batch", None, "reservations"),
+            ("malformed batch", "local-not-hex", "reservations"),
+            ("missing reservation root", TEST_BATCH, None),
+            ("relative reservation root", TEST_BATCH, "relative-reservations"),
+        )
+        for name, batch, reservation in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                output = root / "config"
+                env = {**os.environ, "GITHUB_ENV": str(root / "github-env")}
+                if batch is not None:
+                    env["MUTATION_COVERAGE_BATCH"] = batch
+                if reservation is not None:
+                    env["MUTATION_COVERAGE_RESERVATIONS"] = reservation
+                result = coverage_cli(
+                    "configure",
+                    "unit",
+                    "--root",
+                    str(root),
+                    "--shard",
+                    "1/4",
+                    "--output",
+                    str(output),
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["outcome"], "INFRA")
+                self.assertFalse(output.exists())
+
+    def test_complete_prior_campaign_fails_when_the_consumer_uses_a_new_batch(self):
+        batches = (TEST_BATCH, f"local-{'b' * 32}")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            repository(root)
+            (root / "tests/test_installed_child.py").write_text(INSTALLED_CHILD_TEST)
+            subprocess.run(["git", "add", "tests/test_installed_child.py"], cwd=root, check=True)  # noqa: S607
+            subprocess.run(
+                [  # noqa: S607 - fixed commit in an owned fixture repository
+                    "git",
+                    "-c",
+                    "user.name=Test role",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "-qm",
+                    "test: installed child campaign",
+                ],
+                cwd=root,
+                check=True,
+            )
+            campaigns = {batch: root / f"coverage-{index}" for index, batch in enumerate(batches)}
+            for batch, destination in campaigns.items():
+                campaign_fragments(root, destination, batch)
+
+            config = root / "tmp/mutation-config-a"
+            environment_file = root / "github-env-a"
+            env_a = {
+                **os.environ,
+                "GITHUB_ENV": str(environment_file),
+                "MUTATION_COVERAGE_BATCH": TEST_BATCH,
+                "MUTATION_COVERAGE_RESERVATIONS": str(root / "reservations-a"),
+            }
+            configured = coverage_cli(
+                "configure",
+                "unit",
+                "--root",
+                str(root),
+                "--shard",
+                "1/4",
+                "--output",
+                str(config),
+                env=env_a,
+            )
+            self.assertEqual(configured.returncode, 0, configured.stdout + configured.stderr)
+            trace_environment = dict(
+                line.split("=", 1) for line in environment_file.read_text().splitlines()
+            )
+            produced = produce(
+                root,
+                config / ".coveragerc",
+                "tests/test_example.py",
+                "tests/test_installed_child.py",
+                trace_environment=trace_environment,
+            )
+            self.assertEqual(produced.returncode, 0, produced.stdout + produced.stderr)
+            exported = coverage_cli(
+                "export",
+                "unit",
+                "--root",
+                str(root),
+                "--data",
+                str(root / ".coverage"),
+                "--shard",
+                "1/4",
+                "--output",
+                str(campaigns[TEST_BATCH] / "unit-1.json"),
+                env={**os.environ, "MUTATION_COVERAGE_BATCH": TEST_BATCH},
+            )
+            self.assertEqual(exported.returncode, 0, exported.stdout + exported.stderr)
+            prior_fragment = json.loads((campaigns[TEST_BATCH] / "unit-1.json").read_text())
+            self.assertTrue(prior_fragment["children"])
+            self.assertEqual(
+                {child["run_id"] for child in prior_fragment["children"]},
+                {prior_fragment["producer"]["run_id"]},
+            )
+
+            prior_batch, current_batch = batches
+            current_env = {**os.environ, "MUTATION_COVERAGE_BATCH": current_batch}
+            with patch.dict(os.environ, {"MUTATION_COVERAGE_BATCH": prior_batch}):
+                imported = cli(
+                    root,
+                    "--base",
+                    "HEAD",
+                    "--head",
+                    "HEAD",
+                    "--coverage-dir",
+                    str(campaigns[prior_batch]),
+                )
+            with patch.dict(os.environ, current_env):
+                replayed = cli(
+                    root,
+                    "--base",
+                    "HEAD",
+                    "--head",
+                    "HEAD",
+                    "--coverage-dir",
+                    str(campaigns[prior_batch]),
+                )
+                current = cli(
+                    root,
+                    "--base",
+                    "HEAD",
+                    "--head",
+                    "HEAD",
+                    "--coverage-dir",
+                    str(campaigns[current_batch]),
+                )
+
+            self.assertEqual(imported.returncode, 0, imported.stdout + imported.stderr)
+            self.assertEqual(replayed.returncode, 2, replayed.stdout + replayed.stderr)
+            self.assertEqual(json.loads(replayed.stdout)["outcome"], "INFRA")
+            self.assertEqual(current.returncode, 0, current.stdout + current.stderr)
+            self.assertEqual(json.loads(current.stdout)["outcome"], "EMPTY")
+
+            check_a = coverage_cli(
+                "check",
+                "unit",
+                "--root",
+                str(root),
+                "--output",
+                str(campaigns[prior_batch]),
+                env={**os.environ, "MUTATION_COVERAGE_BATCH": prior_batch},
+            )
+            replayed_check = coverage_cli(
+                "check",
+                "unit",
+                "--root",
+                str(root),
+                "--output",
+                str(campaigns[prior_batch]),
+                env={**os.environ, "MUTATION_COVERAGE_BATCH": current_batch},
+            )
+            check_b = coverage_cli(
+                "check",
+                "unit",
+                "--root",
+                str(root),
+                "--output",
+                str(campaigns[current_batch]),
+                env={**os.environ, "MUTATION_COVERAGE_BATCH": current_batch},
+            )
+            self.assertEqual(check_a.returncode, 0, check_a.stdout + check_a.stderr)
+            self.assertEqual(
+                replayed_check.returncode, 2, replayed_check.stdout + replayed_check.stderr
+            )
+            self.assertEqual(json.loads(replayed_check.stdout)["outcome"], "INFRA")
+            self.assertEqual(check_b.returncode, 0, check_b.stdout + check_b.stderr)
+
+            for batch in (None, "local-short"):
+                env = os.environ.copy()
+                if batch is None:
+                    env.pop("MUTATION_COVERAGE_BATCH", None)
+                else:
+                    env["MUTATION_COVERAGE_BATCH"] = batch
+                result = coverage_cli(
+                    "check",
+                    "unit",
+                    "--root",
+                    str(root),
+                    "--output",
+                    str(campaigns[current_batch]),
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["outcome"], "INFRA")
+
+    def test_export_rejects_a_producer_not_matching_the_external_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            repository(root)
+            data_file = root / ".coverage"
+            data = CoverageData(basename=str(data_file))
+            data.set_context("tests/test_example.py::test_value|run")
+            data.add_lines({str(root / "src/example.py"): {2}})
+            data.write()
+            prepare_run(data_file, root / "hook", "unit", "producer", "1/4")
+            output = root / "batch-a.json"
+            result = coverage_cli(
+                "export",
+                "unit",
+                "--root",
+                str(root),
+                "--data",
+                str(data_file),
+                "--shard",
+                "1/4",
+                "--output",
+                str(output),
+                env={**os.environ, "MUTATION_COVERAGE_BATCH": TEST_BATCH},
+            )
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)["outcome"], "INFRA")
+            self.assertFalse(output.exists())
+
     def test_fragment_counts_match_the_real_ci_matrix_independently(self):
         self.assertEqual(SHARDS, {"unit": 4, "selftest": 8, "fixture": 1})
 
