@@ -75,12 +75,28 @@ CI's existing unit, harness self-test and prepared-fixture jobs collect per-test
 coverage once. Each job's generated config (`mutation_coverage configure`) names that job's own
 absolute data file (`.coverage` at the root for unit, `acceptance/.coverage` for the harness
 domains), so a child started from another working directory writes beside it and is combined.
-They export one-day fragments bound to the checked-out merge commit and tracked
-input bytes; mutation shards wait for those producers and the coverage floors, download their
-same-run fragments and pass `--coverage-dir`. A missing, incomplete, malformed or mismatched
-import fails as `INFRA`, even for an empty catalogue; it never silently reruns a baseline.
+They export one-day fragments bound to the checked-out merge commit, tracked input bytes and
+the repository/run/attempt batch. Each producer reserves its domain/shard once in an owned
+runner-temporary directory outside its output. Mutation shards wait for those producers and the
+coverage floors, download fragments from their own run and attempt, and pass `--coverage-dir`.
+A missing, incomplete, malformed or mismatched import fails as `INFRA`, even for an empty
+catalogue; it never silently reruns a baseline. If the consumer executes in a new attempt,
+all 13 producer fragments must come from that attempt; rerun all producers rather than borrow
+earlier fragments. An unrelated later retry that does not run the consumer does not by itself
+invalidate a previously complete campaign for the exact unchanged candidate and inputs. Review
+its actual producer and mutation attempts, raw outcomes and restoration evidence; a green
+aggregate alone is not that proof.
 A fixture execution must exit zero to export a baseline, even if its ratchet expects failures.
 Collection/setup/teardown attribution retains the existing conservative selection rules.
+
+For a manual imported baseline, the local coordinator supplies one `local-` batch followed by
+32 lowercase hexadecimal characters as `MUTATION_COVERAGE_BATCH` to each producer, export,
+check and consumer. It also supplies an absolute, owned `MUTATION_COVERAGE_RESERVATIONS`
+directory shared by the producers and outside **all** producer output and fragment directories.
+Each domain/shard can be reserved only once, including after failure. The coordinator must keep
+all producer snapshots at the consumer's exact HEAD and tracked bytes; the configure command
+cannot observe every later fragment directory. For a retry, use a fresh batch and reservation
+directory and rerun all producers. Preserve prior evidence before cleanup.
 
 Without `--coverage-dir`, local `pdm run mutation-gate` still computes clean unit, harness
 self-test and prepared-fixture baselines itself; unit remains serial. Any baseline failure
@@ -440,7 +456,7 @@ original file, with its synthesized row in `result-N.infra.json`. Corruption fai
 even after scheduler exit zero; file permission failures remain diagnostic. An incomplete row
 never counts as a kill or verified scratch restoration. Retained runs are never resumed automatically.
 The PR mutation job uploads this directory on success or failure as
-`mutation-results-<merge-tree-sha>-<shard>` for 30 days. An `EMPTY` shard creates no scheduler
+`mutation-results-<merge-tree-sha>-<run-id>-<attempt>-<shard>` for 30 days. An `EMPTY` shard creates no scheduler
 directory; missing or incomplete raw evidence for a nonempty shard blocks review clearance,
 regardless of the workflow's displayed status. The raw results do not contain every runner phase.
 
