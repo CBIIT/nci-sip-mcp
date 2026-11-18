@@ -228,10 +228,12 @@ A leading `~` is expanded, and an empty value is rejected. The other settings:
 | `NCI_SI_HTTP_REQUIRE_INDEX` | `0` | Boolean switch, read as `0` or `1` only (anything else is a configuration error). Set to 1 when deployment supplies an index: readiness requires an active build compatible with the configured embedding model. With 0 an absent index permits live tools; an existing active build is still verified |
 
 `NCI_SI_INSTALLATION_ID` is read only by the local identity utility, not by server settings or
-request emission. After generating an identity, persist it in your local configuration:
+request emission. Generate one value, replace the placeholder below with that saved value, and
+retain it in durable deployment configuration across restarts and upgrades. This `export` lasts
+only in the current shell; do not generate a fresh value on every startup.
 
 ```bash
-export NCI_SI_INSTALLATION_ID=0123456789abcdef0123456789abcdef
+export NCI_SI_INSTALLATION_ID='<saved-generated-value>'
 ```
 
 Choose `NCI_SI_PROFILE` for the **whole session**: use `evs` or `cadsr` only when every

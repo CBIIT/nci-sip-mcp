@@ -39,7 +39,11 @@ class IdentitySnapshot:
 def capture_identity() -> IdentitySnapshot:
     """Capture the configured value and installed package version once."""
 
-    return IdentitySnapshot(os.environ.get(INSTALLATION_ID_ENV), version(PRODUCT))
+    try:
+        installed_version = version(PRODUCT)
+    except UnicodeDecodeError:
+        installed_version = None
+    return IdentitySnapshot(os.environ.get(INSTALLATION_ID_ENV), installed_version)
 
 
 def installation_label(snapshot: IdentitySnapshot) -> str:
