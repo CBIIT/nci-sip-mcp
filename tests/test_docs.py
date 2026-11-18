@@ -1009,17 +1009,19 @@ class DocumentationTest(unittest.TestCase):
         )
 
     def test_quickstart_export_example_does_not_use_a_literal_identity(self):
-        identity_text = QUICKSTART.split("`NCI_SI_INSTALLATION_ID` is read only by", 1)[1].split(
-            "\n\nChoose ", 1
-        )[0]
         exports = [
             line.strip()
-            for line in identity_text.splitlines()
+            for line in QUICKSTART.splitlines()
             if line.strip().startswith("export NCI_SI_INSTALLATION_ID=")
         ]
 
-        self.assertEqual(len(exports), 1)
-        self.assertNotRegex(exports[0], r"=[ \t]*['\"]?[0-9a-f]{32}['\"]?[ \t]*\Z")
+        self.assertTrue(exports, "QUICKSTART should show the identity setting")
+        for export in exports:
+            with self.subTest(export=export):
+                self.assertNotRegex(
+                    export,
+                    r"=(?:[0-9a-f]{32}|'[0-9a-f]{32}'|\"[0-9a-f]{32}\")(?=$|[\s#;&|])",
+                )
 
     def test_every_repository_url_in_the_documents_names_this_repository(self):
         # Both canonical names remain in use during the released-installer transition.
