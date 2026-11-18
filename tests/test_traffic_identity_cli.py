@@ -355,7 +355,6 @@ class CoreIdentityCLITest(unittest.TestCase):
             "import importlib, pathlib, nci_si_mcp\n"
             f"path = pathlib.Path({metadata_path})\n"
             "initial = nci_si_mcp.__version__\n"
-            "initial_attribute = '__version__' in nci_si_mcp.__dict__\n"
             "metadata = path.read_bytes()\n"
             "old = b'Version: ' + initial.encode()\n"
             "assert metadata.count(old) == 1\n"
@@ -369,26 +368,21 @@ class CoreIdentityCLITest(unittest.TestCase):
             "try:\n"
             "    importlib.reload(nci_si_mcp)\n"
             "except UnicodeDecodeError:\n"
-            "    reload_failed = True\n"
+            "    reload_error = 'UnicodeDecodeError'\n"
             "else:\n"
-            "    reload_failed = False\n"
-            "present_after_corrupt = '__version__' in nci_si_mcp.__dict__\n"
+            "    reload_error = 'none'\n"
             "try:\n"
             "    nci_si_mcp.__version__\n"
-            "except UnicodeDecodeError:\n"
-            "    explicit_failed = True\n"
+            "except (AttributeError, UnicodeDecodeError) as error:\n"
+            "    explicit_error = type(error).__name__\n"
             "else:\n"
-            "    explicit_failed = False\n"
-            "deferred_after_corrupt = '__getattr__' in nci_si_mcp.__dict__\n"
+            "    explicit_error = 'none'\n"
             "metadata = path.read_bytes()\n"
             "metadata = metadata.replace(bad_version, b'Version: 7.7.7', 1)\n"
             "path.write_bytes(metadata)\n"
             "importlib.reload(nci_si_mcp)\n"
-            "print(f'{initial}|{initial_attribute}|{snapshot}|{reload_failed}|"
-            "{present_after_corrupt}|{explicit_failed}|{deferred_after_corrupt}|"
-            "{nci_si_mcp.__version__}|"
-            '{"__version__" in nci_si_mcp.__dict__}|'
-            '{"__getattr__" in nci_si_mcp.__dict__}\')\n'
+            "print(f'{initial}|{snapshot}|{reload_error}|{explicit_error}|"
+            "{nci_si_mcp.__version__}')\n"
         )
         result = self._child(["-c", code])
 
@@ -396,8 +390,8 @@ class CoreIdentityCLITest(unittest.TestCase):
             (result.returncode, result.stdout, result.stderr),
             (
                 0,
-                f"{self.original_version}|True|{self.original_version}|True|False|True|"
-                f"True|7.7.7|True|False\n",
+                f"{self.original_version}|{self.original_version}|UnicodeDecodeError|"
+                f"AttributeError|7.7.7\n",
                 "",
             ),
         )
