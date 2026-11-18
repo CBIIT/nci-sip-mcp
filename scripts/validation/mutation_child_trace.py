@@ -218,13 +218,59 @@ def child_environment(route: ChildRoute) -> dict[str, str]:
         return environment
     request, config = trace_request(route, environment)
     directory = Path(environment["MUTATION_CHILD_TRACE_DIR"])
+    prior = existing_trace_configs(environment, directory, request)
     write_json(directory / f"{request['invocation']}.request.json", request)
     write_json(directory / f"{request['invocation']}.config.json", config)
     environment["PYTHONPATH"] = environment["MUTATION_CHILD_TRACE_HOOK"]
-    environment["MUTATION_CHILD_TRACE_CONFIG"] = str(
-        directory / f"{request['invocation']}.config.json"
-    )
+    current = str(directory / f"{request['invocation']}.config.json")
+    environment["MUTATION_CHILD_TRACE_CONFIG"] = json.dumps([*prior, current]) if prior else current
     return environment
+
+
+def trace_config_paths(value: str) -> list[str]:
+    if not value.startswith("["):
+        return [value]
+    paths = json.loads(value)
+    if not valid_trace_config_paths(paths):
+        raise ValueError("Invalid installed child trace configs")
+    return paths
+
+
+def valid_trace_config_paths(value: object) -> TypeGuard[list[str]]:
+    return isinstance(value, list) and bool(value) and all(isinstance(path, str) for path in value)
+
+
+def existing_trace_configs(
+    environment: dict[str, str], directory: Path, current: dict[str, object]
+) -> list[str]:
+    value = environment.get("MUTATION_CHILD_TRACE_CONFIG")
+    if value is None:
+        return []
+    paths = trace_config_paths(value)
+    if len(set(paths)) != len(paths):
+        raise ValueError("Duplicate installed child trace config")
+    producer = read_producer(directory)
+    if not request_matches_producer(producer, str(current["invocation"]), current):
+        raise ValueError("Installed child trace belongs to another producer or route")
+    for name in paths:
+        validate_existing_trace_config(directory, producer, name, current)
+    return paths
+
+
+def validate_existing_trace_config(
+    directory: Path, producer: Producer, name: str, current: dict[str, object]
+) -> None:
+    path = Path(name)
+    if path.parent != directory or not path.name.endswith(".config.json"):
+        raise ValueError("Invalid installed child trace config path")
+    invocation = path.name.removesuffix(".config.json")
+    request = read_object(directory / f"{invocation}.request.json")
+    config = read_object(path)
+    validate_trace_configs(directory, {invocation: request}, {invocation: config})
+    if not request_matches_producer(producer, invocation, request) or any(
+        request.get(key) != current.get(key) for key in ("node", "test_phase", "environment")
+    ):
+        raise ValueError("Installed child trace belongs to another producer or route")
 
 
 def trace_request(
@@ -632,8 +678,15 @@ class _ChildTracer:
 
 
 def install_child_trace() -> None:
-    config = read_object(Path(os.environ["MUTATION_CHILD_TRACE_CONFIG"]))
-    tracer = _ChildTracer(config)
-    sys.settrace(tracer.trace)
-    threading.settrace(tracer.trace)
-    atexit.register(tracer.finish)
+    paths = trace_config_paths(os.environ["MUTATION_CHILD_TRACE_CONFIG"])
+    tracers = [_ChildTracer(read_object(Path(path))) for path in paths]
+
+    def trace(frame, event, argument):
+        for tracer in tracers:
+            tracer.trace(frame, event, argument)
+        return trace
+
+    sys.settrace(trace)
+    threading.settrace(trace)
+    for tracer in tracers:
+        atexit.register(tracer.finish)
