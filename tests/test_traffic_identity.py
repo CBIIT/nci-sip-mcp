@@ -5,6 +5,7 @@ import os
 import unittest
 from unittest.mock import patch
 
+from nci_si_mcp import traffic_identity
 from nci_si_mcp.errors import PlatformError, serialise
 from nci_si_mcp.traffic_identity import (
     INSTALLATION_ID_ENV,
@@ -15,6 +16,17 @@ from nci_si_mcp.traffic_identity import (
 
 
 class IdentitySnapshotTest(unittest.TestCase):
+    def test_snapshot_does_not_expose_a_captured_private_version(self):
+        canary = "PRIVATE VERSION CANARY"
+        with (
+            patch.dict(os.environ, {INSTALLATION_ID_ENV: "a" * 32}, clear=True),
+            patch.object(traffic_identity, "version", return_value=canary),
+        ):
+            captured = capture_identity()
+
+        self.assertIsInstance(captured, IdentitySnapshot)
+        self.assertNotIn(canary, repr(captured))
+
     def test_environment_repair_does_not_change_a_captured_invalid_value(self):
         canary = "PRIVATE-ID-CANARY"
         with patch.dict(os.environ, {INSTALLATION_ID_ENV: canary}, clear=True):

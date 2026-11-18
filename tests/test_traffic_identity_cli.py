@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import venv
 from pathlib import Path
+from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "a" * 32
@@ -39,12 +40,25 @@ class CoreIdentityCLITest(unittest.TestCase):
             "import os\n"
             "import socket\n"
             "from pathlib import Path\n"
-            "def deny(self, address):\n"
+            "def record(kind):\n"
             "    with Path(os.environ['NCI_IDENTITY_NETWORK_LOG']).open('a') as log:\n"
-            "        log.write('attempt\\n')\n"
+            "        log.write(kind + '\\n')\n"
+            "def deny_connect(self, address):\n"
+            "    record('connect')\n"
             "    raise OSError('network denied')\n"
-            "socket.socket.connect = deny\n"
-            "socket.socket.connect_ex = deny\n",
+            "def deny_connect_ex(self, address):\n"
+            "    record('connect_ex')\n"
+            "    raise OSError('network denied')\n"
+            "def deny_getaddrinfo(*args, **kwargs):\n"
+            "    record('getaddrinfo')\n"
+            "    raise OSError('network denied')\n"
+            "def deny_sendto(self, *args, **kwargs):\n"
+            "    record('sendto')\n"
+            "    raise OSError('network denied')\n"
+            "socket.socket.connect = deny_connect\n"
+            "socket.socket.connect_ex = deny_connect_ex\n"
+            "socket.getaddrinfo = deny_getaddrinfo\n"
+            "socket.socket.sendto = deny_sendto\n",
             encoding="utf-8",
         )
         cls.python = Path(sys.executable)
@@ -163,6 +177,14 @@ class CoreIdentityCLITest(unittest.TestCase):
         )
 
     @classmethod
+    def _remove_version(cls):
+        lines = cls.metadata.read_text(encoding="utf-8").splitlines()
+        cls.metadata.write_text(
+            "\n".join(line for line in lines if not line.startswith("Version: ")) + "\n",
+            encoding="utf-8",
+        )
+
+    @classmethod
     def _restore_version(cls):
         cls.metadata.write_text(cls.original_metadata, encoding="utf-8")
 
@@ -173,10 +195,12 @@ class CoreIdentityCLITest(unittest.TestCase):
             for path in sorted(directory.rglob("*"))
         }
 
-    def _child(self, arguments, token=None):
+    def _child(self, arguments, token=None, configured_id=None):
         environment = self._environment()
         if token is not None:
             environment["NCI_SI_INSTALLATION_ID"] = token
+        if configured_id is not None:
+            environment["NCI_SI_INSTALLATION_ID"] = configured_id
         result = subprocess.run(  # noqa: S603 - fixed module and owned isolated wheel
             [str(self.python), "-B", *arguments],
             capture_output=True,
@@ -187,12 +211,16 @@ class CoreIdentityCLITest(unittest.TestCase):
         )
         self.assertFalse(
             self.network_log.exists() and self.network_log.read_text(encoding="utf-8"),
-            "identity child attempted a network connection",
+            "identity child used a patched Python socket API for network access",
         )
         return result
 
-    def _module(self, *arguments, token=None):
-        return self._child(["-m", "nci_si_mcp.traffic_identity", *arguments], token)
+    def _module(self, *arguments, token=None, configured_id=None):
+        return self._child(
+            ["-m", "nci_si_mcp.traffic_identity", *arguments],
+            token,
+            configured_id,
+        )
 
     def _installed_version(self):
         result = self._child(
@@ -232,6 +260,8 @@ class CoreIdentityCLITest(unittest.TestCase):
 
         self.assertRegex(generated.stdout, r"^[0-9a-f]{32}\n$")
         self.assertEqual((generated.returncode, generated.stderr), (0, ""))
+        parsed = UUID(generated.stdout.strip())
+        self.assertEqual(parsed.version, 4)
         missing = self._module("show")
         error = self._error(
             missing,
@@ -252,6 +282,22 @@ class CoreIdentityCLITest(unittest.TestCase):
             (0, f"nci-si-mcp/{version}{LABEL_SUFFIX}\n", ""),
         )
         self._assert_no_configuration_writes()
+
+    def test_show_rejects_installed_metadata_without_a_version(self):
+        self._remove_version()
+        self.assertFalse(
+            any(line.startswith("Version: ") for line in self.metadata.read_text().splitlines())
+        )
+
+        refused = self._module("show", token=TOKEN)
+
+        self._error(
+            refused,
+            "nci-si-mcp installed version",
+            "must be a safe printable ASCII version and keep the complete label within 256 bytes",
+            VERSION_ERROR,
+        )
+        self.assertNotIn("Traceback", refused.stdout + refused.stderr)
 
     def test_invalid_tokens_are_refused_without_echoing_them(self):
         version = self._installed_version()
@@ -311,18 +357,37 @@ class CoreIdentityCLITest(unittest.TestCase):
         self.assertNotIn("v" * (257 - fixed_length), refused.stdout + refused.stderr)
         self._assert_no_configuration_writes()
 
-    def test_network_sentinel_records_a_controlled_attempt_even_when_caught(self):
+    def test_socket_api_sentinel_records_distinct_attempts_even_when_caught(self):
+        """Only patched Python socket APIs are observed.
+
+        Native extensions, subprocess networking, and direct syscalls are outside this sentinel.
+        """
         self.network_log.unlink(missing_ok=True)
         result = subprocess.run(  # noqa: S603 - controlled socket attempt intercepted by sentinel
             [
                 str(self.python),
                 "-B",
                 "-c",
-                "import socket\n"
-                "try:\n"
-                "    socket.create_connection(('192.0.2.1', 9), timeout=0.1)\n"
-                "except OSError:\n"
-                "    pass\n",
+                "import os, socket\n"
+                "missing_path = '/nci-si-identity-sentinel-' + str(os.getpid())\n"
+                "for kind, attempt in (\n"
+                "    ('DNS', lambda: socket.getaddrinfo('192.0.2.1', 9, "
+                "flags=socket.AI_NUMERICHOST)),\n"
+                "    ('connect', lambda: stream.connect(missing_path)),\n"
+                "    ('connect_ex', lambda: stream.connect_ex(missing_path)),\n"
+                "    ('sendto', lambda: datagram.sendto(b'controlled', missing_path)),\n"
+                "):\n"
+                "    stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+                "    datagram = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)\n"
+                "    try:\n"
+                "        attempt()\n"
+                "    except OSError:\n"
+                "        pass\n"
+                "    else:\n"
+                "        raise AssertionError(f'{kind} was not refused')\n"
+                "    finally:\n"
+                "        stream.close()\n"
+                "        datagram.close()\n",
             ],
             capture_output=True,
             text=True,
@@ -332,4 +397,23 @@ class CoreIdentityCLITest(unittest.TestCase):
         )
 
         self.assertEqual((result.returncode, result.stderr), (0, ""))
-        self.assertEqual(self.network_log.read_text(encoding="utf-8"), "attempt\n")
+        self.assertEqual(
+            self.network_log.read_text(encoding="utf-8"),
+            "getaddrinfo\nconnect\nconnect_ex\nsendto\n",
+        )
+
+    def test_help_and_usage_failures_do_not_evaluate_configuration(self):
+        for configured_id in (None, "PRIVATE-ID-CANARY"):
+            with self.subTest(configured_id=configured_id):
+                help_result = self._module("--help", configured_id=configured_id)
+                self.assertEqual((help_result.returncode, help_result.stderr), (0, ""))
+                self.assertIn("generate", help_result.stdout)
+                self.assertIn("show", help_result.stdout)
+                self.assertNotIn("PRIVATE-ID-CANARY", help_result.stdout)
+
+                invalid = self._module("not-a-command", configured_id=configured_id)
+                self.assertEqual(invalid.returncode, 2)
+                self.assertIn("usage:", invalid.stderr)
+                self.assertEqual(invalid.stdout, "")
+                self.assertNotIn("PRIVATE-ID-CANARY", invalid.stdout + invalid.stderr)
+                self.assertNotIn("Traceback", invalid.stdout + invalid.stderr)
