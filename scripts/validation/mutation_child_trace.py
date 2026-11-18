@@ -13,7 +13,7 @@ import sysconfig
 import threading
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from types import CodeType
+from types import CodeType, FrameType
 from typing import Literal, TypedDict, TypeGuard
 from uuid import uuid4
 
@@ -556,6 +556,13 @@ def installed_module_path(path: Path, environment: Path, suffix: tuple[str, ...]
     )
 
 
+def frame_module(frame: FrameType) -> str | None:
+    name = frame.f_globals.get("__name__")
+    if name == "__main__":
+        name = getattr(frame.f_globals.get("__spec__"), "name", None)
+    return name if isinstance(name, str) else None
+
+
 class _ChildTracer:
     def __init__(self, config: dict[str, object]):
         self.config = config
@@ -575,7 +582,7 @@ class _ChildTracer:
         return self.trace
 
     def module_call(self, frame) -> None:
-        if frame.f_globals.get("__name__") != self.config["module"]:
+        if frame_module(frame) != self.config["module"]:
             return
         self.module_seen = True
         try:
@@ -591,7 +598,7 @@ class _ChildTracer:
     def matches(self, frame) -> bool:
         return (
             self.outcome == "reached"
-            and frame.f_globals.get("__name__") == self.config["module"]
+            and frame_module(frame) == self.config["module"]
             and str(Path(frame.f_code.co_filename).resolve()) == self.path
         )
 
