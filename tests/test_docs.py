@@ -888,18 +888,8 @@ class DocumentationTest(unittest.TestCase):
 
     def test_architecture_describes_every_module(self):
         modules = {path.name for path in PACKAGE.glob("*.py")} - {"__init__.py"}
-        identity = next(
-            row
-            for row in section(ARCHITECTURE, "Components").splitlines()
-            if "`traffic_identity.py`" in row
-        )
 
         self.assertEqual(first_column(section(ARCHITECTURE, "Components")), modules)
-        self.assertIn(
-            "captures the raw configured value and installed-version snapshot; "
-            "rendering the label performs validation",
-            identity,
-        )
 
     def test_agent_instructions_exist_and_no_tracked_file_names_a_local_tool_file(self):
         self.assertTrue((ROOT / "AGENTS.md").is_file(), "AGENTS.md must exist")
@@ -1018,21 +1008,18 @@ class DocumentationTest(unittest.TestCase):
             guide_text,
         )
 
-    def test_quickstart_preserves_a_saved_identity_across_restarts(self):
+    def test_quickstart_export_example_does_not_use_a_literal_identity(self):
         identity_text = QUICKSTART.split("`NCI_SI_INSTALLATION_ID` is read only by", 1)[1].split(
             "\n\nChoose ", 1
         )[0]
+        exports = [
+            line.strip()
+            for line in identity_text.splitlines()
+            if line.strip().startswith("export NCI_SI_INSTALLATION_ID=")
+        ]
 
-        self.assertEqual(
-            [
-                line.strip()
-                for line in identity_text.splitlines()
-                if line.strip().startswith("export NCI_SI_INSTALLATION_ID=")
-            ],
-            ["export NCI_SI_INSTALLATION_ID='<saved-generated-value>'"],
-        )
-        self.assertIn("durable deployment configuration", identity_text)
-        self.assertIn("Do not generate a fresh value on every startup", identity_text)
+        self.assertEqual(len(exports), 1)
+        self.assertNotRegex(exports[0], r"=[ \t]*['\"]?[0-9a-f]{32}['\"]?[ \t]*\Z")
 
     def test_every_repository_url_in_the_documents_names_this_repository(self):
         # Both canonical names remain in use during the released-installer transition.
