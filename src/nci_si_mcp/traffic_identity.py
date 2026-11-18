@@ -28,7 +28,7 @@ _VERSION_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.!+_-]*\Z", re.ASCII)
 @dataclass(frozen=True, slots=True)
 class IdentitySnapshot:
     _raw_id: str | None = field(repr=False)
-    version: str
+    version: str | None = field(repr=False)
 
 
 def capture_identity() -> IdentitySnapshot:
@@ -46,7 +46,7 @@ def installation_label(snapshot: IdentitySnapshot) -> str:
     if _INSTALLATION_ID.fullmatch(raw_id) is None:
         raise _invalid_id("must be exactly 32 lowercase hexadecimal characters")
     installation_id = InstallationId(raw_id)
-    if _VERSION_TOKEN.fullmatch(snapshot.version) is None:
+    if not isinstance(snapshot.version, str) or _VERSION_TOKEN.fullmatch(snapshot.version) is None:
         raise _invalid_version()
     label = f"{PRODUCT}/{snapshot.version} (installation={installation_id}; +{PROJECT_URL})"
     if len(label.encode("ascii")) > MAX_LABEL_BYTES:

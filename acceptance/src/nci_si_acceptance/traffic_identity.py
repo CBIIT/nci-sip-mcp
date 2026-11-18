@@ -33,7 +33,7 @@ _VERSION_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.!+_-]*\Z", re.ASCII)
 @dataclass(frozen=True, slots=True)
 class IdentitySnapshot:
     _raw_id: str | None = field(repr=False)
-    version: str
+    version: str | None = field(repr=False)
 
 
 def capture_identity() -> IdentitySnapshot:
@@ -49,7 +49,7 @@ def installation_label(snapshot: IdentitySnapshot) -> str:
     if raw_id is None or _INSTALLATION_ID.fullmatch(raw_id) is None:
         raise ValueError(ID_ERROR)
     installation_id = InstallationId(raw_id)
-    if _VERSION_TOKEN.fullmatch(snapshot.version) is None:
+    if not isinstance(snapshot.version, str) or _VERSION_TOKEN.fullmatch(snapshot.version) is None:
         raise ValueError(VERSION_ERROR)
     label = f"{PRODUCT}/{snapshot.version} (installation={installation_id}; +{PROJECT_URL})"
     if len(label.encode("ascii")) > MAX_LABEL_BYTES:
