@@ -248,15 +248,17 @@ custom_dir = "overrides"
         stage_pages(self.root, staged, [page])
         self.assertEqual((staged / page).read_bytes(), source.read_bytes())
 
+        (self.root / "README.md").write_text("# Public overview\n")
         config = self.config().replace(
             'nav = [{ Overview = "README.md" }, { Story = "docs/story.md" }]',
-            'nav = [{ "Request identification" = "docs/request-identification.md" }]',
+            'nav = [{ Overview = "README.md" }, '
+            '{ "Request identification" = "docs/request-identification.md" }]',
         )
         (self.root / "docs/site-assets/zensical.toml").write_text(config)
         self.build()
         published_page = self.output / "docs/request-identification.html"
         self.assertTrue(published_page.is_file())
         self.assertIn(
-            'href="docs/request-identification.html"', (self.output / "index.html").read_text()
+            'href="./docs/request-identification.html"', (self.output / "index.html").read_text()
         )
         self.assertIn("Stable installation identity", published_page.read_text())

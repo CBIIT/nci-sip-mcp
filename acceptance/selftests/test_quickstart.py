@@ -70,3 +70,12 @@ def test_the_module_runs_as_a_command():
     )
 
     assert (ran.returncode, ran.stderr) == (0, "")
+
+
+def test_quickstart_links_to_the_published_request_identification_guide():
+    text = QUICKSTART.read_text(encoding="utf-8")
+    link = "[request identification guide](docs/request-identification.md)"
+    guide = QUICKSTART.parent / "docs/request-identification.md"
+
+    assert text.count(link) == 1
+    assert guide.is_file()

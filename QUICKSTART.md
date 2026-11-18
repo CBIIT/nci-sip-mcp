@@ -12,7 +12,9 @@ and validation dashboard in [local companion containers](docs/companion-containe
 [validation guide](docs/local-validation.md) for `pdm run portal serve`, runs, results and
 configuration proposals, including startup-settings snapshots
 (`nci-si-mcp serve --configuration-snapshot PATH`,
-[configuration evidence](docs/local-validation.md#configuration-evidence-and-proposals)).
+[configuration evidence](docs/local-validation.md#configuration-evidence-and-proposals)). The
+[request identification guide](docs/request-identification.md) covers local identity provisioning;
+the utilities do not label requests yet.
 
 ## Upstream access and SSIS transition
 
@@ -224,6 +226,13 @@ A leading `~` is expanded, and an empty value is rejected. The other settings:
 | `NCI_SI_HTTP_ALLOWED_HOSTS` | `127.0.0.1:*,localhost:*,[::1]:*` | Comma-separated permitted Host authorities, exact or wildcard port; add the public authority when using a proxy |
 | `NCI_SI_HTTP_ALLOWED_ORIGINS` | `http://127.0.0.1:*,http://localhost:*,http://[::1]:*` | Permitted Origin authorities, exact or wildcard port; requests without Origin are allowed |
 | `NCI_SI_HTTP_REQUIRE_INDEX` | `0` | Boolean switch, read as `0` or `1` only (anything else is a configuration error). Set to 1 when deployment supplies an index: readiness requires an active build compatible with the configured embedding model. With 0 an absent index permits live tools; an existing active build is still verified |
+
+`NCI_SI_INSTALLATION_ID` is read only by the local identity utility, not by server settings or
+request emission. After generating an identity, persist it in your local configuration:
+
+```bash
+export NCI_SI_INSTALLATION_ID=0123456789abcdef0123456789abcdef
+```
 
 Choose `NCI_SI_PROFILE` for the **whole session**: use `evs` or `cadsr` only when every
 needed operation belongs to that domain. Use `unified` for mixed-domain sessions,

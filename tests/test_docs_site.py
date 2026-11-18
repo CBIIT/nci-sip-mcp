@@ -17,6 +17,7 @@ PUBLIC_NAVIGATION = [
             {"Run locally": "docs/local-guide.md"},
             {"Installer target interface": "docs/installer-targets.md"},
             {"Quickstart": "QUICKSTART.md"},
+            {"Request identification": "docs/request-identification.md"},
             {"Domain users and UAT": "docs/user-acceptance.md"},
             {"Behavioral stories": "docs/behavioural-tests.md"},
         ]

@@ -985,12 +985,14 @@ class DocumentationTest(unittest.TestCase):
 
         self.assertTrue((ROOT / guide).is_file())
         self.assertIn(f"[request identification guide]({guide})", read("README.md"))
-        self.assertIn(f"[request identification guide]({guide})", read("QUICKSTART.md"))
         self.assertIn(
             f"[request identification guide](../{guide})",
             read("acceptance/README.md"),
         )
-        self.assertIn("does not add an HTTP header or alter any request", read(guide))
+        self.assertIn(
+            "does not yet add an HTTP header or alter any request",
+            " ".join(read(guide).split()),
+        )
 
     def test_every_repository_url_in_the_documents_names_this_repository(self):
         # Both canonical names remain in use during the released-installer transition.
