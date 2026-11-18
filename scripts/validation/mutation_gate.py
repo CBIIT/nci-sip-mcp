@@ -77,6 +77,10 @@ def execute_job(path: Path, index: int) -> None:
     write_json(path.parent / f"result-{index}.json", row)
 
 
+def measurement_confirms_fixture(domain: str, outcome: str) -> bool:
+    return domain == "fixture" and outcome in {"KILLED", "SURVIVED"}
+
+
 def measure(
     scratch: Path, selected: dict, timeout: float, *, mutated_file: Path | None = None
 ) -> dict:
@@ -84,15 +88,20 @@ def measure(
         return {"outcome": "NO_TESTS", "domains": []}
     timings = []
     result = {}
+    last_survivor = {}
+    confirmation = "unreached"
     for domain, tests in selected.items():
         result, _ = run_domain(scratch, domain, tests, timeout, mutated_file=mutated_file)
         timings.append({key: result[key] for key in ("domain", "outcome", "elapsed_seconds")})
-        if domain == "fixture":
-            result["confirmation"] = "fixture"
+        if measurement_confirms_fixture(domain, result["outcome"]):
+            confirmation = "fixture"
+        if result["outcome"] == "NO_TESTS":
+            continue
         if result["outcome"] != "SURVIVED":
-            return {**result, "domains": timings}
-    result["confirmation"] = "fixture" if "fixture" in selected else "unreached"
-    return {**result, "domains": timings}
+            return {**result, "confirmation": confirmation, "domains": timings}
+        last_survivor = result
+    result = {**result, **last_survivor}
+    return {**result, "confirmation": confirmation, "domains": timings}
 
 
 def collect(root: Path, selected: dict) -> tuple[list[Mutant], list[dict]]:
