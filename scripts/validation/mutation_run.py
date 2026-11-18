@@ -18,7 +18,7 @@ from threading import current_thread, main_thread
 from time import monotonic, sleep
 from types import FrameType
 
-from coverage import CoverageData
+from coverage import Coverage, CoverageData
 from pytest import ExitCode
 from scripts.processes import STOP_SECONDS, stop
 from scripts.validation.mutation_child_trace import (
@@ -513,21 +513,29 @@ def run_domain(
     mutated_span: tuple[int, int] | None = None,
     expected_children: tuple[ChildTrace, ...] = (),
 ) -> tuple[dict, Path]:
-    args, env, data_file, evidence, log = prepare_domain_run(scratch, domain, selected, baseline)
+    args, env, data_file, evidence, log = prepare_domain_run(
+        scratch, domain, selected, baseline, collect_coverage=bool(expected_children)
+    )
     started = monotonic()
     status = program(args, scratch / DOMAINS[domain][0], env, timeout, log)
     elapsed = monotonic() - started
     result: dict[str, object] = classify(status, evidence, mutated_file)
     try:
-        validate_domain_traces(
-            data_file,
-            env,
-            domain,
-            expected_children,
-            mutated_file,
-            mutated_span,
-            scratch,
-        )
+        if status is not None:
+            owners = validate_domain_traces(
+                data_file,
+                env,
+                domain,
+                expected_children,
+                mutated_file,
+                mutated_span,
+                scratch,
+            )
+            if expected_children:
+                owners.update(
+                    native_candidate_owners(data_file, scratch, mutated_file, mutated_span)
+                )
+                result = attribute_child_result(result, evidence, owners)
     except (OSError, ValueError) as error:
         result = {"outcome": "INFRA", "message": str(error)}
     if baseline and result["outcome"] == "KILLED":
@@ -537,7 +545,12 @@ def run_domain(
 
 
 def prepare_domain_run(
-    scratch: Path, domain: str, selected: list[str], baseline: bool
+    scratch: Path,
+    domain: str,
+    selected: list[str],
+    baseline: bool,
+    *,
+    collect_coverage: bool = False,
 ) -> tuple[list[str], dict[str, str], Path, Path, Path]:
     directory, default = DOMAINS[domain]
     work = Path(tempfile.mkdtemp(prefix=f"evidence-{domain}-", dir=scratch.parent))
@@ -570,7 +583,7 @@ def prepare_domain_run(
         str(scratch / directory),
         *(selected or [default]),
     ]
-    args += coverage_args(scratch, work, baseline, env)
+    args += coverage_args(scratch, work, baseline or collect_coverage, env)
     if domain == "fixture":
         env.update(FIXTURE)
         args += ["--report=fixture.json"]
@@ -586,13 +599,42 @@ def validate_domain_traces(
     mutated_file: Path | None,
     mutated_span: tuple[int, int] | None,
     scratch: Path,
-) -> None:
+) -> set[str]:
     producer, traces = read_traces(data_file)
     expected_phase = environment["MUTATION_CHILD_TRACE_PHASE"]
     if not producer_matches_run(producer, environment, domain, expected_phase):
         raise ValueError("Child trace belongs to another run")
     if expected:
-        verify_child_attempts(traces, expected, mutated_file, mutated_span, scratch)
+        return verify_child_attempts(traces, expected, mutated_file, mutated_span, scratch)
+    return set()
+
+
+def native_candidate_owners(
+    data_file: Path, scratch: Path, target: Path | None, span: tuple[int, int] | None
+) -> set[str]:
+    if target is None or span is None:
+        raise ValueError("Installed child mutation lacks its source span")
+    if not data_file.exists():
+        coverage = Coverage(data_file=str(data_file), config_file=False)
+        coverage.combine(strict=True, keep=True)
+        coverage.save()
+    lines = coverage_map(data_file, scratch).get(target.relative_to(scratch).as_posix(), {})
+    return set(context_tests(line_contexts(lines, *span)))
+
+
+def attribute_child_result(result: dict, evidence: Path, owners: set[str]) -> dict:
+    if result.get("kind") == "import":
+        return result
+    if result["outcome"] == "KILLED":
+        return result if result["node"] in owners else {"outcome": "NO_TESTS"}
+    if result["outcome"] == "SURVIVED":
+        return result if passed_call_nodes(evidence) & owners else {"outcome": "NO_TESTS"}
+    return result
+
+
+def passed_call_nodes(evidence: Path) -> set[str]:
+    calls = [json.loads(line) for line in evidence.read_text().splitlines()]
+    return {row["node"] for row in calls if (row["phase"], row["outcome"]) == ("call", "passed")}
 
 
 def producer_matches_run(
@@ -725,14 +767,17 @@ def verify_child_attempts(
     mutated_file: Path | None,
     mutated_span: tuple[int, int] | None,
     scratch: Path,
-) -> None:
+) -> set[str]:
     if mutated_file is None or mutated_span is None:
         raise ValueError("Installed child mutation lacks its source span")
     source = mutated_file.read_bytes()
     expected_digest = sha256(source).hexdigest()
     source_name = mutated_file.relative_to(scratch).as_posix()
-    for route in expected:
-        verify_child_route_attempt(traces, route, source_name, expected_digest, mutated_span)
+    return {
+        route.node
+        for route in expected
+        if verify_child_route_attempt(traces, route, source_name, expected_digest, mutated_span)
+    }
 
 
 def verify_child_route_attempt(
@@ -741,12 +786,15 @@ def verify_child_route_attempt(
     source_name: str,
     expected_digest: str,
     span: tuple[int, int],
-) -> None:
+) -> bool:
     attempts = child_attempts(traces, route)
-    if not attempts or route.source != source_name:
-        raise ValueError("Expected installed child route was not attempted")
-    if not any(child_attempt_reaches_mutation(trace, expected_digest, span) for trace in attempts):
-        raise ValueError("Installed child mutation was not reached with fresh bytecode")
+    if route.source != source_name:
+        raise ValueError("Expected installed child route names another source")
+    if any(
+        trace.outcome == "reached" and trace.source_digest != expected_digest for trace in attempts
+    ):
+        raise ValueError("Installed child source differs from the mutation")
+    return any(child_attempt_reaches_mutation(trace, expected_digest, span) for trace in attempts)
 
 
 def child_attempts(traces: list[ChildTrace], route: ChildTrace) -> list[ChildTrace]:

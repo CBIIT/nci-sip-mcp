@@ -370,11 +370,18 @@ and decorators need not repeat imports. With no identifiable call owner, the who
 Unrecognized contexts fail mapping. Each result names its `fallback_domains`; shard
 summaries count fallback mutants overall and per domain, alongside outcomes and kill kinds.
 Domains run in unit, self-test, then fixture order, stopping when a mutant is detected.
-Fixture confirmation runs only tests whose baseline contexts reach the mutated lines;
-`confirmation: unreached` records a survivor with no fixture reach and no fixture run.
+Fixture confirmation runs only tests whose baseline contexts reach the mutated lines.
+`confirmation: fixture` requires a fixture kill or survivor; `confirmation: unreached`
+does not attest fixture execution, including a selected fixture route with no actual reach.
 `NO_TESTS` means no domain covered the mutated span, or a selected domain run produced no
 passed owning call. It fails the gate and cannot be allowlisted; inspect selection and call
 evidence before concluding the code is unreachable.
+Explicitly opted-in installed-child routes retain their owning test, installed path, source
+and bytecode digests, executed lines, and producer/run identity. A child kill requires the
+same test to reach the mutated bytes and fail; another node cannot lend its reach. Completed
+unreached routes are `NO_TESTS`, not evidence failures, and do not block an independent
+in-process owner. Candidates with child routes collect coverage to distinguish these owners.
+Malformed or missing trace evidence is `INFRA`; a timed-out run remains `TIMEOUT`.
 Long-lived fixture servers retain the setup context present when they start; later RPCs
 cannot inherit changes to the parent's environment. Their setup-only lines therefore use
 the whole-fixture fallback, counted like the other domains, rather than claiming per-RPC ownership.
