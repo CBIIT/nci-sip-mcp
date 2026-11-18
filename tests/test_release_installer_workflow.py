@@ -681,7 +681,7 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
         install = steps["Install the selected installer source"]
         self.assertEqual(install["working-directory"], "${{ runner.temp }}")
         procedures = documented_procedures()
-        self.assertEqual(len(procedures), 2)
+        self.assertEqual(len(procedures), 3)
         public = procedures[0]
         self.assertEqual(
             public,
@@ -703,6 +703,16 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
             ],
         )
         self.assertEqual(
+            procedures[1],
+            [
+                "PRE_SIP_TAG=v0.39.2",
+                '"$PYTHON" -m venv "$INSTALLER_VENV"',
+                '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ '
+                'git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"',
+                '"$INSTALLER_VENV/bin/nci-si-install" check --target local',
+            ],
+        )
+        self.assertEqual(
             install["run"].splitlines(),
             [public[0], public[1].replace("${RELEASE_TAG}", "${INSTALL_REF}")],
         )
@@ -721,9 +731,9 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
 
     def test_legacy_installer_keeps_its_separate_complete_old_origin_procedure(self):
         procedures = documented_procedures()
-        self.assertEqual(len(procedures), 2)
+        self.assertEqual(len(procedures), 3)
         self.assertEqual(
-            procedures[1],
+            procedures[2],
             [
                 '"$PYTHON" -m venv "$INSTALLER_VENV"',
                 '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ '
