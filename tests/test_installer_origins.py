@@ -94,7 +94,7 @@ class InstallerOriginsTest(unittest.TestCase):
                     self.installed_origin = installed
                     self.commands.clear()
                     self.assert_completed(self.invoke("run"))
-                    self.assertEqual(self.commands[2][-1], f"nci-si-mcp @ git+{NEW}@{COMMIT}")
+                    self.assertEqual(self.commands[2][-1], f"nci-sip-mcp @ git+{NEW}@{COMMIT}")
                 shutil.rmtree(self.data, ignore_errors=True)
 
     def test_status_reverifies_both_canonical_installed_origins(self):

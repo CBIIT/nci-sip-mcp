@@ -69,16 +69,21 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings, Settings())
         self.assertEqual(settings.data_dir, Path(".nci-si-mcp"))
 
+    def test_legacy_namespace_is_not_an_environment_alias(self):
+        settings = settings_from(NCI_SI_DATA_DIR="/legacy/index")
+
+        self.assertEqual(settings.data_dir, Path(".nci-si-mcp"))
+
     def test_environment_overrides(self):
         settings = settings_from(
-            NCI_SI_EVS_BASE_URL="http://localhost:8080/",
-            NCI_SI_DATA_DIR="/data/index",
-            NCI_SI_TIMEOUT_SECONDS="2.5",
-            NCI_SI_EVS_MAX_ATTEMPTS="1",
-            NCI_SI_INDEX_BATCH_SIZE="7",
-            NCI_SI_LOG_LEVEL="debug",
-            NCI_SI_EMBEDDING_PROVIDER="sentence-transformers",
-            NCI_SI_EMBEDDING_MODEL="all-MiniLM-L6-v2",
+            NCI_SIP_EVS_BASE_URL="http://localhost:8080/",
+            NCI_SIP_DATA_DIR="/data/index",
+            NCI_SIP_TIMEOUT_SECONDS="2.5",
+            NCI_SIP_EVS_MAX_ATTEMPTS="1",
+            NCI_SIP_INDEX_BATCH_SIZE="7",
+            NCI_SIP_LOG_LEVEL="debug",
+            NCI_SIP_EMBEDDING_PROVIDER="sentence-transformers",
+            NCI_SIP_EMBEDDING_MODEL="all-MiniLM-L6-v2",
         )
 
         self.assertEqual(settings.evs_base_url, "http://localhost:8080")

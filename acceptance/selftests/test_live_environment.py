@@ -47,6 +47,27 @@ def clean_settings(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", local_process)
 
 
+def test_sip_credential_uses_sip_environment_name_only(monkeypatch, tmp_path):
+    monkeypatch.setenv("NCI_SI_ACCEPTANCE_ENVIRONMENT", "evs-only")
+    monkeypatch.setenv("NCI_SI_EVS_LICENSE_KEY", "legacy-private-marker")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "live")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_ENVIRONMENT", "evs-only")
+    monkeypatch.setenv("NCI_SIP_EVS_LICENSE_KEY", "selected-private-marker")
+    target = Target.from_env()
+    monkeypatch.setenv("NCI_SIP_EVS_LICENSE_KEY", "later-private-marker")
+
+    environment = server_environment(
+        "live",
+        tmp_path,
+        None,
+        environment=target.environment,
+        denied_url="http://127.0.0.1:1",
+    )
+
+    assert environment.get("NCI_SIP_EVS_LICENSE_KEY") == "selected-private-marker"
+    assert "NCI_SI_EVS_LICENSE_KEY" not in environment
+
+
 @pytest.mark.parametrize("name", [None, "", "stage", "production", "unknown"])
 def test_selection_precedes_process_or_request(monkeypatch, name):
     if name is not None:
