@@ -527,23 +527,24 @@ def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(
         finally:
             helper_clean = finish_pending_worker(child, actual_wait, release, helper)
             monkeypatch.setattr(child, "wait", actual_wait)
-        assert helper_clean
-        assert helper_done.is_set() and not helper.is_alive()
-        assert helper_errors == []
-        assert wait_entered.is_set() and waits
-        pending, remaining, timeout = waits[0]
-        assert pending and remaining > 0
-        assert timeout is not None and 0 < timeout <= request_supervision.STOP_SECONDS
-        assert release_sent.is_set()
-        assert failure is None
-        assert marker.read_bytes() == b"finish\n"
-        assert child.returncode == 0
-        assert all(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
-        assert not call.thread.is_alive()
-        assert owner.pending_owners == ()
-        summary = json.loads((owner.run.directory / "summary.json").read_text())
-        assert (summary["state"], summary["observationComplete"]) == ("completed", True)
-        assert owner.cleanup_deadline().remaining() > 0
+    assert helper_clean
+    assert helper_done.is_set() and not helper.is_alive()
+    assert helper_errors == []
+    assert wait_entered.is_set() and waits
+    pending, remaining, timeout = waits[0]
+    assert pending and remaining > 0
+    assert timeout is not None and 0 < timeout <= request_supervision.STOP_SECONDS
+    assert child.returncode is not None
+    assert all(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
+    assert not call.thread.is_alive()
+    assert owner.pending_owners == ()
+    assert release_sent.is_set()
+    assert failure is None
+    assert marker.read_bytes() == b"finish\n"
+    assert child.returncode == 0
+    summary = json.loads((owner.run.directory / "summary.json").read_text())
+    assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+    assert owner.cleanup_deadline().remaining() > 0
 
 
 def test_sealed_receipt_is_one_use_and_callbacks_do_not_hold_registry_lock(calls):

@@ -236,26 +236,28 @@ def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypa
             )
             monkeypatch.setattr(first, "wait", actual_first_wait)
             monkeypatch.setattr(second, "wait", actual_second_wait)
-        assert helpers_clean
-        assert helper_done.is_set() and not helper.is_alive()
-        assert helper_errors == []
-        assert wait_entered.is_set() and waits
-        pending, remaining, timeout = waits[0]
-        assert pending and remaining == 0
-        assert timeout == request_supervision.STOP_SECONDS == LEGACY_WORKER_GRACE_SECONDS
-        assert release_sent.is_set()
-        assert failure is None
-        assert (first.returncode, second.returncode) == (0, 0)
-        assert not first_marker.exists()
-        assert marker.read_bytes() == b"finish\n"
-        assert all(
-            stream.closed
-            for child in (first, second)
-            for stream in (child.stdin, child.stdout, child.stderr)
-        )
-        summary = owner.snapshot()
-        assert (summary["state"], summary["observationComplete"]) == ("completed", True)
-        assert owner.cleanup_deadline().remaining() == 0
+    assert helpers_clean
+    assert helper_done.is_set() and not helper.is_alive()
+    assert helper_errors == []
+    assert first.returncode is not None and second.returncode is not None
+    assert all(
+        stream.closed
+        for child in (first, second)
+        for stream in (child.stdin, child.stdout, child.stderr)
+    )
+    assert owner.pending_owners == ()
+    assert wait_entered.is_set() and waits
+    pending, remaining, timeout = waits[0]
+    assert pending and remaining == 0
+    assert timeout == request_supervision.STOP_SECONDS == LEGACY_WORKER_GRACE_SECONDS
+    assert release_sent.is_set()
+    assert failure is None
+    assert (first.returncode, second.returncode) == (0, 0)
+    assert not first_marker.exists()
+    assert marker.read_bytes() == b"finish\n"
+    summary = owner.snapshot()
+    assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+    assert owner.cleanup_deadline().remaining() == 0
 
 
 def test_initial_summary_precedes_admission(tmp_path):
