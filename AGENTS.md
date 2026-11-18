@@ -86,7 +86,7 @@ pdm run pytest tests/test_handlers.py -k LookupTest
 pdm run lint                              # ruff check + basedpyright, the fast check
 pdm run fmt                               # ruff format
 pdm run pre-commit run --all-files        # every commit-stage hook, as the CI quality job runs them
-pdm run mutation-gate                    # changed Python sites; review every survivor before a PR
+pdm run mutation-gate                    # focused sensitivity follow-up; full catalogue runs once in PR CI
 NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SI_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json  # fixture mode, prepared as in CI
 pdm run acceptance-expected check acceptance/fixture.json    # the report against the expected outcomes
 pdm run acceptance-expected update acceptance/fixture.json   # rewrite the expected outcomes
@@ -285,21 +285,33 @@ adding exclusion pathspecs for generated files.
    1. **Code review:** the engineering standards above, the architecture, and the scope.
    2. **Silent failures:** swallowed exceptions, broad `except`, fallbacks that hide an error,
       results that look complete but are not.
-   3. **Tests:** apply the outside-in rules below to every changed behavioral claim.
-      Run `pdm run mutation-gate` before the PR; fix every survivor or allowlist a reviewed
-      equivalent `SURVIVED` mutant in `scripts/validation/mutation-allowlist.yaml` with its reason.
-      `NO_TESTS` is never allowlisted: close reachable gaps at their owning boundary and
-      remove verified dead code. Timeouts count as killed by policy, not as assertion-strength
-      evidence. See [CONTRIBUTING.md](CONTRIBUTING.md#mutation-gate) for classification and execution details.
-      A behavioural change without a red commit is a finding; check its quoted failure. Identify the claim's
-      caller scenario, owning interface and test, plausible regression, and observed
+   3. **Tests:** apply the outside-in rules below to every changed behavioral claim. The existing
+      PR-CI mutation job is the one full catalogue campaign for a frozen candidate; do not run a
+      second full catalogue locally or as reviewer. Before opening the PR, sample about 20 items
+      from that workload, explain outliers and state the projection in the issue. Freeze and record
+      PR head H, event base B and the actual tested PR checkout T. A change to H, B, T, inputs or
+      toolchain requires re-establishing the affected proof. Independently review the raw campaign
+      results and retain their exact provenance
+      ([CONTRIBUTING.md](CONTRIBUTING.md#mutation-gate)); raw evidence review is not another
+      campaign. Producer and mutation-consumer evidence must belong to one workflow
+      attempt. An unrelated rerun that did not execute the mutation consumer does not by itself
+      invalidate a completed campaign when H/B/T and inputs are unchanged and raw results are
+      independently reviewed; an aggregate summary alone is insufficient. This does not reduce
+      ordinary test, self-test, fixture or hook gates.
+      Use focused follow-up tests/mutations for a concrete claim or finding.
+      Fix every survivor or allowlist only reviewed equivalent `SURVIVED` results in
+      `scripts/validation/mutation-allowlist.yaml` with their reasons. `NO_TESTS` is never
+      allowlisted: close reachable gaps at their owning boundary and remove verified dead code.
+      Timeouts count as killed by policy, not as assertion-strength evidence. Check exact error
+      contracts, boundary cases and independent expected values. Challenge internal spies,
+      duplicate claims and development scaffolding; retain component tests with independent
+      contracts. Before any removal, show which remaining test preserves each distinct failure
+      mechanism. Record each finding's retention, replacement or removal rationale in the review
+      table. Coverage percentages and passing tests alone do not establish assertion quality or
+      uniqueness. A behavioural change without a red commit is a finding; check its quoted failure.
+      Identify the caller scenario, owning interface and test, plausible regression, and observed
       assertion failure under the original defect or a restored targeted mutation. Distinguish
-      setup failures from sensitivity evidence. Check exact error contracts, boundary cases,
-      and independent expected values. Challenge internal spies, duplicate claims and
-      development scaffolding; retain component tests with independent contracts. Before any
-      removal, show which remaining test preserves each distinct failure mechanism. Record
-      each finding's retention, replacement or removal rationale in the review table. Coverage
-      percentages and passing tests alone do not establish assertion quality or uniqueness.
+      setup failures from sensitivity evidence.
    4. **Types and records:** invariants are expressed in the types, and records match `spec/`.
       Check the diff against the Typing conventions in CONTRIBUTING.md.
    5. **Comments and documentation:** docstrings, comments and documents say what the code
@@ -315,10 +327,13 @@ adding exclusion pathspecs for generated files.
    something); its body lists `Closes #N` for every issue of the milestone, so they close when
    it merges, the combined expected-file diff grouped by test function with before and after
    counts, the predicted tests that did not move and why, and the review rounds of step 5.
-7. **The reviewer then runs an independent mutation review** on the open pull request and posts
-   the surviving mutants; close each real gap with a test that fails without the fix, and say
-   which you judged equivalent and why. The fixes are pushed to the milestone branch after the
-   pull request exists, and their rounds are posted as comments, as in step 5.
+7. **The reviewer independently reviews the PR-CI campaign's raw evidence** on the open pull
+   request; they do not launch a second full catalogue campaign. They post the surviving or
+   unresolved mutants, missing evidence and specific claims needing sensitivity proof. Close each
+   real gap with a focused test/mutation that fails without the fix, and say which results you
+   judged equivalent and why. A change to the tested candidate requires new evidence for that
+   candidate. The fixes are pushed to the milestone branch after the pull request exists, and their
+   rounds are posted as comments, as in step 5.
 
 The government sponsor approves changes; the NCI SI MCP project coordinator relays that approval,
 and the reviewer acts for the coordinator.
@@ -366,9 +381,10 @@ Rules learned the hard way:
   `ps` and stop it by its process id.
 - A wait loop ends when the file or process it watches is gone, and never matches its own
   command line (`pgrep -f` on a string in the loop does).
-- Before a run projected to take over an hour (mutation, live audit, benchmark), run about 20
-  items of that run's own workload, break down where the time goes and explain every outlier.
-  Launch the full run only with the projection from that sample stated in the issue.
+- Before a run projected to take over an hour (the one PR-CI mutation campaign, live audit,
+  benchmark), run about 20 items of that run's own workload, break down where the time goes and
+  explain every outlier. Launch the full campaign only with the projection from that sample stated
+  in the issue; do not substitute a separate full local campaign.
 - When a run falls more than 25% behind its projection, find the cause before waiting longer;
   a new estimate is not a cause.
 - Name roles, never people, in code, issues and pull requests.

@@ -40,7 +40,7 @@ a diagnosis of the underlying TLS failure.
 | `pdm run test` | The whole suite, with the coverage minimum |
 | `pdm run pytest tests/test_index.py -k name` | A selection of tests, without the minimum |
 | `pdm run lint` | Ruff and basedpyright: the fast check while you work |
-| `pdm run mutation-gate` | Kill every changed-site Python mutant before a PR; `--paths src/package/module.py` checks a whole module; review survivors with the printed AST keys in `scripts/validation/mutation-allowlist.yaml` |
+| `pdm run mutation-gate` | Focused sensitivity checks for a specific claim (`--paths src/package/module.py` selects a module); the full catalogue runs once in PR CI for each frozen candidate |
 | `pdm run fmt` | Format with Ruff |
 | `pdm run lock` | Refresh every Python group to the newest version admitted by the five-day release-age policy |
 | `pdm run github-setup` | Create missing workflow credential names with safe placeholders; never overwrite existing names |
@@ -71,6 +71,28 @@ default PR merge checkout relative to the event's base SHA, just as the suite pr
 The gate's nested self-tests require the larger timeout; current timing evidence belongs in
 the issue and pull request, not a standing runtime promise.
 
+This PR-CI job is the one full catalogue campaign for each frozen candidate. Do not run a
+separate full local campaign before the PR, or repeat it as the reviewer. Before opening the PR,
+sample about 20 items from this workload, break down baseline/mutant time and explain outliers;
+record the projection and readiness in the issue. Bind the report to H (the PR head SHA), B (the
+event base SHA) and T (the actual tested PR merge checkout SHA), plus the CI run/attempt, job and
+shard, source/input/toolchain/lock/version identities. If H, B, T, inputs or toolchain change,
+re-establish the affected candidate evidence rather than reusing a matching-tree result.
+Producer and mutation-consumer evidence must be coherent within the same workflow attempt, not
+assembled from whichever attempt is globally latest. An unrelated job rerun that did not execute
+the mutation consumer does not by itself invalidate a completed campaign when H/B/T and inputs are
+unchanged and the raw per-mutant results are independently reviewed; an aggregate summary alone
+cannot establish that evidence.
+
+The reviewer independently examines the existing run's raw per-mutant results and restoration
+receipts; that evidence review is not an independent campaign. Missing/malformed results,
+unresolved infrastructure failures, or `NO_TESTS` block clearance; `NO_TESTS` is never allowlisted.
+`SURVIVED` equivalence still needs explicit review. Focused local mutation/test follow-ups establish
+the sensitivity of a named claim or resolve a finding and record their exact tested source and
+inputs; they do not replace or repeat the full campaign.
+Ordinary unit tests, acceptance self-tests, fixture-ratchet checks and all hooks remain required;
+this policy changes only the number of full mutation-catalogue campaigns.
+
 CI's existing unit, harness self-test and prepared-fixture jobs collect per-test and child-phase
 coverage once. Each job's generated config (`mutation_coverage configure`) names that job's own
 absolute data file (`.coverage` at the root for unit, `acceptance/.coverage` for the harness
@@ -82,10 +104,11 @@ import fails as `INFRA`, even for an empty catalogue; it never silently reruns a
 A fixture execution must exit zero to export a baseline, even if its ratchet expects failures.
 Collection/setup/teardown attribution retains the existing conservative selection rules.
 
-Without `--coverage-dir`, local `pdm run mutation-gate` still computes clean unit, harness
-self-test and prepared-fixture baselines itself; unit remains serial. Any baseline failure
-names its domain and fails the gate. The shard summary's `baseline_domains` records freshly
-computed domain outcomes and seconds; imported runs leave that list empty.
+For a focused local sensitivity run (for example with `--paths`), `pdm run mutation-gate` without
+`--coverage-dir` computes clean unit, harness self-test and prepared-fixture baselines itself;
+unit remains serial. Any baseline failure names its domain and fails the run. The shard summary's
+`baseline_domains` records freshly computed domain outcomes and seconds; imported PR-CI runs leave
+that list empty. Do not use the unselected local command to launch a second full catalogue.
 
 Ordinary `pdm run test` stores combined coverage in `tmp/coverage/unit/.coverage`;
 `pdm run acceptance-selftest` uses `tmp/coverage/harness/.coverage`. PDM supplies the required
@@ -433,7 +456,12 @@ original file, with its synthesized row in `result-N.infra.json`. Corruption fai
 even after scheduler exit zero; file permission failures remain diagnostic. An incomplete row
 never counts as a kill or verified scratch restoration. Retained runs are never resumed automatically.
 The PR mutation job uploads this directory on success or failure as
-`mutation-results-<merge-tree-sha>-<shard>` for 30 days. An `EMPTY` shard creates no scheduler
+`mutation-results-<merge-tree-sha>-<shard>` for 30 days. Before that artifact expires, the operator
+retains the exact tested Git object T in a verified self-contained bundle or an existing controlled
+durable ref, together with the original raw artifacts and their hashes. Record H/B/T, run/attempt,
+job/shard, source/input/toolchain/lock/version identities, retention owner and expiry. Keep this
+operator-owned and limited to existing evidence; do not add private authority records or secrets to
+public artifacts or build a transfer/attestation framework. An `EMPTY` shard creates no scheduler
 directory; missing or incomplete raw evidence for a nonempty shard blocks review clearance,
 regardless of the workflow's displayed status. The raw results do not contain every runner phase.
 
