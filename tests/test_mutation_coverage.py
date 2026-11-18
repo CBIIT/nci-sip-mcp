@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from coverage import CoverageData
-from scripts.validation.mutation_child_trace import prepare_run, trace_directory
+from scripts.validation.mutation_child_trace import trace_directory
 from scripts.validation.mutation_coverage import SHARDS, export, identity, load
 from scripts.validation.mutation_gate import manifest_data, schedule
 from scripts.validation.mutation_run import baseline, environment, run_domain, selection
@@ -51,7 +51,26 @@ def repository(root):
     )
 
 
-def fragments(root, directory, *, data_tag=""):
+def producer_checkout(root, directory, domain, index):
+    checkout = root / "producer-checkouts" / directory.name / f"{domain}-{index}"
+    checkout.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(  # noqa: S603 - local fixture repository and owned destination
+        ["git", "clone", "--quiet", "--shared", str(root), str(checkout)],  # noqa: S607
+        check=True,
+        capture_output=True,
+    )
+    return checkout
+
+
+def configure_coverage(root, domain, shard, output, batch):
+    env = {**os.environ, "MUTATION_COVERAGE_BATCH": batch}
+    env.pop("GITHUB_ENV", None)
+    return coverage_cli(
+        "configure", domain, "--root", str(root), "--shard", shard, "--output", str(output), env=env
+    )
+
+
+def fragments(root, directory, batch=TEST_BATCH, *, skip=()):
     directory.mkdir()
     for domain, count in SHARDS.items():
         node = {
@@ -60,25 +79,20 @@ def fragments(root, directory, *, data_tag=""):
             "fixture": "tests/test_contract.py",
         }[domain]
         for index in range(1, count + 1):
-            data_file = root / f".coverage{data_tag}-{domain}-{index}"
+            if (domain, index) in skip:
+                continue
+            checkout = producer_checkout(root, directory, domain, index)
+            shard = f"{index}/{count}"
+            configured = configure_coverage(checkout, domain, shard, checkout / "config", batch)
+            if configured.returncode != 0:
+                raise RuntimeError(configured.stdout + configured.stderr)
+            data_file = checkout / (".coverage" if domain == "unit" else "acceptance/.coverage")
             data = CoverageData(basename=str(data_file))
             data.set_context(f"{node}::test_value|run")
-            data.add_lines({str(root / "src/example.py"): {2}})
+            data.add_lines({str(checkout / "src/example.py"): {2}})
             data.write()
-            shard = f"{index}/{count}"
-            prepare_run(data_file, directory / f"hook-{domain}-{index}", domain, "producer", shard)
-            export(root, data_file, domain, shard, directory / f"{domain}-{index}.json")
-
-
-def campaign_fragments(root, directory, batch):
-    fragments(root, directory, data_tag=f"-{directory.name}")
-    for path in directory.glob("*.json"):
-        fragment = json.loads(path.read_text())
-        run_id = expected_producer_id(batch, fragment["domain"], fragment["shard"])
-        fragment["producer"]["run_id"] = run_id
-        for child in fragment["children"]:
-            child["run_id"] = run_id
-        path.write_text(json.dumps(fragment) + "\n")
+            with patch.dict(os.environ, {"MUTATION_COVERAGE_BATCH": batch}):
+                export(checkout, data_file, domain, shard, directory / f"{domain}-{index}.json")
 
 
 FOLDERS = {"unit": "tests", "selftest": "acceptance/selftests", "fixture": "acceptance/tests"}
@@ -291,40 +305,55 @@ def cli_mutants(result):
 
 
 class SharedCoverageTest(unittest.TestCase):
-    def test_configure_binds_producer_to_the_external_batch_and_slot(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            reservations = root / "reservations"
-            output = root / "config"
-            environment_file = root / "github-env"
-            env = {
-                **os.environ,
-                "GITHUB_ENV": str(environment_file),
+    def setUp(self):
+        reservations = tempfile.TemporaryDirectory()
+        self.addCleanup(reservations.cleanup)
+        environment_patch = patch.dict(
+            os.environ,
+            {
                 "MUTATION_COVERAGE_BATCH": TEST_BATCH,
-                "MUTATION_COVERAGE_RESERVATIONS": str(reservations),
-            }
-            result = coverage_cli(
-                "configure",
-                "unit",
-                "--root",
-                str(root),
-                "--shard",
-                "1/4",
-                "--output",
-                str(output),
-                env=env,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            run_id = expected_producer_id(TEST_BATCH, "unit", "1/4")
-            trace_environment = dict(
-                line.split("=", 1) for line in environment_file.read_text().splitlines()
-            )
-            producer = json.loads(
-                (trace_directory(root / ".coverage") / "producer.json").read_text()
-            )
-            self.assertEqual(trace_environment["MUTATION_CHILD_TRACE_RUN"], run_id)
-            self.assertEqual(producer["run_id"], run_id)
-            self.assertEqual([path.name for path in reservations.iterdir()], [run_id])
+                "MUTATION_COVERAGE_RESERVATIONS": str(Path(reservations.name).resolve()),
+            },
+        )
+        environment_patch.start()
+        self.addCleanup(environment_patch.stop)
+        os.environ.pop("GITHUB_ENV", None)
+
+    def test_configure_binds_producer_to_the_external_batch_and_slot(self):
+        for batch in (TEST_BATCH, "gha-123-456-7"):
+            with self.subTest(batch=batch), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                reservations = root / "reservations"
+                output = root / "config"
+                environment_file = root / "github-env"
+                env = {
+                    **os.environ,
+                    "GITHUB_ENV": str(environment_file),
+                    "MUTATION_COVERAGE_BATCH": batch,
+                    "MUTATION_COVERAGE_RESERVATIONS": str(reservations),
+                }
+                result = coverage_cli(
+                    "configure",
+                    "unit",
+                    "--root",
+                    str(root),
+                    "--shard",
+                    "1/4",
+                    "--output",
+                    str(output),
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                run_id = expected_producer_id(batch, "unit", "1/4")
+                trace_environment = dict(
+                    line.split("=", 1) for line in environment_file.read_text().splitlines()
+                )
+                producer = json.loads(
+                    (trace_directory(root / ".coverage") / "producer.json").read_text()
+                )
+                self.assertEqual(trace_environment["MUTATION_CHILD_TRACE_RUN"], run_id)
+                self.assertEqual(producer["run_id"], run_id)
+                self.assertEqual([path.name for path in reservations.iterdir()], [run_id])
 
     def test_repeated_configure_in_another_output_cannot_reuse_a_reserved_slot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -351,8 +380,10 @@ class SharedCoverageTest(unittest.TestCase):
 
     def test_configure_rejects_missing_or_malformed_campaign_inputs_before_output(self):
         cases = (
-            ("missing batch", None, "reservations"),
-            ("malformed batch", "local-not-hex", "reservations"),
+            ("missing batch", None, "owned"),
+            ("malformed batch", "local-not-hex", "owned"),
+            ("zero github field", "gha-123-0-7", "owned"),
+            ("non-ascii github field", "gha-123-\uff14-7", "owned"),
             ("missing reservation root", TEST_BATCH, None),
             ("relative reservation root", TEST_BATCH, "relative-reservations"),
         )
@@ -361,10 +392,14 @@ class SharedCoverageTest(unittest.TestCase):
                 root = Path(directory).resolve()
                 output = root / "config"
                 env = {**os.environ, "GITHUB_ENV": str(root / "github-env")}
+                env.pop("MUTATION_COVERAGE_BATCH", None)
+                env.pop("MUTATION_COVERAGE_RESERVATIONS", None)
                 if batch is not None:
                     env["MUTATION_COVERAGE_BATCH"] = batch
                 if reservation is not None:
-                    env["MUTATION_COVERAGE_RESERVATIONS"] = reservation
+                    env["MUTATION_COVERAGE_RESERVATIONS"] = (
+                        str(root / "reservations") if reservation == "owned" else reservation
+                    )
                 result = coverage_cli(
                     "configure",
                     "unit",
@@ -379,6 +414,30 @@ class SharedCoverageTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertEqual(json.loads(result.stdout)["outcome"], "INFRA")
                 self.assertFalse(output.exists())
+
+    def test_configure_rejects_reservation_root_inside_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            output = root / "config"
+            env = {
+                **os.environ,
+                "MUTATION_COVERAGE_BATCH": TEST_BATCH,
+                "MUTATION_COVERAGE_RESERVATIONS": str(output / "reservations"),
+            }
+            result = coverage_cli(
+                "configure",
+                "unit",
+                "--root",
+                str(root),
+                "--shard",
+                "1/4",
+                "--output",
+                str(output),
+                env=env,
+            )
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)["outcome"], "INFRA")
+            self.assertFalse(output.exists())
 
     def test_complete_prior_campaign_fails_when_the_consumer_uses_a_new_batch(self):
         batches = (TEST_BATCH, f"local-{'b' * 32}")
@@ -402,8 +461,8 @@ class SharedCoverageTest(unittest.TestCase):
                 check=True,
             )
             campaigns = {batch: root / f"coverage-{index}" for index, batch in enumerate(batches)}
-            for batch, destination in campaigns.items():
-                campaign_fragments(root, destination, batch)
+            fragments(root, campaigns[batches[0]], batches[0], skip=(("unit", 1),))
+            fragments(root, campaigns[batches[1]], batches[1])
 
             config = root / "tmp/mutation-config-a"
             environment_file = root / "github-env-a"
@@ -411,7 +470,6 @@ class SharedCoverageTest(unittest.TestCase):
                 **os.environ,
                 "GITHUB_ENV": str(environment_file),
                 "MUTATION_COVERAGE_BATCH": TEST_BATCH,
-                "MUTATION_COVERAGE_RESERVATIONS": str(root / "reservations-a"),
             }
             configured = coverage_cli(
                 "configure",
@@ -556,7 +614,8 @@ class SharedCoverageTest(unittest.TestCase):
             data.set_context("tests/test_example.py::test_value|run")
             data.add_lines({str(root / "src/example.py"): {2}})
             data.write()
-            prepare_run(data_file, root / "hook", "unit", "producer", "1/4")
+            configured = configure_coverage(root, "unit", "1/4", root / "hook", f"local-{'b' * 32}")
+            self.assertEqual(configured.returncode, 0, configured.stdout + configured.stderr)
             output = root / "batch-a.json"
             result = coverage_cli(
                 "export",
@@ -592,7 +651,8 @@ class SharedCoverageTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "shard membership"):
                         export(root, data_file, "unit", shard, root / "bad.json")
                     self.assertFalse((root / "bad.json").exists())
-            prepare_run(data_file, root / "hook", "unit", "producer", "1/4")
+            configured = configure_coverage(root, "unit", "1/4", root / "hook", TEST_BATCH)
+            self.assertEqual(configured.returncode, 0, configured.stdout + configured.stderr)
             output = root / "nested/deeper/piece.json"
             export(root, data_file, "unit", "1/4", output)
             export(root, data_file, "unit", "1/4", output)
@@ -644,7 +704,12 @@ class SharedCoverageTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "nested/config"
             environment_file = Path(directory) / "github-env"
-            env = {**environment(Path(directory), output), "GITHUB_ENV": str(environment_file)}
+            env = {
+                **environment(Path(directory), output),
+                "GITHUB_ENV": str(environment_file),
+                "MUTATION_COVERAGE_BATCH": TEST_BATCH,
+                "MUTATION_COVERAGE_RESERVATIONS": os.environ["MUTATION_COVERAGE_RESERVATIONS"],
+            }
             result = subprocess.run(  # noqa: S603 - fixed CLI and owned output
                 [  # noqa: S607
                     "pdm",
@@ -790,24 +855,31 @@ class SharedCoverageTest(unittest.TestCase):
             partition_project(root)
             local = baseline(root, 30)
             output = root / "coverage"
+            output.mkdir()
             for domain, count in SHARDS.items():
                 prefix = Path(FOLDERS[domain]).name
                 for index in range(1, count + 1):
+                    checkout = producer_checkout(root, output, domain, index)
                     outcome, data = run_domain(
-                        root, domain, [f"{prefix}/test_value.py::test_{index}"], 30, baseline=True
+                        checkout,
+                        domain,
+                        [f"{prefix}/test_value.py::test_{index}"],
+                        30,
+                        baseline=True,
                     )
                     self.assertEqual(outcome["outcome"], "SURVIVED", outcome)
-                    export_data = root / f".coverage-export-{domain}-{index}"
-                    shutil.copyfile(data, export_data)
                     shard = f"{index}/{count}"
-                    prepare_run(
-                        export_data,
-                        root / f"hook-export-{domain}-{index}",
-                        domain,
-                        "producer",
-                        shard,
+                    configured = configure_coverage(
+                        checkout, domain, shard, checkout / "config", TEST_BATCH
                     )
-                    export(root, export_data, domain, shard, output / f"{domain}-{index}.json")
+                    self.assertEqual(
+                        configured.returncode, 0, configured.stdout + configured.stderr
+                    )
+                    export_data = checkout / (
+                        ".coverage" if domain == "unit" else "acceptance/.coverage"
+                    )
+                    shutil.copyfile(data, export_data)
+                    export(checkout, export_data, domain, shard, output / f"{domain}-{index}.json")
             imported = load(root, output)
             expected = expected_nodes()
             self.assertEqual(selection(local, "src/example.py", 2, 2), expected)
@@ -873,7 +945,7 @@ class SharedCoverageTest(unittest.TestCase):
                 check=True,
             )
 
-            fragments(root, root / "coverage")
+            fragments(root, root / "coverage", skip=(("unit", 1),))
             config = root / "tmp/mutation-config"
             env_file = root / "github-env"
             configured = coverage_cli(
@@ -1026,6 +1098,7 @@ class SharedCoverageTest(unittest.TestCase):
             fragments(root, root / "coverage")
             mapping = load(root, root / "coverage")
             cli_output = root / "exported.json"
+            checkout = root / "producer-checkouts/coverage/unit-1"
             exported = subprocess.run(  # noqa: S603 - fixed export interface and owned paths
                 [  # noqa: S607
                     "pdm",
@@ -1036,9 +1109,9 @@ class SharedCoverageTest(unittest.TestCase):
                     "export",
                     "unit",
                     "--root",
-                    str(root),
+                    str(checkout),
                     "--data",
-                    str(root / ".coverage-unit-1"),
+                    str(checkout / ".coverage"),
                     "--shard",
                     "1/4",
                     "--output",
