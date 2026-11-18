@@ -554,12 +554,10 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
             candidate_prepare, candidate_output = run_installer_source_selection(
                 repository,
                 root,
-                "workflow_call",
-                input_ref=candidate_sha,
-                input_tag="v0.0.0",
+                "workflow_dispatch",
             )
             candidate_install = install_local_git_requirement(
-                repository, "v0.0.0", "nci-sip-mcp", root / "candidate-installed"
+                repository, candidate_sha, "nci-sip-mcp", root / "candidate-installed"
             )
             self.assertEqual(candidate_install.returncode, 0, candidate_install.stderr)
             candidate_distributions, candidate_help = installed_distribution_and_help(
