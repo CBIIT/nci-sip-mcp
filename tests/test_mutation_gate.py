@@ -1,6 +1,7 @@
 """The mutation command measures assertion sensitivity without editing its caller."""
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -73,6 +74,74 @@ INSTALLED_CHILD_TEST = (
     "    imported = Path(child.stdout.strip()).resolve()\n"
     "    assert imported.is_relative_to(environment.resolve())\n"
 )
+
+
+WHEEL_CHILD_TEST = """\
+import json, os, subprocess, sys, tempfile, venv
+from pathlib import Path
+from scripts.validation.mutation_child_trace import ChildRoute, child_environment
+
+def test_wheel():
+    root = Path(__file__).resolve().parents[1]
+    with tempfile.TemporaryDirectory() as temporary:
+        work = Path(temporary).resolve()
+        wheelhouse = work / "wheels"
+        wheelhouse.mkdir()
+        clean_env = {
+            "HOME": str(work), "PATH": os.environ.get("PATH", ""),
+            "PIP_CONFIG_FILE": os.devnull, "PIP_NO_INDEX": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1", "PYTHONNOUSERSITE": "1",
+        }
+        built = subprocess.run(
+            [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
+             "--no-index", "--wheel-dir", str(wheelhouse), str(root)],
+            env=clean_env, capture_output=True, text=True, check=False,
+        )
+        assert built.returncode == 0, built.stdout + built.stderr
+        wheels = list(wheelhouse.glob("*.whl"))
+        assert len(wheels) == 1, wheels
+        environment = work / "venv"
+        venv.EnvBuilder(with_pip=True, system_site_packages=False).create(environment)
+        interpreter = environment / "bin/python"
+        installed = subprocess.run(
+            [str(interpreter), "-m", "pip", "install", "--no-deps", "--no-index",
+             "--no-cache-dir", str(wheels[0])],
+            env=clean_env, capture_output=True, text=True, check=False,
+        )
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        route = ChildRoute("src/wheel_sample/cli.py", "wheel_sample.cli", environment)
+        child = subprocess.run(
+            [str(interpreter), "-B", "-m", "wheel_sample.cli"],
+            cwd=work, env=child_environment(route), capture_output=True, text=True, check=False,
+        )
+        assert child.returncode == 0, child.stdout + child.stderr
+        result = json.loads(child.stdout)
+        assert (result["name"], result["spec"], result["value"]) == (
+            "__main__", "wheel_sample.cli", 1
+        )
+        assert Path(result["file"]).resolve().is_relative_to(environment)
+        assert str(root / "src") not in result["path"]
+"""
+
+
+def wheel_project(root):
+    project(root, "pass\n", unit="pass")
+    package = root / "src/wheel_sample"
+    package.mkdir()
+    (package / "__init__.py").write_text("READY = True\n")
+    (package / "cli.py").write_text(
+        "import json, sys\n"
+        "VALUE = 1\n"
+        "print(json.dumps({'name': __name__, 'spec': __spec__.name, 'value': VALUE, "
+        "'file': __file__, 'path': sys.path}))\n"
+    )
+    (root / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["pdm-backend"]\nbuild-backend = "pdm.backend"\n'
+        '[project]\nname = "wheel-sample"\nversion = "1.0"\n'
+        '[tool.pdm.build]\nincludes = ["src/wheel_sample"]\n'
+        '[tool.pytest.ini_options]\npythonpath = ["src"]\n'
+    )
+    (root / "tests/test_installed_wheel.py").write_text(WHEEL_CHILD_TEST)
 
 
 def command(root, *args):
@@ -396,6 +465,27 @@ class MutationOperatorsTest(unittest.TestCase):
 
 
 class MutationExecutionTest(unittest.TestCase):
+    def test_main_module_route_records_the_executed_installed_wheel(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            wheel_project(root)
+            outcome, data = run_domain(
+                root, "unit", ["tests/test_installed_wheel.py"], 90, baseline=True
+            )
+            self.assertEqual(outcome["outcome"], "SURVIVED", outcome["log"])
+            _, traces = child_trace.read_traces(data)
+            self.assertEqual(len(traces), 1)
+            trace = traces[0]
+            self.assertEqual(trace.outcome, "reached")
+            self.assertEqual(trace.node, "tests/test_installed_wheel.py::test_wheel")
+            self.assertEqual((trace.module, trace.test_phase), ("wheel_sample.cli", "run"))
+            self.assertEqual(
+                trace.source_digest, hashlib.sha256((root / trace.source).read_bytes()).hexdigest()
+            )
+            self.assertTrue(Path(trace.path).is_relative_to(Path(trace.environment)))
+            self.assertEqual(Path(trace.path).parts[-2:], ("wheel_sample", "cli.py"))
+            self.assertIn(2, trace.lines)
+
     def test_child_attribution_uses_the_same_reaching_and_failing_node(self):
         cases = (
             ("passing child", False, "", "SURVIVED", None),
