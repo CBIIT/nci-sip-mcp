@@ -9,15 +9,15 @@ This value is separate from the per-call correlation ID.
 Run the utility for the distribution you installed:
 
 ```bash
-python -m nci_si_mcp.traffic_identity generate
-python -m nci_si_mcp.traffic_identity show
+pdm run python -m nci_si_mcp.traffic_identity generate
+pdm run python -m nci_si_mcp.traffic_identity show
 ```
 
 The standalone acceptance distribution has its own identity and version:
 
 ```bash
-python -m nci_si_acceptance.traffic_identity generate
-python -m nci_si_acceptance.traffic_identity show
+pdm run --working-dir acceptance python -m nci_si_acceptance.traffic_identity generate
+pdm run --working-dir acceptance python -m nci_si_acceptance.traffic_identity show
 ```
 
 `generate` prints one UUID4 value as 32 lowercase hexadecimal characters. It does not write
