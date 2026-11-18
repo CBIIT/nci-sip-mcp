@@ -33,12 +33,16 @@ KNOWN_BODY_BYTES = 5
 OBSERVED_FAILURE_COUNT = 2
 FAILED_WORKER_EXIT = 7
 LEGACY_WORKER_GRACE_SECONDS = 10.0
+LEGACY_WORKER_COUNT = 2
 CLEANUP_WORKER = (
     "import sys\nfrom pathlib import Path\n"
     "print('ready', flush=True)\n"
     "line = sys.stdin.buffer.readline()\n"
     "if line:\n"
     "    Path(sys.argv[1]).write_bytes(line)\n"
+)
+STALL_BEFORE_READY = (
+    "import sys\nprint('started', file=sys.stderr, flush=True)\nsys.stdin.buffer.read()"
 )
 
 
@@ -99,29 +103,71 @@ def supervisor(directory):
     return importlib.import_module(name).SupervisedRun.create(authorization(), directory)
 
 
+def child_stream_state(child):
+    return tuple(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
+
+
+def kill_pending_legacy_worker(child):
+    try:
+        if child.poll() is None:
+            child.kill()
+    except ProcessLookupError:
+        pass
+    except BaseException as error:  # noqa: BLE001 - return teardown failures without masking setup.
+        return [error]
+    return []
+
+
+def close_legacy_worker_streams(child):
+    errors = []
+    for stream in (child.stdin, child.stdout, child.stderr):
+        try:
+            if stream is not None and not stream.closed:
+                stream.close()
+        except BaseException as error:  # noqa: BLE001 - retain cleanup failures for the test.
+            errors.append(error)
+    return errors
+
+
 def close_and_reap_worker(child, wait):
-    if child.stdin is not None and not child.stdin.closed:
-        child.stdin.close()
-    if child.poll() is None:
-        child.kill()
+    errors = kill_pending_legacy_worker(child)
     try:
         wait(timeout=3)
     except subprocess.TimeoutExpired:
-        child.kill()
-        wait(timeout=3)
+        errors.extend(kill_pending_legacy_worker(child))
+        try:
+            wait(timeout=3)
+        except BaseException as error:  # noqa: BLE001 - retain bounded reap failures.
+            errors.append(error)
+    except BaseException as error:  # noqa: BLE001 - retain bounded reap failures.
+        errors.append(error)
+    errors.extend(close_legacy_worker_streams(child))
+    return errors
 
 
-def finish_legacy_workers(release, helper, children):
-    release.set()
+def join_legacy_helper(helper, children):
+    errors = []
     helper.join(request_supervision.JOIN_SECONDS)
     if helper.is_alive():
         for child, _wait in children:
-            if child.poll() is None:
-                child.kill()
+            errors.extend(kill_pending_legacy_worker(child))
         helper.join(request_supervision.JOIN_SECONDS)
+    if helper.is_alive():
+        errors.append(TimeoutError("owned legacy helper did not stop"))
+    return errors
+
+
+def finish_legacy_workers(release, helper, children):
+    errors = []
+    release.set()
+    if helper is not None and helper.ident is not None:
+        try:
+            errors.extend(join_legacy_helper(helper, children))
+        except BaseException as error:  # noqa: BLE001 - retain helper teardown failures.
+            errors.append(error)
     for child, wait in children:
-        close_and_reap_worker(child, wait)
-    return not helper.is_alive()
+        errors.extend(close_and_reap_worker(child, wait))
+    return errors
 
 
 def finish_first_worker_wait(actual_wait, clock, timeout=None):
@@ -173,45 +219,52 @@ def run_legacy_cleanup(owner, first, second):
     return None
 
 
-def assert_worker_ready(child):
-    assert child.stdin is not None and child.stdout is not None
-    assert select.select([child.stdout], [], [], 3)[0] == [child.stdout]
-    assert child.stdout.readline() == b"ready\n"
-    assert child.poll() is None
+def run_legacy_cleanup_with_stream_snapshot(owner, first, second):
+    try:
+        failure = run_legacy_cleanup(owner, first, second)
+    finally:
+        supervisor_streams_closed = (
+            child_stream_state(first),
+            child_stream_state(second),
+        )
+    return failure, supervisor_streams_closed
 
 
-def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypatch):
-    owner = supervisor(tmp_path)
-    clock = [time.monotonic()]
-    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
-    first_marker = tmp_path / "first-worker"
-    marker = tmp_path / "second-worker-completed"
-    with (
-        subprocess.Popen(  # noqa: S603 - fixed owned interpreter and synthetic stdin-only worker.
+def restore_legacy_waits(monkeypatch, first, second, actual_first_wait, actual_second_wait):
+    if first is not None and actual_first_wait is not None:
+        monkeypatch.setattr(first, "wait", actual_first_wait)
+    if second is not None and actual_second_wait is not None:
+        monkeypatch.setattr(second, "wait", actual_second_wait)
+
+
+def run_legacy_worker_scenario(owner, first_marker, marker, clock, monkeypatch):
+    children = []
+    release, wait_entered = threading.Event(), threading.Event()
+    helper_done, release_sent = threading.Event(), threading.Event()
+    helper_errors, waits = [], []
+    helper = None
+    first = second = None
+    actual_first_wait = actual_second_wait = None
+    startup_failure = failure = supervisor_streams_closed = None
+    try:
+        first = subprocess.Popen(  # noqa: S603 - fixed owned interpreter and synthetic worker.
             [sys.executable, "-I", "-c", CLEANUP_WORKER, str(first_marker)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-        ) as first,
-        subprocess.Popen(  # noqa: S603 - same fixed program, distinct owned worker.
+        )
+        actual_first_wait = first.wait
+        children.append((first, actual_first_wait))
+        second = subprocess.Popen(  # noqa: S603 - same program, distinct owned worker.
             [sys.executable, "-I", "-c", CLEANUP_WORKER, str(marker)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-        ) as second,
-    ):
+        )
+        actual_second_wait = second.wait
+        children.append((second, actual_second_wait))
         assert_worker_ready(first)
         assert_worker_ready(second)
-        actual_first_wait, actual_second_wait = first.wait, second.wait
-        wait_entered, release, helper_done, release_sent = (
-            threading.Event(),
-            threading.Event(),
-            threading.Event(),
-            threading.Event(),
-        )
-        helper_errors = []
-        waits = []
-
         finish_first = partial(finish_first_worker_wait, actual_first_wait, clock)
         public_second_wait = partial(
             wait_for_legacy_worker,
@@ -230,25 +283,118 @@ def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypa
             name="release-legacy-worker",
         )
         helper.start()
-        try:
-            failure = run_legacy_cleanup(owner, first, second)
-        finally:
-            helpers_clean = finish_legacy_workers(
-                release,
-                helper,
-                ((first, actual_first_wait), (second, actual_second_wait)),
+        failure, supervisor_streams_closed = run_legacy_cleanup_with_stream_snapshot(
+            owner, first, second
+        )
+    except BaseException as error:  # noqa: BLE001 - retain setup failures for bounded cleanup.
+        startup_failure = error
+    finally:
+        cleanup_errors = finish_legacy_workers(release, helper, children)
+        restore_legacy_waits(monkeypatch, first, second, actual_first_wait, actual_second_wait)
+    if startup_failure is not None:
+        teardown_errors = [*cleanup_errors, *helper_errors]
+        if teardown_errors:
+            raise startup_failure from BaseExceptionGroup(
+                "Owned test teardown failed", teardown_errors
             )
-            monkeypatch.setattr(first, "wait", actual_first_wait)
-            monkeypatch.setattr(second, "wait", actual_second_wait)
-    assert helpers_clean
+        raise startup_failure
+    return (
+        (failure, supervisor_streams_closed, cleanup_errors),
+        (helper, helper_done, helper_errors, wait_entered, waits, release_sent),
+        (first, second),
+    )
+
+
+def assert_worker_ready(child, timeout=3):
+    assert child.stdin is not None and child.stdout is not None
+    assert select.select([child.stdout], [], [], timeout)[0] == [child.stdout]
+    assert child.stdout.readline() == b"ready\n"
+    assert child.poll() is None
+
+
+def assert_worker_stalled_before_ready(child):
+    assert child.stderr is not None
+    assert select.select([child.stderr], [], [], 3)[0] == [child.stderr]
+    assert child.stderr.readline() == b"started\n"
+    assert child.poll() is None
+    assert_worker_ready(child, timeout=0)
+
+
+@pytest.mark.parametrize("failure_point", ("readiness", "helper-start"))
+def test_legacy_fixture_setup_failures_stop_all_workers(tmp_path, monkeypatch, failure_point):
+    """Fixture-failure cleanup assurance; neither setup fault is a product behavior red."""
+    children = []
+    release = threading.Event()
+    helper_done, release_sent = threading.Event(), threading.Event()
+    helper_errors = []
+    helper = None
+    startup_error = RuntimeError("owned legacy helper-start failure")
+    failure = None
+    try:
+        script = STALL_BEFORE_READY if failure_point == "readiness" else CLEANUP_WORKER
+        first = subprocess.Popen(  # noqa: S603 - fixed owned interpreter and fixture worker.
+            [sys.executable, "-I", "-c", script, str(tmp_path / "first-worker")],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        children.append((first, first.wait))
+        second = subprocess.Popen(  # noqa: S603 - same owned interpreter and worker program.
+            [sys.executable, "-I", "-c", CLEANUP_WORKER, str(tmp_path / "second-worker")],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        children.append((second, second.wait))
+        if failure_point == "readiness":
+            assert_worker_stalled_before_ready(first)
+        else:
+            assert_worker_ready(first)
+            assert_worker_ready(second)
+            helper = threading.Thread(
+                target=release_legacy_worker,
+                args=(second, release, release_sent, helper_done, helper_errors),
+                name="failed-start-legacy-worker",
+            )
+
+            def refuse_start():
+                raise startup_error
+
+            monkeypatch.setattr(helper, "start", refuse_start)
+            helper.start()
+    except BaseException as error:  # noqa: BLE001 - preserve startup failure through cleanup.
+        failure = error
+    finally:
+        cleanup_errors = finish_legacy_workers(release, helper, children)
+    if failure_point == "readiness":
+        assert isinstance(failure, AssertionError)
+    else:
+        assert failure is startup_error
+        assert helper is not None and helper.ident is None and not helper.is_alive()
+    assert cleanup_errors == []
+    assert len(children) == LEGACY_WORKER_COUNT
+    assert all(child.returncode is not None for child, _wait in children)
+    assert all(child_stream_state(child) == (True, True, True) for child, _wait in children)
+    assert helper_errors == []
+
+
+def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    clock = [time.monotonic()]
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    first_marker = tmp_path / "first-worker"
+    marker = tmp_path / "second-worker-completed"
+    (
+        (failure, supervisor_streams_closed, cleanup_errors),
+        (helper, helper_done, helper_errors, wait_entered, waits, release_sent),
+        (first, second),
+    ) = run_legacy_worker_scenario(owner, first_marker, marker, clock, monkeypatch)
+    assert cleanup_errors == []
+    assert helper is not None and helper.ident is not None and not helper.is_alive()
     assert helper_done.is_set() and not helper.is_alive()
     assert helper_errors == []
     assert first.returncode is not None and second.returncode is not None
-    assert all(
-        stream.closed
-        for child in (first, second)
-        for stream in (child.stdin, child.stdout, child.stderr)
-    )
+    assert all(child_stream_state(child) == (True, True, True) for child in (first, second))
     assert wait_entered.is_set() and waits
     pending, remaining, timeout = waits[0]
     assert pending and remaining == 0
@@ -262,6 +408,7 @@ def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypa
     summary = owner.snapshot()
     assert (summary["state"], summary["observationComplete"]) == ("completed", True)
     assert owner.cleanup_deadline().remaining() == 0
+    assert supervisor_streams_closed == ((True, True, True), (True, True, True))
 
 
 def test_initial_summary_precedes_admission(tmp_path):
