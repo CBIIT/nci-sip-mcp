@@ -2254,7 +2254,7 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                 runner.baseline(root, 30)
             project(root, "def answer():\n    return True\n")
             mapping = runner.baseline(root, 30)
-            self.assertEqual(set(mapping), {"unit", "selftest", "fixture"})
+            self.assertEqual(set(mapping.lines), {"unit", "selftest", "fixture"})
             self.assertEqual(
                 runner.selection(mapping, "src/example.py", 2, 2),
                 {"unit": ["tests/test_example.py::test_value"]},
@@ -2325,5 +2325,5 @@ class MutationEvidenceContractsTest(unittest.TestCase):
             result = gate.measure(root, selected, 30)
             self.assertEqual((result["outcome"], result["domain"]), ("KILLED", "unit"))
             self.assertEqual([row["domain"] for row in result["domains"]], ["unit"])
-            self.assertNotIn("confirmation", result)
+            self.assertEqual(result["confirmation"], "unreached")
             self.assertEqual(gate.measure(root, {}, 30), {"outcome": "NO_TESTS", "domains": []})

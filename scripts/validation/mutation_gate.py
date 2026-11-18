@@ -17,8 +17,16 @@ from time import monotonic
 
 from scripts.operator_files import write_json
 from scripts.processes import exit_on_sigterm
+from scripts.validation.mutation_child_trace import (
+    ChildTrace,
+    ChildTraceRecord,
+    child_trace_record,
+    parse_trace,
+)
 from scripts.validation.mutation_run import (
+    CoverageEvidence,
     baseline,
+    child_selection,
     environment,
     program,
     run_domain,
@@ -45,24 +53,13 @@ def execute_job(path: Path, index: int) -> None:
     item = jobs["mutants"][index]
     source = jobs["sources"][item["file"]].encode()
     mutant = Mutant(
-        **{key: value for key, value in item.items() if key != "selected"},
+        **{key: value for key, value in item.items() if key not in {"selected", "child_routes"}},
         before=source[item["start"] : item["end"]].decode(),
     )
+    child_routes = tuple(parse_trace(route) for route in item.get("child_routes", []))
     restored = False
     try:
-        with snapshot(Path(jobs["root"])) as scratch:
-            target = scratch / mutant.file
-            original = target.read_bytes()
-            try:
-                target.write_bytes(
-                    original[: mutant.start] + mutant.after.encode() + original[mutant.end :]
-                )
-                result = measure(scratch, item["selected"], jobs["timeout"], mutated_file=target)
-            finally:
-                target.write_bytes(original)
-                if digest(target.read_bytes().hex()) != digest(original.hex()):
-                    raise ValueError(f"Scratch restoration failed: {mutant.file}")
-                restored = True
+        result, restored = mutate_and_measure(jobs, item, mutant, child_routes)
     except (OSError, subprocess.SubprocessError) as error:
         result = {"outcome": "INFRA", "message": str(error), "domains": []}
     row = {
@@ -77,12 +74,53 @@ def execute_job(path: Path, index: int) -> None:
     write_json(path.parent / f"result-{index}.json", row)
 
 
+def mutate_and_measure(
+    jobs: dict,
+    item: dict,
+    mutant: Mutant,
+    child_routes: tuple[ChildTrace, ...],
+) -> tuple[dict, bool]:
+    restored = False
+    try:
+        with snapshot(Path(jobs["root"])) as scratch:
+            target = scratch / mutant.file
+            original = target.read_bytes()
+            try:
+                target.write_bytes(
+                    original[: mutant.start] + mutant.after.encode() + original[mutant.end :]
+                )
+                result = measure(
+                    scratch,
+                    item["selected"],
+                    jobs["timeout"],
+                    mutated_file=target,
+                    mutated_span=(mutant.line, mutant.end_line),
+                    expected_children=child_routes,
+                )
+            except (OSError, subprocess.SubprocessError) as error:
+                result = {"outcome": "INFRA", "message": str(error), "domains": []}
+            finally:
+                target.write_bytes(original)
+                if digest(target.read_bytes().hex()) != digest(original.hex()):
+                    raise ValueError(f"Scratch restoration failed: {mutant.file}")
+                restored = True
+    except (OSError, subprocess.SubprocessError) as error:
+        return {"outcome": "INFRA", "message": str(error), "domains": []}, restored
+    return result, restored
+
+
 def measurement_confirms_fixture(domain: str, outcome: str) -> bool:
     return domain == "fixture" and outcome in {"KILLED", "SURVIVED"}
 
 
 def measure(
-    scratch: Path, selected: dict, timeout: float, *, mutated_file: Path | None = None
+    scratch: Path,
+    selected: dict,
+    timeout: float,
+    *,
+    mutated_file: Path | None = None,
+    mutated_span: tuple[int, int] | None = None,
+    expected_children: tuple[ChildTrace, ...] = (),
 ) -> dict:
     if not selected:
         return {"outcome": "NO_TESTS", "domains": []}
@@ -91,10 +129,17 @@ def measure(
     last_survivor = {}
     confirmation = "unreached"
     for domain, tests in selected.items():
-        result, _ = run_domain(scratch, domain, tests, timeout, mutated_file=mutated_file)
-        timings.append({key: result[key] for key in ("domain", "outcome", "elapsed_seconds")})
-        if measurement_confirms_fixture(domain, result["outcome"]):
-            confirmation = "fixture"
+        result, timing, confirmation = measure_domain(
+            scratch,
+            domain,
+            tests,
+            timeout,
+            mutated_file,
+            mutated_span,
+            tuple(route for route in expected_children if route.domain == domain),
+            confirmation,
+        )
+        timings.append(timing)
         if result["outcome"] == "NO_TESTS":
             continue
         if result["outcome"] != "SURVIVED":
@@ -102,6 +147,31 @@ def measure(
         last_survivor = result
     result = {**result, **last_survivor}
     return {**result, "confirmation": confirmation, "domains": timings}
+
+
+def measure_domain(
+    scratch: Path,
+    domain: str,
+    tests: list[str],
+    timeout: float,
+    mutated_file: Path | None,
+    mutated_span: tuple[int, int] | None,
+    expected_children: tuple[ChildTrace, ...],
+    confirmation: str,
+) -> tuple[dict, dict, str]:
+    result, _ = run_domain(
+        scratch,
+        domain,
+        tests,
+        timeout,
+        mutated_file=mutated_file,
+        mutated_span=mutated_span,
+        expected_children=expected_children,
+    )
+    timing = {key: result[key] for key in ("domain", "outcome", "elapsed_seconds")}
+    if measurement_confirms_fixture(domain, result["outcome"]):
+        confirmation = "fixture"
+    return result, timing, confirmation
 
 
 def collect(root: Path, selected: dict) -> tuple[list[Mutant], list[dict]]:
@@ -118,7 +188,9 @@ def collect(root: Path, selected: dict) -> tuple[list[Mutant], list[dict]]:
     return mutants, diagnostics
 
 
-def manifest_data(root: Path, mutants: list[Mutant], mapping: dict, timeout: float) -> dict:
+def manifest_data(
+    root: Path, mutants: list[Mutant], mapping: dict | CoverageEvidence, timeout: float
+) -> dict:
     return {
         "root": str(root),
         "sources": {
@@ -127,7 +199,8 @@ def manifest_data(root: Path, mutants: list[Mutant], mapping: dict, timeout: flo
         "mutants": [
             {
                 **{key: value for key, value in asdict(mutant).items() if key != "before"},
-                "selected": selection(mapping, mutant.file, mutant.line, mutant.end_line),
+                "selected": mutant_selection(mapping, mutant),
+                "child_routes": child_route_records(mapping, mutant),
             }
             for mutant in mutants
         ],
@@ -135,7 +208,27 @@ def manifest_data(root: Path, mutants: list[Mutant], mapping: dict, timeout: flo
     }
 
 
-def schedule(root: Path, mutants: list[Mutant], mapping: dict, args) -> list[dict]:
+def child_route_records(mapping: dict | CoverageEvidence, mutant: Mutant) -> list[ChildTraceRecord]:
+    if not isinstance(mapping, CoverageEvidence):
+        return []
+    return [
+        child_trace_record(trace)
+        for trace in child_selection(mapping, mutant.file, mutant.line, mutant.end_line)
+    ]
+
+
+def mutant_selection(mapping: dict | CoverageEvidence, mutant: Mutant) -> dict[str, list[str]]:
+    selected = selection(mapping, mutant.file, mutant.line, mutant.end_line)
+    if not isinstance(mapping, CoverageEvidence):
+        return selected
+    for trace in child_selection(mapping, mutant.file, mutant.line, mutant.end_line):
+        selected.setdefault(trace.domain, []).append(trace.node)
+    return {domain: sorted(set(nodes)) for domain, nodes in selected.items()}
+
+
+def schedule(
+    root: Path, mutants: list[Mutant], mapping: dict | CoverageEvidence, args
+) -> list[dict]:
     destination = root / "tmp/mutation-runs"
     destination.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="run-", dir=destination)).resolve()
@@ -445,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
-def imported_coverage(root: Path, directory: Path | None) -> dict | None:
+def imported_coverage(root: Path, directory: Path | None) -> CoverageEvidence | None:
     if directory is None:
         return None
     from scripts.validation.mutation_coverage import load  # noqa: PLC0415 - optional CI input
@@ -453,7 +546,7 @@ def imported_coverage(root: Path, directory: Path | None) -> dict | None:
     return load(root, directory)
 
 
-def resolve_coverage(root: Path, mapping: dict | None, args) -> dict:
+def resolve_coverage(root: Path, mapping: CoverageEvidence | None, args) -> CoverageEvidence:
     if mapping is not None:
         return mapping
     return baseline(root, args.baseline_timeout, timings=args.baseline_domains)

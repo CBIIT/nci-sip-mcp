@@ -322,7 +322,9 @@ jobs:
       # Includes the recorded retrieval sample and activation gate with a test-only hashing
       # calibration. It tests execution and arithmetic, not real-model retrieval quality.
       - name: Configure shared unit coverage
-        run: pdm run python -m scripts.validation.mutation_coverage configure unit --output tmp/mutation-config
+        env:
+          UNIT_SHARD: ${{ matrix.shard }}
+        run: pdm run python -m scripts.validation.mutation_coverage configure unit --shard "$UNIT_SHARD" --output tmp/mutation-config
       - name: Test, including recorded retrieval evaluation
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -418,7 +420,7 @@ jobs:
       # comparison below. Any other status (usage error, interruption, a crash) or a missing
       # report is a run that did not happen.
       - name: Configure shared fixture coverage
-        run: pdm run python -m scripts.validation.mutation_coverage configure fixture --output tmp/mutation-config
+        run: pdm run python -m scripts.validation.mutation_coverage configure fixture --shard 1/1 --output tmp/mutation-config
       - name: Run the suite against the fixtures
         id: fixture
         env:
@@ -550,7 +552,9 @@ jobs:
       - uses: $/.github/actions/setup
       # The minimum applies to the shards together, in the coverage job.
       - name: Configure shared selftest coverage
-        run: pdm run python -m scripts.validation.mutation_coverage configure selftest --output tmp/mutation-config
+        env:
+          SELFTEST_SHARD: ${{ matrix.shard }}
+        run: pdm run python -m scripts.validation.mutation_coverage configure selftest --shard "$SELFTEST_SHARD" --output tmp/mutation-config
       - run: pdm run acceptance-selftest -p scripts.validation.mutation_probe --cov-config=../tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= --junitxml=tmp/test-results/selftest.xml
         env:
           PYTHONPATH: ${{ github.workspace }}

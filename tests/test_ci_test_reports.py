@@ -116,7 +116,8 @@ class TestReportWorkflowTest(unittest.TestCase):
                     {"uses": "$/.github/actions/setup"},
                     {
                         "name": "Configure shared unit coverage",
-                        "run": "pdm run python -m scripts.validation.mutation_coverage configure unit --output tmp/mutation-config",
+                        "env": {"UNIT_SHARD": "${{ matrix.shard }}"},
+                        "run": 'pdm run python -m scripts.validation.mutation_coverage configure unit --shard "$UNIT_SHARD" --output tmp/mutation-config',
                     },
                     {
                         "name": "Test, including recorded retrieval evaluation",

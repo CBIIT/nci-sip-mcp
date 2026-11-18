@@ -111,6 +111,22 @@ class AcceptanceGateWorkflowTest(unittest.TestCase):
             [
                 entry
                 for entry in job["steps"]
+                if entry.get("name") == "Configure shared fixture coverage"
+            ],
+            [
+                {
+                    "name": "Configure shared fixture coverage",
+                    "run": (
+                        "pdm run python -m scripts.validation.mutation_coverage configure "
+                        "fixture --shard 1/1 --output tmp/mutation-config"
+                    ),
+                }
+            ],
+        )
+        self.assertEqual(
+            [
+                entry
+                for entry in job["steps"]
                 if entry.get("name") == "Export shared fixture coverage"
             ],
             [

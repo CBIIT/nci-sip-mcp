@@ -103,6 +103,11 @@ class CoveragePolicyTest(unittest.TestCase):
             [step for step in jobs["selftest"]["steps"] if "SELFTEST_SHARD" in step.get("env", {})],
             [
                 {
+                    "name": "Configure shared selftest coverage",
+                    "env": {"SELFTEST_SHARD": "${{ matrix.shard }}"},
+                    "run": 'pdm run python -m scripts.validation.mutation_coverage configure selftest --shard "$SELFTEST_SHARD" --output tmp/mutation-config',
+                },
+                {
                     "run": "pdm run acceptance-selftest -p scripts.validation.mutation_probe --cov-config=../tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= "
                     "--junitxml=tmp/test-results/selftest.xml",
                     "env": {

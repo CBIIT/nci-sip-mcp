@@ -254,6 +254,8 @@ ignore_names = [
     "handle_starttag", "handle_endtag", "handle_data",
     "handle_entityref", "handle_charref", "handle_comment", "handle_decl",
     "registry", "generatedAt", "sourceDistribution", "conceptCode", "valueMeaning",
+    # Installed child processes invoke these through generated sitecustomize.py.
+    "child_environment", "install_child_trace",
     "workflowStatus", "registrationStatus", "dateCreated", "dateModified", "permissibleValues",
     "valueDomain", "conceptAssociations", "alternateNames", "classificationSchemes", "dataElement",
     "conceptReference", "unresolvedReason", "objectClass", "dataElementConcept",
