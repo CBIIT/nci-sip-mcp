@@ -21,7 +21,14 @@ from scripts.validation.mutation_gate import manifest_data, schedule
 from scripts.validation.mutation_run import baseline, environment, run_domain, selection
 from scripts.validation.mutation_source import candidates
 
-from test_mutation_gate import INSTALLED_CHILD_TEST, ROOT, cli, project
+from test_mutation_gate import (
+    INSTALLED_CHILD_TEST,
+    ROOT,
+    cli,
+    composed_wheel_child_test,
+    project,
+    wheel_project,
+)
 
 TEST_BATCH = f"local-{'a' * 32}"
 
@@ -31,8 +38,24 @@ def expected_producer_id(batch, domain, shard):
     return hashlib.sha256(value).hexdigest()[:32]
 
 
+def wheel_candidate(root, name, line, operator):
+    mutants, _ = candidates(name, (root / name).read_bytes())
+    selected = [item for item in mutants if item.line == line and item.operator == operator]
+    if len(selected) != 1:
+        raise ValueError(f"Expected one wheel candidate at {name}:{line}: {operator}")
+    target = selected[0]
+    count = 10007
+    index = int(hashlib.sha256(json.dumps(target.key(), sort_keys=True).encode()).hexdigest(), 16)
+    index = index % count + 1
+    return target, f"{index}/{count}"
+
+
 def repository(root):
     project(root, "def answer():\n    return True\n")
+    commit_repository(root)
+
+
+def commit_repository(root):
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)  # noqa: S607
     subprocess.run(["git", "add", "."], cwd=root, check=True)  # noqa: S607
     subprocess.run(
@@ -48,6 +71,59 @@ def repository(root):
         ],
         cwd=root,
         check=True,
+    )
+
+
+def wheel_verdict_project(root, child_test):
+    wheel_project(root)
+    (root / "src/example.py").write_text("def touch():\n    return True\n")
+    (root / "tests/test_example.py").write_text(
+        "import example\ndef test_value():\n    assert example.touch()\n"
+    )
+    module = root / "src/wheel_sample/cli.py"
+    with module.open("a") as source:
+        source.write(
+            "import socket\n"
+            "try:\n    socket.socket().connect(('127.0.0.1', 0))\n"
+            "except OSError:\n    pass\n"
+            "def never_called():\n    return 17\n"
+        )
+    (root / "tests/test_installed_wheel.py").write_text(child_test)
+    commit_repository(root)
+
+
+def stale_wheel_child_test():
+    route = (
+        '        route = ChildRoute("src/wheel_sample/cli.py", "wheel_sample.cli", environment)\n'
+    )
+    stale = (
+        '        if "return False" in (root / "src/wheel_sample/cli.py").read_text():\n'
+        '            probe = subprocess.run([str(interpreter), "-c", '
+        '"import sysconfig; print(sysconfig.get_paths()[\\"purelib\\"])"],\n'
+        "                                   env=clean_env, capture_output=True, "
+        "text=True, check=True)\n"
+        '            installed_source = Path(probe.stdout.strip()) / "wheel_sample/cli.py"\n'
+        "            original = installed_source.read_bytes()\n"
+        '            stale_source = original.replace(b"return False", b"return True ")\n'
+        "            assert stale_source != original and len(stale_source) == len(original)\n"
+        "            stat = installed_source.stat()\n"
+        "            cache = Path(importlib.util.cache_from_source(str(installed_source)))\n"
+        "            cache.parent.mkdir(parents=True, exist_ok=True)\n"
+        '            code = compile(stale_source, str(installed_source), "exec", '
+        "dont_inherit=True, optimize=0)\n"
+        "            cache.write_bytes(importlib._bootstrap_external._code_to_timestamp_pyc(\n"
+        "                code, int(stat.st_mtime), len(original)))\n"
+        "            assert installed_source.read_bytes() == original\n"
+        "            assert installed_source.stat().st_mtime_ns == stat.st_mtime_ns\n"
+    )
+    return (
+        composed_wheel_child_test()
+        .replace(
+            "import json, os, subprocess, sys, tempfile, venv\n",
+            "import importlib.util, importlib._bootstrap_external, "
+            "json, os, subprocess, sys, tempfile, venv\n",
+        )
+        .replace(route, stale + route)
     )
 
 
@@ -318,6 +394,98 @@ class SharedCoverageTest(unittest.TestCase):
         environment_patch.start()
         self.addCleanup(environment_patch.stop)
         os.environ.pop("GITHUB_ENV", None)
+
+    def imported_wheel_coverage(self, root):
+        output = root / "coverage"
+        fragments(root, output, skip=(("unit", 1),))
+        config = root / "tmp/mutation-config"
+        env_file = root / "github-env"
+        configured = coverage_cli(
+            "configure",
+            "unit",
+            "--root",
+            str(root),
+            "--shard",
+            "1/4",
+            "--output",
+            str(config),
+            env={**os.environ, "GITHUB_ENV": str(env_file)},
+        )
+        self.assertEqual(configured.returncode, 0, configured.stdout + configured.stderr)
+        trace_env = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
+        produced = produce(
+            root,
+            config / ".coveragerc",
+            "tests/test_example.py",
+            "tests/test_installed_wheel.py",
+            trace_environment=trace_env,
+        )
+        self.assertEqual(produced.returncode, 0, produced.stdout + produced.stderr)
+        export(root, root / ".coverage", "unit", "1/4", output / "unit-1.json")
+        return output
+
+    def test_real_wheel_mutant_outcomes_match_local_and_imported_coverage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            wheel_verdict_project(root, composed_wheel_child_test())
+            module = root / "src/wheel_sample/cli.py"
+            imported = self.imported_wheel_coverage(root)
+            unused_line = module.read_text().splitlines().index("    return 17") + 1
+            cases = (
+                ("src/wheel_sample/cli.py", 3, "return:False", "KILLED", 0),
+                ("src/wheel_sample/__init__.py", 1, "boolean:literal", "SURVIVED", 1),
+                ("src/wheel_sample/cli.py", unused_line, "return:False", "NO_TESTS", 1),
+            )
+            for name, line, operator, expected, exit_code in cases:
+                target, shard = wheel_candidate(root, name, line, operator)
+                allowlist = root / "wheel-allowlist.json"
+                allowlist.write_text(json.dumps([{**target.key(), "reason": "contract canary"}]))
+                for mode in ("local", "imported"):
+                    with self.subTest(outcome=expected, mode=mode):
+                        arguments = ["--paths", name, "--shard", shard, "-n", "1"]
+                        if mode == "imported":
+                            arguments += ["--coverage-dir", str(imported)]
+                        if expected == "NO_TESTS":
+                            arguments += ["--allowlist", str(allowlist)]
+                        result = cli(root, *arguments)
+                        rows = cli_mutants(result)
+                        self.assertEqual(
+                            result.returncode, exit_code, result.stdout + result.stderr
+                        )
+                        self.assertEqual(len(rows), 1, result.stdout)
+                        self.assertEqual(
+                            (
+                                rows[0]["file"],
+                                rows[0]["line"],
+                                rows[0]["operator"],
+                                rows[0]["outcome"],
+                            ),
+                            (name, line, operator, expected),
+                        )
+                        if expected == "KILLED":
+                            self.assertEqual(
+                                rows[0]["node"], "tests/test_installed_wheel.py::test_wheel"
+                            )
+                            self.assertEqual(rows[0]["kind"], "assertion")
+
+    def test_real_wheel_stale_bytecode_is_infrastructure_in_both_coverage_modes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            wheel_verdict_project(root, stale_wheel_child_test())
+            imported = self.imported_wheel_coverage(root)
+            name = "src/wheel_sample/cli.py"
+            _, shard = wheel_candidate(root, name, 3, "return:False")
+            for mode in ("local", "imported"):
+                with self.subTest(mode=mode):
+                    arguments = ["--paths", name, "--shard", shard, "-n", "1"]
+                    if mode == "imported":
+                        arguments += ["--coverage-dir", str(imported)]
+                    result = cli(root, *arguments)
+                    rows = cli_mutants(result)
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertEqual(len(rows), 1, result.stdout)
+                    self.assertEqual(rows[0]["outcome"], "INFRA")
+                    self.assertIn("Loaded bytecode does not match", rows[0]["message"])
 
     def test_configure_binds_producer_to_the_external_batch_and_slot(self):
         for batch in (TEST_BATCH, "gha-123-456-7"):

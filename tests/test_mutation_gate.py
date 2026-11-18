@@ -131,7 +131,8 @@ def wheel_project(root):
     (package / "__init__.py").write_text("READY = True\n")
     (package / "cli.py").write_text(
         "import json, sys\n"
-        "VALUE = 1\n"
+        "def answer():\n    return 1\n"
+        "VALUE = answer()\n"
         "print(json.dumps({'name': __name__, 'spec': __spec__.name, 'value': VALUE, "
         "'file': __file__, 'path': sys.path}))\n"
     )
@@ -142,6 +143,50 @@ def wheel_project(root):
         '[tool.pytest.ini_options]\npythonpath = ["src"]\n'
     )
     (root / "tests/test_installed_wheel.py").write_text(WHEEL_CHILD_TEST)
+
+
+def composed_wheel_child_test():
+    sentinel = (
+        "import os, socket\n"
+        "def deny(self, address):\n"
+        "    with open(os.environ['WHEEL_SENTINEL'], 'a') as log:\n"
+        "        log.write('connect denied\\n')\n"
+        "    raise OSError('blocked')\n"
+        "socket.socket.connect = deny\n"
+    )
+    route_line = (
+        '        route = ChildRoute("src/wheel_sample/cli.py", "wheel_sample.cli", environment)\n'
+    )
+    setup = route_line + (
+        '        initializer = ChildRoute("src/wheel_sample/__init__.py", '
+        '"wheel_sample", environment)\n'
+        "        first = child_environment(initializer)\n"
+        "        with patch.dict(os.environ, first, clear=True):\n"
+        "            child_env = child_environment(route)\n"
+        '        hooks = work / "sentinel-hooks"\n'
+        "        hooks.mkdir()\n"
+        '        site = hooks / "sitecustomize.py"\n'
+        f"        site.write_text({sentinel!r})\n"
+        '        with site.open("a") as hook:\n'
+        '            hook.write("from _mutation_child_trace import install_child_trace\\n'
+        'install_child_trace()\\n")\n'
+        '        child_env["PYTHONPATH"] = str(hooks) + os.pathsep + child_env["PYTHONPATH"]\n'
+        '        child_env["WHEEL_SENTINEL"] = str(root / "sentinel.log")\n'
+        '        (root / "sentinel.log").unlink(missing_ok=True)\n'
+    )
+    return (
+        WHEEL_CHILD_TEST.replace(
+            "from pathlib import Path\n",
+            "from pathlib import Path\nfrom unittest.mock import patch\n",
+        )
+        .replace(route_line, setup)
+        .replace("env=child_environment(route)", "env=child_env")
+        .replace(
+            '        assert str(root / "src") not in result["path"]\n',
+            '        assert str(root / "src") not in result["path"]\n'
+            '        assert (root / "sentinel.log").read_text() == "connect denied\\n"\n',
+        )
+    )
 
 
 def command(root, *args):
@@ -487,45 +532,6 @@ class MutationExecutionTest(unittest.TestCase):
             self.assertIn(2, trace.lines)
 
     def test_one_wheel_child_reports_both_declared_routes_and_keeps_network_sentinel(self):
-        sentinel = (
-            "import os, socket\n"
-            "def deny(self, address):\n"
-            "    with open(os.environ['WHEEL_SENTINEL'], 'a') as log:\n"
-            "        log.write('connect denied\\n')\n"
-            "    raise OSError('blocked')\n"
-            "socket.socket.connect = deny\n"
-        )
-        route_line = (
-            '        route = ChildRoute("src/wheel_sample/cli.py", '
-            '"wheel_sample.cli", environment)\n'
-        )
-        setup = route_line + (
-            '        initializer = ChildRoute("src/wheel_sample/__init__.py", '
-            '"wheel_sample", environment)\n'
-            "        first = child_environment(initializer)\n"
-            "        with patch.dict(os.environ, first, clear=True):\n"
-            "            child_env = child_environment(route)\n"
-            '        hooks = work / "sentinel-hooks"\n'
-            "        hooks.mkdir()\n"
-            '        site = hooks / "sitecustomize.py"\n'
-            f"        site.write_text({sentinel!r})\n"
-            '        with site.open("a") as hook:\n'
-            '            hook.write("from _mutation_child_trace import install_child_trace\\n'
-            'install_child_trace()\\n")\n'
-            '        child_env["PYTHONPATH"] = str(hooks) + os.pathsep + child_env["PYTHONPATH"]\n'
-            '        child_env["WHEEL_SENTINEL"] = str(root / "sentinel.log")\n'
-        )
-        test = (
-            WHEEL_CHILD_TEST.replace(
-                "from pathlib import Path\n",
-                "from pathlib import Path\nfrom unittest.mock import patch\n",
-            )
-            .replace(
-                route_line,
-                setup,
-            )
-            .replace("env=child_environment(route)", "env=child_env")
-        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             wheel_project(root)
@@ -535,7 +541,7 @@ class MutationExecutionTest(unittest.TestCase):
                     "try:\n    socket.socket().connect(('127.0.0.1', 0))\n"
                     "except OSError:\n    pass\n"
                 )
-            (root / "tests/test_installed_wheel.py").write_text(test)
+            (root / "tests/test_installed_wheel.py").write_text(composed_wheel_child_test())
             outcome, data = run_domain(
                 root, "unit", ["tests/test_installed_wheel.py"], 90, baseline=True
             )
@@ -561,6 +567,25 @@ class MutationExecutionTest(unittest.TestCase):
                 )
                 self.assertTrue(Path(trace.path).is_relative_to(Path(trace.environment)))
                 self.assertTrue(trace.lines)
+
+    def test_module_spec_cannot_claim_a_different_installed_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            wheel_project(root)
+            test = WHEEL_CHILD_TEST.replace(
+                'ChildRoute("src/wheel_sample/cli.py", "wheel_sample.cli", environment)',
+                'ChildRoute("src/wheel_sample/__init__.py", "wheel_sample.cli", environment)',
+            )
+            (root / "tests/test_installed_wheel.py").write_text(test)
+            outcome, _ = run_domain(
+                root, "unit", ["tests/test_installed_wheel.py"], 90, baseline=True
+            )
+            self.assertEqual(outcome["outcome"], "INFRA", outcome)
+            self.assertEqual(
+                outcome["message"],
+                "Installed child trace is invalid: Module did not execute from the declared "
+                "installed environment",
+            )
 
     def test_child_attribution_uses_the_same_reaching_and_failing_node(self):
         cases = (
