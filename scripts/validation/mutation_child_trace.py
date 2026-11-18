@@ -454,6 +454,7 @@ def trace_matches_request(result: ChildTrace, request: dict[str, object]) -> boo
             "node",
             "source",
             "module",
+            "environment",
         )
     )
 
@@ -516,7 +517,7 @@ def trace_lines_are_valid(value: dict[str, object]) -> bool:
 
 
 def trace_outcome_is_valid(value: dict[str, object]) -> bool:
-    return value["outcome"] in {"reached", "unreached", "invalid"}
+    return value["outcome"] in ("reached", "unreached", "invalid")
 
 
 def verified_module_source(frame, config: dict[str, object]) -> tuple[Path, bytes, CodeType]:
