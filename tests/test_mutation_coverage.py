@@ -378,6 +378,68 @@ class SharedCoverageTest(unittest.TestCase):
                 (trace_directory(root / ".coverage") / "producer.json").read_bytes(), original
             )
 
+    def test_configure_rejects_noncanonical_shards_before_reserving_or_initializing(self):
+        cases = (
+            ("unit", "1/4", ("01/4", "1/04")),
+            ("selftest", "8/8", ("08/8", "8/08")),
+            ("fixture", "1/1", ("01/1", "1/01")),
+        )
+        for domain, shard, aliases in cases:
+            with self.subTest(domain=domain), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                reservations = root / "reservations"
+                canonical = root / "canonical"
+                canonical.mkdir()
+                env = {
+                    **os.environ,
+                    "MUTATION_COVERAGE_BATCH": TEST_BATCH,
+                    "MUTATION_COVERAGE_RESERVATIONS": str(reservations),
+                }
+                accepted = coverage_cli(
+                    "configure",
+                    domain,
+                    "--root",
+                    str(canonical),
+                    "--shard",
+                    shard,
+                    "--output",
+                    str(canonical / "config"),
+                    env=env,
+                )
+                self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+                expected_slot = expected_producer_id(TEST_BATCH, domain, shard)
+                self.assertEqual({path.name for path in reservations.iterdir()}, {expected_slot})
+                self.assertTrue((canonical / "config/.coveragerc").is_file())
+                for index, alias in enumerate(aliases):
+                    with self.subTest(alias=alias):
+                        snapshot = root / f"alias-{index}"
+                        snapshot.mkdir()
+                        output = snapshot / "config"
+                        data = snapshot / (
+                            ".coverage" if domain == "unit" else "acceptance/.coverage"
+                        )
+                        rejected = coverage_cli(
+                            "configure",
+                            domain,
+                            "--root",
+                            str(snapshot),
+                            "--shard",
+                            alias,
+                            "--output",
+                            str(output),
+                            env=env,
+                        )
+                        self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+                        self.assertEqual(
+                            json.loads(rejected.stdout),
+                            {"outcome": "INFRA", "message": "Invalid coverage shard membership"},
+                        )
+                        self.assertFalse(output.exists())
+                        self.assertFalse(trace_directory(data).exists())
+                        self.assertEqual(
+                            {path.name for path in reservations.iterdir()}, {expected_slot}
+                        )
+
     def test_configure_rejects_missing_or_malformed_campaign_inputs_before_output(self):
         cases = (
             ("missing batch", None, "owned"),
