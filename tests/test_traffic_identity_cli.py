@@ -355,6 +355,7 @@ class CoreIdentityCLITest(unittest.TestCase):
             "import importlib, pathlib, nci_si_mcp\n"
             f"path = pathlib.Path({metadata_path})\n"
             "initial = nci_si_mcp.__version__\n"
+            "initially_introspectable = '__version__' in dir(nci_si_mcp)\n"
             "metadata = path.read_bytes()\n"
             "old = b'Version: ' + initial.encode()\n"
             "assert metadata.count(old) == 1\n"
@@ -371,18 +372,21 @@ class CoreIdentityCLITest(unittest.TestCase):
             "    reload_error = 'UnicodeDecodeError'\n"
             "else:\n"
             "    reload_error = 'none'\n"
+            "corrupt_introspectable = '__version__' in dir(nci_si_mcp)\n"
             "try:\n"
             "    nci_si_mcp.__version__\n"
-            "except (AttributeError, UnicodeDecodeError) as error:\n"
-            "    explicit_error = type(error).__name__\n"
+            "except (AttributeError, UnicodeDecodeError):\n"
+            "    explicit_failed = True\n"
             "else:\n"
-            "    explicit_error = 'none'\n"
+            "    explicit_failed = False\n"
             "metadata = path.read_bytes()\n"
             "metadata = metadata.replace(bad_version, b'Version: 7.7.7', 1)\n"
             "path.write_bytes(metadata)\n"
             "importlib.reload(nci_si_mcp)\n"
-            "print(f'{initial}|{snapshot}|{reload_error}|{explicit_error}|"
-            "{nci_si_mcp.__version__}')\n"
+            "repaired_introspectable = '__version__' in dir(nci_si_mcp)\n"
+            "print(f'{initial}|{snapshot}|{initially_introspectable}|{reload_error}|"
+            "{corrupt_introspectable}|{explicit_failed}|{nci_si_mcp.__version__}|"
+            "{repaired_introspectable}')\n"
         )
         result = self._child(["-c", code])
 
@@ -390,8 +394,8 @@ class CoreIdentityCLITest(unittest.TestCase):
             (result.returncode, result.stdout, result.stderr),
             (
                 0,
-                f"{self.original_version}|{self.original_version}|UnicodeDecodeError|"
-                f"AttributeError|7.7.7\n",
+                f"{self.original_version}|{self.original_version}|True|"
+                f"UnicodeDecodeError|False|True|7.7.7|True\n",
                 "",
             ),
         )
