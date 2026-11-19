@@ -651,6 +651,85 @@ class NativeTracerProducerContractTest(unittest.TestCase):
                 for callback in callbacks:
                     atexit.unregister(callback)
 
+    def test_installed_dispatcher_forwards_real_frame_events(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, config, child_env, module_path, source = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            callbacks = []
+            register = atexit.register
+            previous_trace = sys.gettrace()
+            previous_thread_trace = threading.gettrace()
+
+            def register_owned(callback):
+                registered = register(callback)
+                callbacks.append(registered)
+                return registered
+
+            try:
+                try:
+                    with (
+                        patch.dict(
+                            os.environ,
+                            {
+                                "MUTATION_CHILD_TRACE_CONFIG": child_env[
+                                    "MUTATION_CHILD_TRACE_CONFIG"
+                                ]
+                            },
+                        ),
+                        patch.object(atexit, "register", register_owned),
+                    ):
+                        child_trace.install_child_trace()
+                        dispatcher = sys.gettrace()
+                finally:
+                    sys.settrace(previous_trace)
+                    threading.settrace(previous_thread_trace)
+
+                self.assertTrue(callable(dispatcher))
+                self.assertIn(
+                    dispatcher.__code__, child_trace.install_child_trace.__code__.co_consts
+                )
+                self.assertEqual(
+                    Path(dispatcher.__code__.co_filename).resolve(),
+                    Path(child_trace.__file__).resolve(),
+                )
+                continuations = {}
+
+                def forward(frame, event, argument):
+                    callback = dispatcher if event == "call" else continuations.get(frame)
+                    if callback is not None:
+                        continuation = callback(frame, event, argument)
+                        if continuation is None:
+                            continuations.pop(frame, None)
+                        else:
+                            continuations[frame] = continuation
+                    if event == "return":
+                        continuations.pop(frame, None)
+
+                observed, _compiled = self.consume_real_events(
+                    SimpleNamespace(trace=forward), module_path, source
+                )
+                for callback in callbacks:
+                    callback()
+                self.assertTrue(
+                    Path(str(config["record"])).is_file(), "The trace result was not written"
+                )
+                record = json.loads(Path(str(config["record"])).read_text())
+                self.assertEqual(record["outcome"], "reached")
+                _, traces = child_trace.read_traces(data_file)
+                self.assertEqual(len(traces), 1)
+                trace = traces[0]
+                self.assertEqual(
+                    (trace.node, trace.module, Path(trace.path)),
+                    (self.item.nodeid, "coverage.version", module_path),
+                )
+                self.assertTrue(observed)
+                self.assertEqual(trace.lines, tuple(sorted(observed)))
+            finally:
+                for callback in callbacks:
+                    atexit.unregister(callback)
+
 
 class MutationOperatorsTest(unittest.TestCase):
     def test_fixed_function_context_hash_matches_the_ci_interpreter_contract(self):
