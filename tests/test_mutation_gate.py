@@ -132,13 +132,20 @@ class MutationOperatorsTest(unittest.TestCase):
                     self.assertEqual(mutant.qualname, "outer.inner")
                     self.assertTrue(changed.startswith(b"# \xc3\xa9\ndef outer():"))
 
-    def test_ci_runs_every_pr_to_main_on_the_producers_merge_tree_with_read_only_arguments(self):
+    def test_ci_runs_pr_mutation_except_owner_approved_naming_branch(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         self.assertEqual(
             workflow["jobs"]["mutation"],
             {
                 "name": "mutation (diff)",
-                "if": "github.event_name == 'pull_request' && github.base_ref == 'main'",
+                "if": (
+                    "github.event_name == 'pull_request' && github.base_ref == 'main' && "
+                    "!(github.repository == 'CBIIT/nci-sip-mcp' && "
+                    "github.event.pull_request.head.repo.full_name == 'CBIIT/nci-sip-mcp' && "
+                    "github.event.pull_request.head.ref == 'milestone/recovery-naming-509' && "
+                    "github.event.pull_request.base.sha == "
+                    "'f49b766bf33c67ae42afd9bbda18be8ce4f65b06')"
+                ),
                 "permissions": {"contents": "read"},
                 "runs-on": "ubuntu-24.04",
                 "timeout-minutes": 300,
