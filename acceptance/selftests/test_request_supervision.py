@@ -353,12 +353,18 @@ def assert_worker_stalled_before_ready(child, custody):
 
 
 @pytest.fixture
-def legacy_worker_custody():
+def owned_worker_custody():
     custody = {}
     yield custody
     if custody:
         helper, children = custody["helper"], custody["children"]
-        assert finish_owned_workers(custody["release"], helper, children) == []
+        custody["release"].set()
+        errors = []
+        for child, wait in children:
+            errors.extend(close_and_reap_worker(child, wait))
+        if helper is not None and helper.ident is not None:
+            helper.join(request_supervision.JOIN_SECONDS)
+        assert errors == []
         assert all(child.returncode is not None for child, _wait in children)
         assert all(child_stream_state(child) == (True, True, True) for child, _wait in children)
         assert helper is None or not helper.is_alive()
@@ -366,7 +372,7 @@ def legacy_worker_custody():
 
 @pytest.mark.parametrize("failure_point", ("readiness", "helper-start"))
 def test_legacy_fixture_setup_failures_stop_all_workers(
-    tmp_path, monkeypatch, legacy_worker_custody, failure_point
+    tmp_path, monkeypatch, owned_worker_custody, failure_point
 ):
     """Fixture-failure cleanup assurance; neither setup fault is a product behavior red."""
     startup_error = RuntimeError("owned legacy helper-start failure")
@@ -378,34 +384,34 @@ def test_legacy_fixture_setup_failures_stop_all_workers(
             tmp_path / "second-worker",
             [time.monotonic()],
             monkeypatch,
-            legacy_worker_custody,
+            owned_worker_custody,
             failure_point,
             startup_error,
         )
     if failure_point == "readiness":
         assert str(caught.value) == "worker did not announce readiness"
-        assert caught.value is legacy_worker_custody["readiness_error"]
-        assert (legacy_worker_custody["started"], legacy_worker_custody["pending"]) == (
+        assert caught.value is owned_worker_custody["readiness_error"]
+        assert (owned_worker_custody["started"], owned_worker_custody["pending"]) == (
             b"started\n",
             True,
         )
     else:
         assert caught.value is startup_error
-        helper = legacy_worker_custody["helper"]
+        helper = owned_worker_custody["helper"]
         assert helper is not None and helper.ident is None and not helper.is_alive()
-    children = legacy_worker_custody["children"]
+    children = owned_worker_custody["children"]
     assert len(children) == LEGACY_WORKER_COUNT
     owner_state = [(child.returncode, child_stream_state(child)) for child, _wait in children]
     assert all(returncode is not None for returncode, _streams in owner_state)
     assert all(streams == (True, True, True) for _returncode, streams in owner_state)
-    assert legacy_worker_custody["cleanup_errors"] == []
-    assert legacy_worker_custody["helper_errors"] == []
-    helper = legacy_worker_custody["helper"]
+    assert owned_worker_custody["cleanup_errors"] == []
+    assert owned_worker_custody["helper_errors"] == []
+    helper = owned_worker_custody["helper"]
     assert helper is None or not helper.is_alive()
 
 
 def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(
-    tmp_path, monkeypatch, legacy_worker_custody
+    tmp_path, monkeypatch, owned_worker_custody
 ):
     owner = supervisor(tmp_path)
     clock = [time.monotonic()]
@@ -417,7 +423,7 @@ def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(
         (helper, helper_done, helper_errors, wait_entered, waits, release_sent),
         (first, second),
     ) = run_legacy_worker_scenario(
-        owner, first_marker, marker, clock, monkeypatch, legacy_worker_custody
+        owner, first_marker, marker, clock, monkeypatch, owned_worker_custody
     )
     assert cleanup_errors == []
     assert helper is not None and helper.ident is not None and not helper.is_alive()

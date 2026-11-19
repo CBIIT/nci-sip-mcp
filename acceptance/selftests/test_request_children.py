@@ -26,6 +26,9 @@ from test_request_supervision import (
     start_cleanup_helper,
     supervisor,
 )
+from test_request_supervision import (
+    owned_worker_custody as owned_worker_custody,  # noqa: PLC0414 - pytest discovers the fixture by name.
+)
 
 from nci_si_acceptance import request_children, request_supervision
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
@@ -460,21 +463,6 @@ def wait_for_controlled_worker(
         raise
 
 
-@pytest.fixture
-def controlled_worker_custody():
-    custody = {}
-    yield custody
-    if custody:
-        child, helper = custody["child"], custody["helper"]
-        assert (
-            finish_owned_workers(custody["release"], helper, [(child, custody["actual_wait"])])
-            == []
-        )
-        assert child.returncode is not None
-        assert child_stream_state(child) == (True, True, True)
-        assert helper is None or not helper.is_alive()
-
-
 def assert_pending_worker_completed(
     owner,
     call,
@@ -532,7 +520,7 @@ def run_controlled_worker_scenario(
         stderr=subprocess.PIPE,
     )
     actual_wait = child.wait
-    custody.update(child=child, actual_wait=actual_wait, release=release, helper=None)
+    custody.update(child=child, children=[(child, actual_wait)], release=release, helper=None)
     try:
         if failure_point == "readiness":
             assert_worker_stalled_before_ready(child, custody)
@@ -595,7 +583,7 @@ def run_controlled_worker_scenario(
 
 @pytest.mark.parametrize("failure_point", ("readiness", "helper-start"))
 def test_worker_fixture_setup_failures_are_bounded(
-    tmp_path, monkeypatch, calls, controlled_worker_custody, failure_point
+    tmp_path, monkeypatch, calls, owned_worker_custody, failure_point
 ):
     """Exercise failures through the same owner path as the normal cleanup case."""
     startup_error = RuntimeError("owned helper-start failure")
@@ -606,33 +594,33 @@ def test_worker_fixture_setup_failures_are_bounded(
             calls(lambda: b"completed producer"),
             tmp_path / "worker-completed",
             monkeypatch,
-            controlled_worker_custody,
+            owned_worker_custody,
             failure_point,
             startup_error,
         )
     if failure_point == "readiness":
         assert str(caught.value) == "worker did not announce readiness"
-        assert caught.value is controlled_worker_custody["readiness_error"]
-        assert (controlled_worker_custody["started"], controlled_worker_custody["pending"]) == (
+        assert caught.value is owned_worker_custody["readiness_error"]
+        assert (owned_worker_custody["started"], owned_worker_custody["pending"]) == (
             b"started\n",
             True,
         )
     else:
         assert caught.value is startup_error
-        helper = controlled_worker_custody["helper"]
+        helper = owned_worker_custody["helper"]
         assert helper is not None and helper.ident is None and not helper.is_alive()
-    child = controlled_worker_custody["child"]
+    child = owned_worker_custody["child"]
     owner_state = (child.returncode, child_stream_state(child))
     assert owner_state[0] is not None
     assert owner_state[1] == (True, True, True)
-    assert controlled_worker_custody["cleanup_errors"] == []
-    assert controlled_worker_custody["helper_errors"] == []
-    helper = controlled_worker_custody["helper"]
+    assert owned_worker_custody["cleanup_errors"] == []
+    assert owned_worker_custody["helper_errors"] == []
+    helper = owned_worker_custody["helper"]
     assert helper is None or not helper.is_alive()
 
 
 def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(
-    tmp_path, monkeypatch, calls, controlled_worker_custody
+    tmp_path, monkeypatch, calls, owned_worker_custody
 ):
     owner = SupervisedRun.create(authorization(), tmp_path / "run")
     run_controlled_worker_scenario(
@@ -640,7 +628,7 @@ def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(
         calls(lambda: b"completed producer"),
         tmp_path / "worker-completed",
         monkeypatch,
-        controlled_worker_custody,
+        owned_worker_custody,
     )
     assert owner.pending_owners == ()
 
