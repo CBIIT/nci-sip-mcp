@@ -48,6 +48,21 @@ RECORDED_WAIT_KEY = {
     "original": "dd863ea504e8543d2fb185a820aa7e2cf2d0ceddec9c835185a3510fc2ab463d",
     "mutated": "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51",
 }
+RECORDED_REMAINING_SOURCE = """class SupervisedRun:
+    def _remaining(self, seconds: float) -> float:
+        if not self._controlled_cleanup or self._deadline is None:
+            return seconds
+        return min(seconds, self._deadline.remaining())
+"""
+RECORDED_REMAINING_KEY = {
+    "file": "acceptance/src/nci_si_acceptance/request_supervision.py",
+    "qualname": "SupervisedRun._remaining",
+    "operator": "boolean:drop:1",
+    "site": "/body/0/test/0",
+    "context": "f36f6bf2841ccd71d34ad08175fe1d1069198f811ea06b7c05f0633bf4f5e518",
+    "original": "ff105d5e1b393b7d932f3a338ac223fe44a1d825ca05e559507ad33386fa0a2d",
+    "mutated": "ccddcadc719010718fc95f86d8289368500076b3b7547b038cc86a0b34743b7e",
+}
 FINGERPRINT_SOURCE = """def fingerprint(value: str = "ctx=Load()"):
     assigned = value
     return "ctx=Load()"
@@ -133,6 +148,22 @@ class MutationOperatorsTest(unittest.TestCase):
                 allowlist(root, path),
                 [{**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}],
             )
+
+    def test_recorded_load_bearing_boolean_key_passes_allowlist_validation(self):
+        entry = {
+            **RECORDED_REMAINING_KEY,
+            "reason": "Recorded 3.14 key with loads in the original and replacement.",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / entry["file"]
+            source.parent.mkdir(parents=True)
+            source.write_text(RECORDED_REMAINING_SOURCE, encoding="utf-8")
+            path = root / "scripts/validation/mutation-allowlist.yaml"
+            path.parent.mkdir(parents=True)
+            path.write_text(yaml.safe_dump([entry]), encoding="utf-8")
+
+            self.assertEqual(allowlist(root, path), [entry])
 
     def test_fingerprint_preserves_314_defaults_contexts_and_literal_text(self):
         key = return_none_key(FINGERPRINT_SOURCE)
