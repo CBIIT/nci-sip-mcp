@@ -1,7 +1,6 @@
 """Receipts have run-local authority and require actual outside-thread settlement."""
 
 import json
-import select
 import sqlite3
 import subprocess
 import sys
@@ -9,12 +8,27 @@ import threading
 import time
 from contextlib import nullcontext
 from dataclasses import FrozenInstanceError
+from functools import partial
 from http.client import HTTPResponse
 from types import SimpleNamespace
 
 import pytest
 from http_receiver import WireReceiver
-from test_request_supervision import authorization, failure_leaves, supervisor
+from test_request_supervision import (
+    CLEANUP_WORKER,
+    STALL_BEFORE_READY,
+    assert_worker_ready,
+    assert_worker_stalled_before_ready,
+    authorization,
+    child_stream_state,
+    failure_leaves,
+    finish_owned_workers,
+    start_cleanup_helper,
+    supervisor,
+)
+from test_request_supervision import (
+    owned_worker_custody as owned_worker_custody,  # noqa: PLC0414 - pytest discovers the fixture by name.
+)
 
 from nci_si_acceptance import request_children, request_supervision
 from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
@@ -416,47 +430,120 @@ def test_successful_controlled_child_releases_actual_custody(tmp_path, calls):
         assert summary["state"] == "completed" and summary["observationComplete"] is True
 
 
-def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(
-    tmp_path, monkeypatch, calls
+def release_controlled_worker(child, release, release_sent, helper_done, helper_errors):
+    try:
+        allowance = (
+            request_children.CLEANUP_SECONDS
+            + request_supervision.STOP_SECONDS
+            + request_supervision.JOIN_SECONDS
+        )
+        if not release.wait(allowance):
+            raise TimeoutError("public child wait was not reached")
+        if child.poll() is None and child.stdin is not None and not child.stdin.closed:
+            child.stdin.write(b"finish\n")
+            child.stdin.flush()
+            release_sent.set()
+    except BaseException as error:  # noqa: BLE001 - assert helper failures after cleanup.
+        helper_errors.append(error)
+    finally:
+        helper_done.set()
+
+
+def wait_for_controlled_worker(
+    child, owner, waits, wait_entered, release, actual_wait, timeout=None
 ):
-    owner = SupervisedRun.create(authorization(), tmp_path / "run")
-    call = calls(lambda: b"completed producer")
-    marker = tmp_path / "worker-completed"
-    script = (
-        "import sys\nfrom pathlib import Path\n"
-        "print('ready',flush=True)\n"
-        "sys.stdin.buffer.readline()\n"
-        "Path(sys.argv[1]).write_bytes(b'completed worker')\n"
+    if not waits:
+        waits.append((child.poll() is None, owner.cleanup_deadline().remaining(), timeout))
+        wait_entered.set()
+        release.set()
+    try:
+        return actual_wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        release.set()
+        raise
+
+
+def assert_pending_worker_completed(
+    owner,
+    call,
+    child,
+    marker,
+    helper_state,
+    wait_state,
+    failure,
+    supervisor_streams_closed,
+    cleanup_errors,
+):
+    helper, helper_done, helper_errors = helper_state
+    wait_entered, waits, release_sent = wait_state
+    assert cleanup_errors == []
+    assert helper is not None and helper.ident is not None and not helper.is_alive()
+    assert helper_done.is_set() and not helper.is_alive()
+    assert helper_errors == []
+    assert child.returncode is not None
+    assert child_stream_state(child) == (True, True, True)
+    assert wait_entered.is_set() and waits
+    pending, remaining, timeout = waits[0]
+    assert pending and remaining > 0
+    assert timeout is not None and 0 < timeout <= request_supervision.STOP_SECONDS
+    assert not call.thread.is_alive()
+    assert release_sent.is_set()
+    assert failure is None
+    assert marker.read_bytes() == b"finish\n"
+    assert child.returncode == 0
+    summary = json.loads((owner.run.directory / "summary.json").read_text())
+    assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+    assert owner.cleanup_deadline().remaining() > 0
+    assert supervisor_streams_closed == (True, True, True)
+
+
+def run_controlled_worker_scenario(
+    owner, call, marker, monkeypatch, custody, failure_point=None, startup_error=None
+):
+    script = STALL_BEFORE_READY if failure_point == "readiness" else CLEANUP_WORKER
+    wait_entered, release, helper_done, release_sent = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
     )
-    with subprocess.Popen(  # noqa: S603 - fixed owned worker and local completion marker.
+    helper_errors = []
+    waits = []
+    helper = None
+    failure = None
+    startup_failure = None
+    supervisor_streams_closed = None
+    child = subprocess.Popen(  # noqa: S603 - fixed owned worker and local completion marker.
         [sys.executable, "-I", "-c", script, str(marker)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-    ) as child:
-        actual_wait, actual_join = child._try_wait, owner._join
-        released = threading.Event()
-
-        def wait(flags):
-            # Release only after an actual OS receipt proves this worker is still pending.
-            result = actual_wait(flags)
-            if result[0] == 0 and not released.is_set():
-                released.set()
-                child.stdin.write(b"finish\n")
-                child.stdin.flush()
-            return result
-
-        def join_observer():
-            # This case owns worker waiting, not the independent observer-join contract.
-            owner._observer.join(request_supervision.JOIN_SECONDS)
-            actual_join()
-
-        monkeypatch.setattr(child, "_try_wait", wait)
-        monkeypatch.setattr(owner, "_join", join_observer)
-        failure = None
+    )
+    actual_wait = child.wait
+    custody.update(child=child, children=[(child, actual_wait)], release=release, helper=None)
+    try:
+        if failure_point == "readiness":
+            assert_worker_stalled_before_ready(child, custody)
+        else:
+            assert_worker_ready(child)
+        helper = threading.Thread(
+            target=release_controlled_worker,
+            args=(child, release, release_sent, helper_done, helper_errors),
+            name="release-controlled-worker",
+        )
+        custody["helper"] = helper
+        public_wait = partial(
+            wait_for_controlled_worker,
+            child,
+            owner,
+            waits,
+            wait_entered,
+            release,
+            actual_wait,
+        )
+        monkeypatch.setattr(child, "wait", public_wait)
+        start_cleanup_helper(helper, monkeypatch, failure_point, startup_error)
         try:
-            assert select.select([child.stdout], [], [], 3)[0] == [child.stdout]
-            assert child.stdout.readline() == b"ready\n"
             with owner:
                 owner.register_child(child, participant="worker", role="worker")
                 owner.register_completion(call, participant="producer")
@@ -466,18 +553,84 @@ def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(
         except BaseException as error:  # noqa: BLE001 - compare the real caller outcome below.
             failure = error
         finally:
-            if not child.stdin.closed:
-                child.stdin.close()
-            child.wait(timeout=3)
-        assert failure is None
-        assert released.is_set() and marker.read_bytes() == b"completed worker"
-        assert child.returncode == 0
-        assert all(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
-        assert not call.thread.is_alive()
-        assert owner.pending_owners == ()
-        summary = json.loads((owner.run.directory / "summary.json").read_text())
-        assert (summary["state"], summary["observationComplete"]) == ("completed", True)
-        assert owner.cleanup_deadline().remaining() > 0
+            supervisor_streams_closed = child_stream_state(child)
+    except BaseException as error:  # noqa: BLE001 - retain setup failures for bounded cleanup.
+        startup_failure = error
+    finally:
+        cleanup_errors = finish_owned_workers(release, helper, [(child, actual_wait)])
+        custody["cleanup_errors"] = cleanup_errors
+        custody["helper_errors"] = helper_errors
+        monkeypatch.setattr(child, "wait", actual_wait)
+    if startup_failure is not None:
+        teardown_errors = [*cleanup_errors, *helper_errors]
+        if teardown_errors:
+            raise startup_failure from BaseExceptionGroup(
+                "Owned test teardown failed", teardown_errors
+            )
+        raise startup_failure
+    assert_pending_worker_completed(
+        owner,
+        call,
+        child,
+        marker,
+        (helper, helper_done, helper_errors),
+        (wait_entered, waits, release_sent),
+        failure,
+        supervisor_streams_closed,
+        cleanup_errors,
+    )
+
+
+@pytest.mark.parametrize("failure_point", ("readiness", "helper-start"))
+def test_worker_fixture_setup_failures_are_bounded(
+    tmp_path, monkeypatch, calls, owned_worker_custody, failure_point
+):
+    """Exercise failures through the same owner path as the normal cleanup case."""
+    startup_error = RuntimeError("owned helper-start failure")
+    expected = TimeoutError if failure_point == "readiness" else RuntimeError
+    with pytest.raises(expected) as caught:
+        run_controlled_worker_scenario(
+            SupervisedRun.create(authorization(), tmp_path / "run"),
+            calls(lambda: b"completed producer"),
+            tmp_path / "worker-completed",
+            monkeypatch,
+            owned_worker_custody,
+            failure_point,
+            startup_error,
+        )
+    if failure_point == "readiness":
+        assert str(caught.value) == "worker did not announce readiness"
+        assert caught.value is owned_worker_custody["readiness_error"]
+        assert (owned_worker_custody["started"], owned_worker_custody["pending"]) == (
+            b"started\n",
+            True,
+        )
+    else:
+        assert caught.value is startup_error
+        helper = owned_worker_custody["helper"]
+        assert helper is not None and helper.ident is None and not helper.is_alive()
+    child = owned_worker_custody["child"]
+    owner_state = (child.returncode, child_stream_state(child))
+    assert owner_state[0] is not None
+    assert owner_state[1] == (True, True, True)
+    assert owned_worker_custody["cleanup_errors"] == []
+    assert owned_worker_custody["helper_errors"] == []
+    helper = owned_worker_custody["helper"]
+    assert helper is None or not helper.is_alive()
+
+
+def test_pending_worker_finishes_within_positive_shared_cleanup_allowance(
+    tmp_path, monkeypatch, calls, owned_worker_custody
+):
+    owner = SupervisedRun.create(authorization(), tmp_path / "run")
+    run_controlled_worker_scenario(
+        owner,
+        calls(lambda: b"completed producer"),
+        tmp_path / "worker-completed",
+        monkeypatch,
+        owned_worker_custody,
+    )
+    assert owner.pending_owners == ()
 
 
 def test_sealed_receipt_is_one_use_and_callbacks_do_not_hold_registry_lock(calls):
