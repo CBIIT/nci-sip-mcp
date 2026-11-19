@@ -701,7 +701,7 @@ class MutationExecutionTest(unittest.TestCase):
             ("passing child", False, "", "SURVIVED", None),
             ("failing child", False, "child", "KILLED", "test_value"),
             ("unreached child", True, "", "NO_TESTS", None),
-            ("unrelated failure", False, "unrelated", "NO_TESTS", None),
+            ("unrelated failure", False, "unrelated", "INFRA", None),
             ("ordinary owner", True, "ordinary", "KILLED", "test_ordinary"),
         )
         for name, unreached, failing, outcome, node in cases:
@@ -753,6 +753,20 @@ class MutationExecutionTest(unittest.TestCase):
                 self.assertEqual(result["outcome"], outcome, result)
                 self.assertEqual(
                     result.get("node"), f"{path}::{node}" if node is not None else None
+                )
+                self.assertEqual(result.get("status"), {"unrelated": 1}.get(failing))
+                self.assertEqual(
+                    result.get("failures", []),
+                    {
+                        "unrelated": [
+                            {
+                                "node": f"{path}::test_unrelated",
+                                "phase": "call",
+                                "outcome": "failed",
+                                "assertion": True,
+                            }
+                        ]
+                    }.get(failing, []),
                 )
 
     def test_configured_child_environment_passes_the_staged_trace_config(self):
