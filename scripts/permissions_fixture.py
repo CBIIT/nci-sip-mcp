@@ -15,10 +15,10 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 
-from nci_si_mcp.config import Settings
-from nci_si_mcp.http_auth import HTTPAuthIntegration
-from nci_si_mcp.permissions import Authority, Principal
-from nci_si_mcp.transport import create_http_app
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.http_auth import HTTPAuthIntegration
+from nci_sip_mcp.permissions import Authority, Principal
+from nci_sip_mcp.transport import create_http_app
 
 
 class FixturePolicy:
@@ -62,7 +62,7 @@ def integration(settings: Settings) -> HTTPAuthIntegration:
     if settings.upstream_mode != "fixture":
         raise RuntimeError("This test adapter requires fixture upstreams")
     resource = f"http://127.0.0.1:{settings.http_port}/mcp"
-    policy = FixturePolicy(Path(os.environ["NCI_SI_TEST_AUTHORITY_FILE"]), resource)
+    policy = FixturePolicy(Path(os.environ["NCI_SIP_TEST_AUTHORITY_FILE"]), resource)
     auth = AuthSettings.model_validate(
         {
             "issuer_url": "https://fixture.invalid",
@@ -78,7 +78,7 @@ def main() -> None:
     settings = replace(
         Settings.from_env(),
         http_host="127.0.0.1",
-        http_port=int(os.environ["NCI_SI_TEST_HTTP_PORT"]),
+        http_port=int(os.environ["NCI_SIP_TEST_HTTP_PORT"]),
         http_auth_mode="required",
         http_auth_factory="permissions_fixture:integration",
     )

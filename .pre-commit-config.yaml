@@ -137,10 +137,10 @@ repos:
 
       - id: installer-requirements
         name: installer requirements are current
-        entry: pdm export -G server -G build --no-default -o src/nci_si_mcp/server-requirements.txt
+        entry: pdm export -G server -G build --no-default -o src/nci_sip_mcp/server-requirements.txt
         language: system
         pass_filenames: false
-        files: ^(pyproject\.toml|pdm\.lock|src/nci_si_mcp/server-requirements\.txt)$
+        files: ^(pyproject\.toml|pdm\.lock|src/nci_sip_mcp/server-requirements\.txt)$
         stages: [pre-commit]
 
       - id: complexity

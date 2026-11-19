@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from nci_si_acceptance.client import OwnedServer, server_environment
+from nci_sip_acceptance.client import OwnedServer, server_environment
 
 # The fixture upstream is never contacted: the tests only start and stop the server.
 UPSTREAM = "http://127.0.0.1:9"
@@ -34,7 +34,7 @@ def owned(directory: Path, **options) -> OwnedServer:
 
 def settings(directory: Path) -> dict[str, str]:
     environment = server_environment("fixture", directory / "data", UPSTREAM)
-    return {key: value for key, value in environment.items() if key.startswith("NCI_SI_")}
+    return {key: value for key, value in environment.items() if key.startswith("NCI_SIP_")}
 
 
 def test_owned_server_is_reaped_when_the_scope_raises(tmp_path):
@@ -60,7 +60,7 @@ def test_a_server_that_exits_before_readiness_fails_naming_its_log(tmp_path):
         with pytest.raises(
             RuntimeError, match=f"exited before readiness; see {tmp_path}/server.log"
         ):
-            server.start(settings(tmp_path) | {"NCI_SI_LOG_LEVEL": "not-a-level"})
+            server.start(settings(tmp_path) | {"NCI_SIP_LOG_LEVEL": "not-a-level"})
         assert not listening(server.port)
     assert (tmp_path / "server.log").read_text()
 
@@ -83,7 +83,7 @@ def test_stop_kills_a_server_that_ignores_termination(tmp_path, monkeypatch):
         "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
         "signal.signal = lambda *_arguments: None\n"
     )
-    monkeypatch.setattr("nci_si_acceptance.client.STOP_SECONDS", 1)
+    monkeypatch.setattr("nci_sip_acceptance.client.STOP_SECONDS", 1)
     environment = server_environment("fixture", tmp_path / "data", UPSTREAM) | {
         "PYTHONPATH": str(hooks)
     }
@@ -117,7 +117,7 @@ def test_a_foreign_listener_on_the_port_is_not_taken_for_the_server(tmp_path):
 
 LISTENS = (
     "import os, socket, time; listener = socket.socket(); "
-    "listener.bind(('127.0.0.1', int(os.environ['NCI_SI_HTTP_PORT']))); "
+    "listener.bind(('127.0.0.1', int(os.environ['NCI_SIP_HTTP_PORT']))); "
     "listener.listen(); time.sleep(300)"
 )
 
@@ -132,7 +132,7 @@ def stand_in_children(monkeypatch, script):
         launched.append((options["env"], process))
         return process
 
-    monkeypatch.setattr("nci_si_acceptance.client.subprocess.Popen", launch)
+    monkeypatch.setattr("nci_sip_acceptance.client.subprocess.Popen", launch)
     return launched
 
 
@@ -144,17 +144,17 @@ def test_the_child_is_told_whether_an_index_is_required(tmp_path, monkeypatch, r
     )
     with server:
         server.start({})
-    assert launched[0][0]["NCI_SI_HTTP_REQUIRE_INDEX"] == ("1" if required else "0")
+    assert launched[0][0]["NCI_SIP_HTTP_REQUIRE_INDEX"] == ("1" if required else "0")
 
 
 def test_an_ambient_server_setting_does_not_reach_the_child(tmp_path, monkeypatch):
     launched = stand_in_children(monkeypatch, LISTENS)
-    ambient = {"PATH": "/bin", "NCI_SI_LOG_LEVEL": "ambient"}
+    ambient = {"PATH": "/bin", "NCI_SIP_LOG_LEVEL": "ambient"}
     with OwnedServer(
         ambient, tmp_path / "server.log", data_dir=tmp_path / "data", require_index=False
     ) as server:
         server.start({})
-    assert "NCI_SI_LOG_LEVEL" not in launched[0][0]
+    assert "NCI_SIP_LOG_LEVEL" not in launched[0][0]
     assert launched[0][0]["PATH"] == "/bin"
 
 

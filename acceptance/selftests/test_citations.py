@@ -13,15 +13,15 @@ from urllib.error import HTTPError
 
 import pytest
 
-from nci_si_acceptance import citations
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_sip_acceptance import citations
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 def verifier():
-    package = importlib.import_module("nci_si_acceptance")
-    module = importlib.util.find_spec("nci_si_acceptance.citations")
+    package = importlib.import_module("nci_sip_acceptance")
+    module = importlib.util.find_spec("nci_sip_acceptance.citations")
     assert module is not None, "acceptance must expose its independent citation comparison"
     return importlib.import_module(f"{package.__name__}.citations").verify_citations
 

@@ -171,7 +171,7 @@ UNIFIED_DEFECTS = [
 def unified(compliant, monkeypatch):
     """The compliant server serving the unified profile, tested as such."""
 
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PROFILE", "unified")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PROFILE", "unified")
     monkeypatch.setenv("COMPLIANT_SERVER_PROFILE", "unified")
 
 

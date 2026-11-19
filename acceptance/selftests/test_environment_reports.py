@@ -9,8 +9,8 @@ from types import SimpleNamespace
 import pytest
 
 from conftest import REVIEWED_ORIGINS, STAND_IN
-from nci_si_acceptance import environments
-from nci_si_acceptance.report import Collector, NativeReport, ReportFieldError, complete, main
+from nci_sip_acceptance import environments
+from nci_sip_acceptance.report import Collector, NativeReport, ReportFieldError, complete, main
 
 pytest_plugins = ["pytester"]
 
@@ -47,14 +47,14 @@ def test_current_workers_cannot_omit_or_conflict_with_controller_selection(worke
 
 @pytest.mark.parametrize("workers", [0, 2])
 def test_native_producer_preserves_selection(compliant, monkeypatch, workers):
-    for key in [key for key in os.environ if key.startswith("NCI_SI_")]:
+    for key in [key for key in os.environ if key.startswith("NCI_SIP_")]:
         monkeypatch.delenv(key)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "live")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "live")
     monkeypatch.setenv(environments.VARIABLE, "evs-only")
     monkeypatch.setenv("Python_ROOT_DIR", "/ci-python")
     plugin = compliant.path / f"{STAND_IN}.py"
     plugin.write_text(
-        "import os\nfrom nci_si_acceptance.environments import external_runtime_setting\n"
+        "import os\nfrom nci_sip_acceptance.environments import external_runtime_setting\n"
         "for key in list(os.environ):\n"
         "    if external_runtime_setting(key): os.environ.pop(key)\n" + plugin.read_text()
     )

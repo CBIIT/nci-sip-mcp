@@ -19,11 +19,11 @@ from mcp.shared.exceptions import MCPError
 from test_request_stdio import PROCESS_SAFETY_SECONDS, _reap_for_test, _stop_child_for_test
 from test_request_supervision import authorization, failure_leaves
 
-from nci_si_acceptance import request_children, request_stdio
-from nci_si_acceptance.client import open_session
-from nci_si_acceptance.request_stdio import StdioOwner
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_mcp.errors import RequestPolicyError
+from nci_sip_acceptance import request_children, request_stdio
+from nci_sip_acceptance.client import open_session
+from nci_sip_acceptance.request_stdio import StdioOwner
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_mcp.errors import RequestPolicyError
 
 CHILD = """import json,signal,sys
 mode=sys.argv[1]

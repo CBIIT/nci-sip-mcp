@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 
 from fakes import concept
-from nci_si_mcp.evaluation import evaluate_build
-from nci_si_mcp.evaluation_sets import load_set, production_set
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.evaluation import evaluate_build
+from nci_sip_mcp.evaluation_sets import load_set, production_set
+from nci_sip_mcp.registry import invoke
 from ncit_index.embeddings import HashingEmbeddingProvider
 from ncit_index.errors import IndexBuildError
 from ncit_index.index import LocalIndex

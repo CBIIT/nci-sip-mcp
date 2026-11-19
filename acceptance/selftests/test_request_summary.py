@@ -8,14 +8,14 @@ import threading
 
 import pytest
 
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_mcp.http_client import RequestPolicyError
 
 FAILURE_COUNT = 2
 
 
 def reader():
-    name = "nci_si_acceptance.request_summary"
+    name = "nci_sip_acceptance.request_summary"
     assert importlib.util.find_spec(name) is not None, "A diagnostic caller needs read_summary"
     return importlib.import_module(name).read_summary
 
@@ -203,7 +203,7 @@ def test_completed_reader_rejects_unresolved_capacity(tmp_path):
 
 
 def test_write_and_cleanup_failures_are_both_sanitized(tmp_path, monkeypatch):
-    module = importlib.import_module("nci_si_acceptance.request_summary")
+    module = importlib.import_module("nci_sip_acceptance.request_summary")
 
     def replace_failure(_source, _target):
         raise OSError("private initiating path")
@@ -226,7 +226,7 @@ def test_write_and_cleanup_failures_are_both_sanitized(tmp_path, monkeypatch):
 
 
 def test_successful_replace_needs_no_second_cleanup(tmp_path, monkeypatch):
-    module = importlib.import_module("nci_si_acceptance.request_summary")
+    module = importlib.import_module("nci_sip_acceptance.request_summary")
 
     def unlink_failure(_path, **_options):
         raise PermissionError("private cleanup path")
@@ -242,7 +242,7 @@ def test_successful_replace_needs_no_second_cleanup(tmp_path, monkeypatch):
 
 
 def managed(directory):
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     auth = Authorization((RequestGrant("GET", "http://127.0.0.1:9/probe", ()),), Limits(), "a" * 64)
     return entry.SupervisedRun.create(auth, directory)
 
@@ -254,7 +254,7 @@ def test_interrupted_publication_retains_failure_and_cleanup(
     tmp_path, monkeypatch, interruption, cleanup_fault, phase
 ):
     owner = managed(tmp_path)
-    module = importlib.import_module("nci_si_acceptance.request_summary")
+    module = importlib.import_module("nci_sip_acceptance.request_summary")
     before = set(owner.run.directory.iterdir())
     original_unlink = module.Path.unlink
     initiating = interruption("synthetic publication interruption")
@@ -306,7 +306,7 @@ def test_interrupted_publication_retains_failure_and_cleanup(
 @pytest.mark.parametrize("phase", ["initial", "final"])
 @pytest.mark.parametrize("fault", ["write", "flush", "fsync", "replace"])
 def test_initial_and_final_publication_faults_are_terminal(tmp_path, monkeypatch, phase, fault):
-    module = importlib.import_module("nci_si_acceptance.request_summary")
+    module = importlib.import_module("nci_sip_acceptance.request_summary")
     original_factory = module.tempfile.NamedTemporaryFile
     owner = managed(tmp_path)
     initial = None
@@ -362,7 +362,7 @@ def test_new_failed_run_cannot_reuse_old_completed_summary(tmp_path, monkeypatch
 
 
 def test_reader_sees_whole_old_or_new_record_during_publication(tmp_path, monkeypatch):
-    module = importlib.import_module("nci_si_acceptance.request_summary")
+    module = importlib.import_module("nci_sip_acceptance.request_summary")
     path = tmp_path / "summary.json"
     original, updated = record(), record()
     updated["observed"]["bodyBytes"] = 5
@@ -428,7 +428,7 @@ def test_reader_sanitizes_missing_and_malformed_file(tmp_path, contents):
 
 
 def test_missing_temporary_does_not_duplicate_publication_failure(tmp_path, monkeypatch):
-    module = importlib.import_module("nci_si_acceptance.request_summary")
+    module = importlib.import_module("nci_sip_acceptance.request_summary")
     path = tmp_path / "summary.json"
     module.publish(path, record())
     original = path.read_bytes()
@@ -459,7 +459,7 @@ def test_missing_temporary_does_not_duplicate_publication_failure(tmp_path, monk
 )
 def test_cleanup_interruption_keeps_prior_publication_failure(tmp_path, monkeypatch, interruption):
     owner = managed(tmp_path)
-    module = importlib.import_module("nci_si_acceptance.request_summary")
+    module = importlib.import_module("nci_sip_acceptance.request_summary")
     value = owner.snapshot()
     owner.run.close()
     path = owner.run.directory / "summary.json"

@@ -6,8 +6,8 @@ import re
 import pytest
 from jsonschema import Draft202012Validator
 
-from nci_si_acceptance.client import Target
-from nci_si_acceptance.results import (
+from nci_sip_acceptance.client import Target
+from nci_sip_acceptance.results import (
     CARRIED,
     UNPINNED_REGISTRY,
     hint_fits,
@@ -20,7 +20,7 @@ from nci_si_acceptance.results import (
     release_of,
     wrong_fields,
 )
-from nci_si_acceptance.spec import (
+from nci_sip_acceptance.spec import (
     PROMPTS,
     RECORDS,
     RESOURCES,
@@ -35,7 +35,7 @@ from nci_si_acceptance.spec import (
     tools_named,
     uri_variables,
 )
-from nci_si_acceptance.tools import Read
+from nci_sip_acceptance.tools import Read
 
 # M7.1: where a caller's correlation identifier goes, and the header that carries it upstream.
 CORRELATION = "acceptance-correlation-0001"

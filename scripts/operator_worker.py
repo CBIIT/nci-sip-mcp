@@ -17,9 +17,9 @@ from scripts.operator_files import write_json
 from scripts.processes import exit_on_sigterm, print_server_log_tail
 from scripts.vocabulary import run_stop
 
-from nci_si_acceptance.client import OwnedServer, server_environment
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
-from nci_si_acceptance.suite import unmatched_requests
+from nci_sip_acceptance.client import OwnedServer, server_environment
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_sip_acceptance.suite import unmatched_requests
 
 FIXTURE_LIMITS = Limits()
 
@@ -90,7 +90,7 @@ def _measure(
     scenarios = tuple(sorted({case["scenario"] for case in selected if case["scenario"]}))
     upstream.activate(*scenarios)
     generated = server_environment("fixture", directory / "data", upstream.url)
-    settings = {key: value for key, value in generated.items() if key.startswith("NCI_SI_")}
+    settings = {key: value for key, value in generated.items() if key.startswith("NCI_SIP_")}
     settings |= upstream.fixtures.settings_of(scenarios)
     with _server(directory, settings) as target:
         report = asyncio.run(

@@ -7,8 +7,8 @@ from typing import Literal, NotRequired, TypedDict
 
 import pytest
 
-from nci_si_acceptance.request_budget import ControlledRun, LedgerSnapshot
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_sip_acceptance.request_budget import ControlledRun, LedgerSnapshot
+from nci_sip_mcp.http_client import RequestPolicyError
 
 PROPERTY = "accounting_snapshot_diagnostic"
 # Enough for the accounting refusal and a failed marker; never traverse unrelated graphs.

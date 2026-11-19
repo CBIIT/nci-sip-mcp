@@ -10,15 +10,15 @@ from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import nci_si_mcp
+import nci_sip_mcp
 from fakes import FakeEVS, concept, release
-from nci_si_mcp import cli
-from nci_si_mcp.cli import build_parser, main
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.index_adapter import LocalIndexAdapter, index_event
-from nci_si_mcp.registry import SPECS
+from nci_sip_mcp import cli
+from nci_sip_mcp.cli import build_parser, main
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.index_adapter import LocalIndexAdapter, index_event
+from nci_sip_mcp.registry import SPECS
 from ncit_index.embeddings import HashingEmbeddingProvider
 from ncit_index.index import LocalIndex
 from test_server import ServerFixture
@@ -77,7 +77,7 @@ class ParserTest(unittest.TestCase):
                 build_parser().parse_args(argv)
 
 
-@patch("nci_si_mcp.cli.configure_logging")
+@patch("nci_sip_mcp.cli.configure_logging")
 class MainTest(unittest.TestCase):
     def test_cli_invocations_do_not_reuse_an_implicit_release(self, _):
         context = self.fake_context()
@@ -110,9 +110,9 @@ class MainTest(unittest.TestCase):
         """
 
         stdout, stderr = io.StringIO(), io.StringIO()
-        environment.setdefault("NCI_SI_DATA_DIR", str(self.path))
+        environment.setdefault("NCI_SIP_DATA_DIR", str(self.path))
         patches = [
-            patch.object(sys, "argv", ["nci-si-mcp", *argv]),
+            patch.object(sys, "argv", ["nci-sip-mcp", *argv]),
             patch.dict(os.environ, environment, clear=True),
             redirect_stdout(stdout),
             redirect_stderr(stderr),
@@ -120,7 +120,7 @@ class MainTest(unittest.TestCase):
         if context == "fake":
             context = self.fake_context()
         if context != "real":
-            patches.append(patch("nci_si_mcp.cli.Context", return_value=context))
+            patches.append(patch("nci_sip_mcp.cli.Context", return_value=context))
         with ExitStack() as stack:
             for item in patches:
                 stack.enter_context(item)
@@ -261,9 +261,9 @@ class MainTest(unittest.TestCase):
 
     def test_invalid_configuration_names_the_variable(self, _):
         for variable, value in (
-            ("NCI_SI_TIMEOUT_SECONDS", "0"),
-            ("NCI_SI_EMBEDDING_PROVIDER", "bogus"),
-            ("NCI_SI_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
+            ("NCI_SIP_TIMEOUT_SECONDS", "0"),
+            ("NCI_SIP_EMBEDDING_PROVIDER", "bogus"),
+            ("NCI_SIP_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
         ):
             with self.subTest(variable):
                 code, result, _ = self.run_cli("release-info", context="real", **{variable: value})
@@ -274,13 +274,13 @@ class MainTest(unittest.TestCase):
 
     def test_a_bad_secret_is_reported_by_variable_and_appears_nowhere(self, _):
         for variable, value in (
-            ("NCI_SI_CADSR_CREDENTIAL", "no-colon-secret"),
-            ("NCI_SI_EVS_LICENSE_KEY", "bad key secret"),
+            ("NCI_SIP_CADSR_CREDENTIAL", "no-colon-secret"),
+            ("NCI_SIP_EVS_LICENSE_KEY", "bad key secret"),
         ):
             with self.subTest(variable), self.assertLogs(level="DEBUG") as logs:
                 logging.getLogger().debug("marker")
                 code, result, stderr = self.run_cli(
-                    "release-info", context="real", NCI_SI_LOG_LEVEL="DEBUG", **{variable: value}
+                    "release-info", context="real", NCI_SIP_LOG_LEVEL="DEBUG", **{variable: value}
                 )
 
                 self.assertEqual((code, result["error"]["code"]), (1, "invalid_request"))
@@ -295,8 +295,8 @@ class MainTest(unittest.TestCase):
         occupied = self.path / "occupied"
         occupied.write_text("not a directory")
         secrets = {
-            "NCI_SI_EVS_LICENSE_KEY": "licence-key-4711",
-            "NCI_SI_CADSR_CREDENTIAL": "reviewer:hunter2-secret",
+            "NCI_SIP_EVS_LICENSE_KEY": "licence-key-4711",
+            "NCI_SIP_CADSR_CREDENTIAL": "reviewer:hunter2-secret",
         }
         for label, context, data_dir, expected in (
             ("success", "fake", self.path, 0),
@@ -307,8 +307,8 @@ class MainTest(unittest.TestCase):
                 code, result, stderr = self.run_cli(
                     "release-info",
                     context=context,
-                    NCI_SI_LOG_LEVEL="DEBUG",
-                    NCI_SI_DATA_DIR=str(data_dir),
+                    NCI_SIP_LOG_LEVEL="DEBUG",
+                    NCI_SIP_DATA_DIR=str(data_dir),
                     **secrets,
                 )
 
@@ -318,7 +318,7 @@ class MainTest(unittest.TestCase):
                     self.assertNotIn(part, everything)
 
     def test_a_setting_error_that_names_no_variable_has_no_parameter_detail(self, _):
-        with patch("nci_si_mcp.cli.Settings.from_env", side_effect=ValueError("odd")):
+        with patch("nci_sip_mcp.cli.Settings.from_env", side_effect=ValueError("odd")):
             code, result, _ = self.run_cli("release-info", context="real")
 
         self.assertEqual((code, result["error"]["code"]), (1, "invalid_request"))
@@ -336,20 +336,20 @@ class MainTest(unittest.TestCase):
         }.items():
             with self.subTest(label):
                 code, result, _ = self.run_cli(
-                    "search", "tumor", context="real", NCI_SI_DATA_DIR=str(data_dir)
+                    "search", "tumor", context="real", NCI_SIP_DATA_DIR=str(data_dir)
                 )
                 self.assertEqual((code, result["error"]["code"]), (1, "internal_error"))
                 self.assertIn(str(data_dir), result["error"]["message"])
 
     def test_value_error_at_startup_is_reported(self, _):
-        with patch("nci_si_mcp.cli.Context", side_effect=ValueError("bad model name")):
+        with patch("nci_sip_mcp.cli.Context", side_effect=ValueError("bad model name")):
             code, result, _ = self.run_cli("release-info", context="real")
 
         self.assertEqual((code, result["error"]["code"]), (1, "internal_error"))
 
     def test_serve_runs_the_server_and_keeps_stdout_for_the_protocol(self, _):
         server = MagicMock()
-        with patch("nci_si_mcp.cli.create_mcp", return_value=server) as create:
+        with patch("nci_sip_mcp.cli.create_mcp", return_value=server) as create:
             code, printed, _ = self.run_cli("serve")
 
         self.assertEqual((code, printed), (0, None))
@@ -358,24 +358,27 @@ class MainTest(unittest.TestCase):
 
     def test_http_transport_can_be_selected_by_environment_or_cli_override(self, _):
         for arguments, environment in (
-            ((), {"NCI_SI_TRANSPORT": "streamable-http"}),
-            (("--transport", "streamable-http"), {"NCI_SI_TRANSPORT": "stdio"}),
+            ((), {"NCI_SIP_TRANSPORT": "streamable-http"}),
+            (("--transport", "streamable-http"), {"NCI_SIP_TRANSPORT": "stdio"}),
         ):
-            with self.subTest(arguments=arguments), patch("nci_si_mcp.cli.run_http") as run:
+            with self.subTest(arguments=arguments), patch("nci_sip_mcp.cli.run_http") as run:
                 code, printed, stderr = self.run_cli("serve", *arguments, **environment)
             self.assertEqual((code, printed, stderr), (0, None, ""))
             self.assertEqual(run.call_args.args[0].transport, "streamable-http")
 
     def test_http_startup_failure_stays_on_stderr(self, _):
-        with patch("nci_si_mcp.cli.run_http", side_effect=OSError("cannot bind port")):
+        with patch("nci_sip_mcp.cli.run_http", side_effect=OSError("cannot bind port")):
             code, printed, stderr = self.run_cli("serve", "--transport", "streamable-http")
         self.assertEqual((code, printed), (1, None))
         self.assertEqual(json.loads(stderr)["error"]["code"], "internal_error")
 
     def test_explicit_stdio_overrides_http_environment(self, _):
-        with patch("nci_si_mcp.cli.create_mcp") as create, patch("nci_si_mcp.cli.run_http") as http:
+        with (
+            patch("nci_sip_mcp.cli.create_mcp") as create,
+            patch("nci_sip_mcp.cli.run_http") as http,
+        ):
             code, printed, _ = self.run_cli(
-                "serve", "--transport", "stdio", NCI_SI_TRANSPORT="streamable-http"
+                "serve", "--transport", "stdio", NCI_SIP_TRANSPORT="streamable-http"
             )
         self.assertEqual((code, printed), (0, None))
         self.assertEqual(create.call_args.args[0].transport, "stdio")
@@ -384,32 +387,32 @@ class MainTest(unittest.TestCase):
     def test_required_http_auth_cannot_serve_stdio_whichever_way_stdio_is_chosen(self, _):
         for arguments, environment in (
             ((), {}),
-            (("--transport", "stdio"), {"NCI_SI_TRANSPORT": "streamable-http"}),
+            (("--transport", "stdio"), {"NCI_SIP_TRANSPORT": "streamable-http"}),
         ):
-            with self.subTest(arguments=arguments), patch("nci_si_mcp.cli.create_mcp") as create:
+            with self.subTest(arguments=arguments), patch("nci_sip_mcp.cli.create_mcp") as create:
                 code, printed, stderr = self.run_cli(
-                    "serve", *arguments, NCI_SI_HTTP_AUTH_MODE="required", **environment
+                    "serve", *arguments, NCI_SIP_HTTP_AUTH_MODE="required", **environment
                 )
             error = json.loads(stderr)["error"]
             self.assertEqual((code, printed, error["code"]), (1, None, "invalid_request"))
-            self.assertEqual(error["details"]["parameter"], "NCI_SI_HTTP_AUTH_MODE")
+            self.assertEqual(error["details"]["parameter"], "NCI_SIP_HTTP_AUTH_MODE")
             create.assert_not_called()
 
     def test_required_http_auth_does_not_stop_commands_that_never_serve(self, _):
-        code, info, stderr = self.run_cli("release-info", NCI_SI_HTTP_AUTH_MODE="required")
+        code, info, stderr = self.run_cli("release-info", NCI_SIP_HTTP_AUTH_MODE="required")
 
         self.assertEqual((code, stderr), (0, ""))
         self.assertEqual(info["selected_release"]["version"], "26.06e")
 
     def test_serve_failures_go_to_stderr(self, _):
-        with patch("nci_si_mcp.cli.create_mcp", side_effect=RuntimeError("mcp is missing")):
+        with patch("nci_sip_mcp.cli.create_mcp", side_effect=RuntimeError("mcp is missing")):
             code, printed, stderr = self.run_cli("serve")
 
         self.assertEqual((code, printed), (1, None))
         self.assertEqual(json.loads(stderr)["error"]["code"], "internal_error")
         self.assertIn("mcp is missing", stderr)
 
-        code, printed, stderr = self.run_cli("serve", NCI_SI_TIMEOUT_SECONDS="0")
+        code, printed, stderr = self.run_cli("serve", NCI_SIP_TIMEOUT_SECONDS="0")
 
         self.assertEqual((code, printed), (1, None))
         self.assertEqual(json.loads(stderr)["error"]["code"], "invalid_request")
@@ -418,20 +421,20 @@ class MainTest(unittest.TestCase):
 class ProcessTest(unittest.TestCase):
     def test_results_go_to_stdout_and_diagnostics_to_stderr(self):
         with tempfile.TemporaryDirectory() as data_dir:
-            # The developer's own NCI_SI_* settings must not reach the subprocess.
+            # The developer's own NCI_SIP_* settings must not reach the subprocess.
             inherited = {
-                key: value for key, value in os.environ.items() if not key.startswith("NCI_SI_")
+                key: value for key, value in os.environ.items() if not key.startswith("NCI_SIP_")
             }
             process = subprocess.run(
-                [sys.executable, "-m", "nci_si_mcp.cli", "lookup", "oops"],
+                [sys.executable, "-m", "nci_sip_mcp.cli", "lookup", "oops"],
                 capture_output=True,
                 text=True,
                 timeout=60,
                 check=False,
                 env={
                     **inherited,
-                    "PYTHONPATH": str(Path(nci_si_mcp.__file__).parents[1]),
-                    "NCI_SI_DATA_DIR": data_dir,
+                    "PYTHONPATH": str(Path(nci_sip_mcp.__file__).parents[1]),
+                    "NCI_SIP_DATA_DIR": data_dir,
                 },
             )
 
@@ -450,14 +453,14 @@ class CommandValidationTest(ServerFixture):
     def test_invalid_environment_error_has_an_actionable_next_step(self):
         output = io.StringIO()
         with (
-            patch.dict(os.environ, {"NCI_SI_TIMEOUT_SECONDS": "0"}, clear=True),
-            patch.object(sys, "argv", ["nci-si-mcp", "release-info"]),
+            patch.dict(os.environ, {"NCI_SIP_TIMEOUT_SECONDS": "0"}, clear=True),
+            patch.object(sys, "argv", ["nci-sip-mcp", "release-info"]),
             redirect_stdout(output),
         ):
             status = cli.main()
         result = json.loads(output.getvalue())
         self.assertEqual(status, 1)
-        self.assertEqual(result["error"]["details"]["parameter"], "NCI_SI_TIMEOUT_SECONDS")
+        self.assertEqual(result["error"]["details"]["parameter"], "NCI_SIP_TIMEOUT_SECONDS")
         self.assertTrue(
             result["error"]["message"].endswith("Fix the environment variable and rerun.")
         )

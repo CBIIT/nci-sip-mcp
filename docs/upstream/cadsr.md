@@ -70,7 +70,7 @@ Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/4
 
 **Observation.** The release route is recorded 404. The export folder names 2026-07-01 22:19 without a timezone while its README says daily updates; matching/forms declare no registryRelease transport. C-1 fixtures are requested future behavior.
 
-**Reproduction.** Read the release route and the exact releasedCDEsXML-OD.zip folder row; inspect the matching/form contracts and the crafted pinned getCRDCList request/echo of the cadsr/with-registry-release scenario, crafted in memory by cadsr_with_registry_release in acceptance/src/nci_si_acceptance/craft.py.
+**Reproduction.** Read the release route and the exact releasedCDEsXML-OD.zip folder row; inspect the matching/form contracts and the crafted pinned getCRDCList request/echo of the cadsr/with-registry-release scenario, crafted in memory by cadsr_with_registry_release in acceptance/src/nci_sip_acceptance/craft.py.
 
 **Expected.** Publish stable registry identifiers and generation dates; specify pin transport and response verification for every content, form and matching operation, including getCRDCList.
 
@@ -132,7 +132,7 @@ Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/4
 
 **Observation.** Keyword search is requested OP-C03, not a verified served operation; the capped search answer is crafted. The live benchmark returned upstream_unavailable. Context/workflow/registration/value-domain filter parameter names are absent from that requested form.
 
-**Reproduction.** Use DataElement/search with keyword and pageSize from the request inventory; compare with public-id lookup. The capped answer crafted/OP-C03/search-over-cap.json is crafted in memory by cadsr_over_cap in acceptance/src/nci_si_acceptance/craft.py. The recorded malformed-id response illustrates the HTTP-200 error convention, not a recording of keyword search.
+**Reproduction.** Use DataElement/search with keyword and pageSize from the request inventory; compare with public-id lookup. The capped answer crafted/OP-C03/search-over-cap.json is crafted in memory by cadsr_over_cap in acceptance/src/nci_sip_acceptance/craft.py. The recorded malformed-id response illustrates the HTTP-200 error convention, not a recording of keyword search.
 
 **Expected.** A keyword endpoint with explicit filter names, registryRelease verification, pagination or a machine-readable 1000-result truncation signal. Open question for caDSR: can legitimate preferred-question-text lookup inputs exceed 2,000 Unicode characters or a 7,000-byte encoded URL target including filters/pins? The July 2026 export maximum was 1,011 characters (CDE 6148373 v1), but excludes retired/TEST/TRAINING records; the byte ceiling is conservative server policy, not measured caDSR capacity. No legitimate-input rejection has been observed; broader export and route measurements are needed.
 

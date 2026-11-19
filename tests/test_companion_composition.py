@@ -65,15 +65,15 @@ class CompanionCompositionTest(unittest.TestCase):
             },
             "mcp": common
             | {
-                "image": "nci-si-mcp:verified",
+                "image": "nci-sip-mcp:verified",
                 "ports": ["127.0.0.1:8000:8000"],
                 "networks": ["serving"],
                 "pids_limit": 128,
                 "mem_limit": "8g",
                 "cpus": 4,
                 "environment": {
-                    "NCI_SI_EMBEDDING_MODEL": "/model",
-                    "NCI_SI_HTTP_AUTH_MODE": "trusted-local",
+                    "NCI_SIP_EMBEDDING_MODEL": "/model",
+                    "NCI_SIP_HTTP_AUTH_MODE": "trusted-local",
                 },
                 "healthcheck": {
                     "test": [
@@ -82,7 +82,7 @@ class CompanionCompositionTest(unittest.TestCase):
                         "-c",
                         "import os, urllib.request; "
                         + "urllib.request.urlopen('http://127.0.0.1:' + "
-                        + "os.getenv('NCI_SI_HTTP_PORT', '8000') + '/ready', timeout=3).close()",
+                        + "os.getenv('NCI_SIP_HTTP_PORT', '8000') + '/ready', timeout=3).close()",
                     ],
                     "interval": "30s",
                     "timeout": "5s",
@@ -90,8 +90,8 @@ class CompanionCompositionTest(unittest.TestCase):
                     "retries": 3,
                 },
                 "volumes": [
-                    "${NCI_SI_LOCAL_INDEX:-../tmp/serving-index}:/data",
-                    "${NCI_SI_LOCAL_MODEL:-../tmp/serving-model}:/model:ro",
+                    "${NCI_SIP_LOCAL_INDEX:-../tmp/serving-index}:/data",
+                    "${NCI_SIP_LOCAL_MODEL:-../tmp/serving-model}:/model:ro",
                 ],
                 "tmpfs": [
                     "/tmp:rw,noexec,nosuid,size=256m,mode=1777",  # noqa: S108
@@ -160,16 +160,16 @@ class CompanionCompositionTest(unittest.TestCase):
         self.assertEqual(
             self.compose["services"]["mcp"]["volumes"],
             [
-                "${NCI_SI_LOCAL_INDEX:-../tmp/serving-index}:/data",
-                "${NCI_SI_LOCAL_MODEL:-../tmp/serving-model}:/model:ro",
+                "${NCI_SIP_LOCAL_INDEX:-../tmp/serving-index}:/data",
+                "${NCI_SIP_LOCAL_MODEL:-../tmp/serving-model}:/model:ro",
             ],
         )
 
     def test_the_runbook_tags_the_image_the_mcp_service_runs(self):
         # The container runbook builds :local; Compose would otherwise try to pull :verified.
         runbook = Path("docs/companion-containers.md").read_text(encoding="utf-8")
-        self.assertEqual(self.compose["services"]["mcp"]["image"], "nci-si-mcp:verified")
-        self.assertIn("`docker tag nci-si-mcp:local nci-si-mcp:verified`", runbook)
+        self.assertEqual(self.compose["services"]["mcp"]["image"], "nci-sip-mcp:verified")
+        self.assertIn("`docker tag nci-sip-mcp:local nci-sip-mcp:verified`", runbook)
 
     def test_committed_companion_dependencies_match_pdm_and_exclude_models(self):
         expected = render(tomllib.loads(Path("pdm.lock").read_text()))

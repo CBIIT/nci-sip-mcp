@@ -151,10 +151,10 @@ class PrePushTestHookTest(unittest.TestCase):
                     "id": "installer-requirements",
                     "name": "installer requirements are current",
                     "entry": "pdm export -G server -G build --no-default "
-                    "-o src/nci_si_mcp/server-requirements.txt",
+                    "-o src/nci_sip_mcp/server-requirements.txt",
                     "pass_filenames": False,
                     "files": r"^(pyproject\.toml|pdm\.lock|"
-                    r"src/nci_si_mcp/server-requirements\.txt)$",
+                    r"src/nci_sip_mcp/server-requirements\.txt)$",
                 },
                 common
                 | {

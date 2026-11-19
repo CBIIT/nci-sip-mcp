@@ -26,7 +26,7 @@ class CoveragePolicyTest(unittest.TestCase):
                 "run": {
                     "data_file": "${PDM_PROJECT_ROOT?}/tmp/coverage/unit/.coverage",
                     "branch": True,
-                    "source": ["nci_si_mcp", "ncit_index", "scripts"],
+                    "source": ["nci_sip_mcp", "ncit_index", "scripts"],
                     "omit": ["*/scripts/companion_entry.py"],
                     "patch": ["subprocess"],
                 },
@@ -44,7 +44,7 @@ class CoveragePolicyTest(unittest.TestCase):
                 "run": {
                     "data_file": "${PDM_PROJECT_ROOT?}/tmp/coverage/harness/.coverage",
                     "branch": True,
-                    "source": ["nci_si_acceptance"],
+                    "source": ["nci_sip_acceptance"],
                     "patch": ["subprocess"],
                 },
                 "report": {"fail_under": 95, "precision": 2, "show_missing": True},
@@ -81,7 +81,7 @@ class CoveragePolicyTest(unittest.TestCase):
             server,
             {
                 "name": "Report coverage against the aim",
-                "run": "total=\"$(pdm run coverage report --include='*/src/nci_si_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=0 --format=total)\"\n"
+                "run": "total=\"$(pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=0 --format=total)\"\n"
                 'echo "Coverage ${total}% (the aim is above 98%)" >> "$GITHUB_STEP_SUMMARY"\n'
                 "if awk -v total=\"$total\" 'BEGIN { exit !(total <= 98) }'; then\n"
                 '  echo "::warning title=Coverage is not above 98%::${total}%. Cover the untested behaviour; do not pad."\nfi\n',

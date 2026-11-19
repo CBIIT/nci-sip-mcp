@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from nci_si_acceptance.craft import Recorded, craft, release_session
-from nci_si_acceptance.record import FIXTURES
+from nci_sip_acceptance.craft import Recorded, craft, release_session
+from nci_sip_acceptance.record import FIXTURES
 
 # Independent literal expected origins shared by policy and native-report owners.
 REVIEWED_ORIGINS = {
@@ -54,7 +54,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 # directory stands in for the identity of the tree (test_suite_identity.py tests the real one).
 STAND_IN = "stand_in"
 STAND_IN_SOURCE = (
-    "from nci_si_acceptance import report\n"
+    "from nci_sip_acceptance import report\n"
     "report.suite_state = lambda config: {'version': '0', 'fixture_set': 'x', 'digest': 'ab'}\n"
 )
 
@@ -70,13 +70,13 @@ def synthetic_live(pytester: pytest.Pytester) -> None:
 
 
 SYNTHETIC_LIVE = """import os as _synthetic_os
-from nci_si_acceptance import client as _synthetic_client
-from nci_si_acceptance.denied_surfaces import DeniedSurfaces as _SyntheticRefusal
+from nci_sip_acceptance import client as _synthetic_client
+from nci_sip_acceptance.denied_surfaces import DeniedSurfaces as _SyntheticRefusal
 
 _synthetic_configure = pytest_configure
 
 def pytest_configure(config):
-    if _synthetic_os.environ.get("NCI_SI_ACCEPTANCE_MODE") != "live":
+    if _synthetic_os.environ.get("NCI_SIP_ACCEPTANCE_MODE") != "live":
         return _synthetic_configure(config)
     denied = _SyntheticRefusal()
     endpoint = denied.__enter__()
@@ -196,7 +196,7 @@ def compliant(pytester, monkeypatch):
         _fixture(fixtures / path, answer)
     for scenario in ("restricted", "attributed"):
         settings = fixtures / "scenarios" / "license" / scenario / "settings.json"
-        settings.write_text(json.dumps({"NCI_SI_EVS_LICENSE_KEY": LICENCE_KEY}), encoding="utf-8")
+        settings.write_text(json.dumps({"NCI_SIP_EVS_LICENSE_KEY": LICENCE_KEY}), encoding="utf-8")
     stand_in(pytester)
     tests = pytester.mkdir("tests")
     for name in (
@@ -207,10 +207,10 @@ def compliant(pytester, monkeypatch):
         "calls.yaml",
     ):
         (tests / name).write_text((SUITE / name).read_text(encoding="utf-8"), encoding="utf-8")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "fixture")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_SERVER", f"{sys.executable} {COMPLIANT_SERVER}")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PROFILE", "evs")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PREPARE", "true")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "fixture")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_SERVER", f"{sys.executable} {COMPLIANT_SERVER}")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PROFILE", "evs")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PREPARE", "true")
     monkeypatch.delenv("COMPLIANT_SERVER_DEFECT", raising=False)
     return pytester
 

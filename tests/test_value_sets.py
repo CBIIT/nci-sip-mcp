@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
 
-from nci_si_mcp.context import Context
-from nci_si_mcp.http_client import UpstreamTooLargeError, UpstreamUnavailableError
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.http_client import UpstreamTooLargeError, UpstreamUnavailableError
+from nci_sip_mcp.registry import invoke
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
 
@@ -29,7 +29,8 @@ class ValueSetTest(ServerFixture):
 
     def reply(self, **arguments):
         with patch(
-            "nci_si_mcp.http_client._open", return_value=FakeResponse(json.dumps(self.raw).encode())
+            "nci_sip_mcp.http_client._open",
+            return_value=FakeResponse(json.dumps(self.raw).encode()),
         ) as opened:
             result = self.expand(**arguments)
         return result, opened
@@ -93,7 +94,10 @@ class ValueSetTest(ServerFixture):
         result, _ = self.reply(valueSet=None, code="C85492")
         self.assertEqual(len(result["members"]), 200)
         for arguments in ({"valueSet": None}, {"code": "C85492"}):
-            with self.subTest(arguments=arguments), patch("nci_si_mcp.http_client._open") as opened:
+            with (
+                self.subTest(arguments=arguments),
+                patch("nci_sip_mcp.http_client._open") as opened,
+            ):
                 result = self.expand(**arguments)
                 self.assertEqual(result["error"]["code"], "invalid_request")
                 self.assertEqual(opened.call_count, 0)
@@ -111,7 +115,10 @@ class ValueSetTest(ServerFixture):
             {"release": "bad?"},
         ]
         for arguments in cases:
-            with self.subTest(arguments=arguments), patch("nci_si_mcp.http_client._open") as opened:
+            with (
+                self.subTest(arguments=arguments),
+                patch("nci_sip_mcp.http_client._open") as opened,
+            ):
                 result = self.expand(**arguments)
                 self.assertEqual(result["error"]["code"], "invalid_request")
                 self.assertEqual(opened.call_count, 0)
@@ -167,7 +174,7 @@ class ValueSetTest(ServerFixture):
         self.raw = {"resourceType": "OperationOutcome", "issue": [{"severity": "error"}]}
         result, _ = self.reply()
         self.assertEqual(result["error"]["code"], "upstream_unavailable")
-        with patch("nci_si_mcp.http_client._open", side_effect=http_error(404, b"{}")):
+        with patch("nci_sip_mcp.http_client._open", side_effect=http_error(404, b"{}")):
             result = self.expand()
         self.assertEqual(result["error"]["code"], "upstream_unavailable")
 
@@ -178,7 +185,7 @@ class ValueSetTest(ServerFixture):
         validator = Draft202012Validator(tool.output_schema)
         arguments = {"terminology": "ncit", "release": "26.09d", "code": "C85492"}
         with patch(
-            "nci_si_mcp.http_client._open",
+            "nci_sip_mcp.http_client._open",
             side_effect=[
                 FakeResponse(json.dumps(self.raw).encode()),
                 FakeResponse(json.dumps(self.raw).encode()),
@@ -199,8 +206,8 @@ class ValueSetTest(ServerFixture):
         self.context.fhir.max_response_bytes = 10
         result, _ = self.reply()
         self.assertEqual(result["error"]["code"], "bound_exceeded")
-        self.assertEqual(result["error"]["details"]["bound"], "NCI_SI_EVS_MAX_RESPONSE_BYTES")
-        self.assertIn("NCI_SI_EVS_MAX_RESPONSE_BYTES", result["error"]["message"])
+        self.assertEqual(result["error"]["details"]["bound"], "NCI_SIP_EVS_MAX_RESPONSE_BYTES")
+        self.assertIn("NCI_SIP_EVS_MAX_RESPONSE_BYTES", result["error"]["message"])
 
     def test_configured_fhir_origin_credentials_and_correlation_reach_the_request(self):
         self.context = Context(
@@ -261,8 +268,8 @@ class FHIRTransportSettingsTest(ServerFixture):
     def test_fhir_retries_use_configured_attempts_and_surface_label(self):
         context = self.fhir_context()
         with (
-            patch("nci_si_mcp.http_client._open", side_effect=lambda *args: http_failure()),
-            patch("nci_si_mcp.http_client.time.sleep"),
+            patch("nci_sip_mcp.http_client._open", side_effect=lambda *args: http_failure()),
+            patch("nci_sip_mcp.http_client.time.sleep"),
             self.assertRaises(UpstreamUnavailableError) as raised,
         ):
             context.fhir.get_json("/ValueSet/$expand")
@@ -272,10 +279,10 @@ class FHIRTransportSettingsTest(ServerFixture):
     def test_fhir_response_limit_uses_configured_bytes(self):
         context = self.fhir_context()
         with (
-            patch("nci_si_mcp.http_client._open", return_value=FakeResponse(b'{"large":"value"}')),
+            patch("nci_sip_mcp.http_client._open", return_value=FakeResponse(b'{"large":"value"}')),
             self.assertRaises(UpstreamTooLargeError) as raised,
         ):
             context.fhir.get_json("/ValueSet/$expand")
         self.assertEqual(raised.exception.details["limit"], 8)
         self.assertEqual(raised.exception.details["reached"], 9)
-        self.assertEqual(raised.exception.details["bound"], "NCI_SI_EVS_MAX_RESPONSE_BYTES")
+        self.assertEqual(raised.exception.details["bound"], "NCI_SIP_EVS_MAX_RESPONSE_BYTES")

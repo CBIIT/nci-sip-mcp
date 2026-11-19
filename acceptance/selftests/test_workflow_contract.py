@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from nci_si_acceptance.record import FIXTURES
-from nci_si_acceptance.spec import parameters
+from nci_sip_acceptance.record import FIXTURES
+from nci_sip_acceptance.spec import parameters
 
 CHECKS = runpy.run_path(str(Path(__file__).parents[1] / "tests/test_workflow.py"))
 PINNED = {"terminology": "ncit", "release": "26.09d"}

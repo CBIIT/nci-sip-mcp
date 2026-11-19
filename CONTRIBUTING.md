@@ -113,13 +113,13 @@ companion and the benchmark tooling; these are their entry points.
 The server tests are `unittest.TestCase` classes, run by pytest. They are offline:
 `tests/fakes.py` supplies shared doubles, and client integration tests use local HTTP fixtures.
 The acceptance suite and its self-tests use pytest directly.
-The unit tests ignore the developer's `NCI_SI_*` variables (`tests/conftest.py` removes them); a
+The unit tests ignore the developer's `NCI_SIP_*` variables (`tests/conftest.py` removes them); a
 test that needs a setting sets it with `monkeypatch` or `patch.dict`.
 
 ### Explicit controlled request integration
 
 `HttpClient(request_policy=...)` selects an explicit provider. Platform-client constructors
-can instead run inside `nci_si_mcp.request_policy.using_request_policy`; each client captures
+can instead run inside `nci_sip_mcp.request_policy.using_request_policy`; each client captures
 that default, and nested scopes restore their parent. Without either opt-in, transport behavior
 is unchanged. The core classifies the provider's raw `Exchange` through the existing parser and
 error path; terminal refusal is `upstream_unavailable`, without cache fallback or public policy
@@ -143,7 +143,7 @@ and headers in their representation. Core classification alone proves none of th
 I/O guarantees. The `on_request` observer is not an enforcement boundary.
 
 Explicit authorization, shared accounting and owned-run supervision are described below.
-`nci_si_acceptance.request_transport.ControlledHttpPolicy` composes them for explicitly
+`nci_sip_acceptance.request_transport.ControlledHttpPolicy` composes them for explicitly
 cooperating diagnostic callers. Furnished harness,
 prepare, selected stdio benchmark and direct-citation adoption remains #448, recorder adoption #449. This extension
 activates no furnished caller or live access and changes no native/benchmark report schema.
@@ -154,9 +154,9 @@ Given an owner-approved `authorization` and an owned `Path` directory, inject th
 into a client inside its supervised run:
 
 ```python
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.http_client import HttpClient
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.request_transport import ControlledHttpPolicy
+from nci_sip_mcp.http_client import HttpClient
 
 with SupervisedRun.create(authorization, owned_directory) as owner:
     client = HttpClient(
@@ -188,7 +188,7 @@ and every cleanup failure closes admission even when a caller catches its except
 
 ### Explicit request authorization
 
-`nci_si_acceptance.request_authorization` supplies frozen `RequestGrant`, `Limits`,
+`nci_sip_acceptance.request_authorization` supplies frozen `RequestGrant`, `Limits`,
 `Authorization` and private `RunDescriptor` values for explicitly cooperating diagnostic callers.
 Grants describe one exact GET/POST method, URL, headers, body and credential destination.
 `Authorization` admits only exact `RequestGrant` and `Limits` records; binding requires an exact
@@ -234,7 +234,7 @@ remains #448/#449.
 
 ### Explicit shared request accounting
 
-`nci_si_acceptance.request_budget.ControlledRun` owns a private SQLite ledger for explicitly
+`nci_sip_acceptance.request_budget.ControlledRun` owns a private SQLite ledger for explicitly
 cooperating callers. `create` starts with admission closed; the controller opens once,
 authorizes participant identities and terminally closes. `attach` opens existing state only.
 Existing ledger operations refuse missing or ambiguous run records before using their fields.
@@ -443,7 +443,7 @@ CI runs the unit suite in four sorted round-robin partitions, each serial with a
 budget. `--unit-shard K/N` selects a partition without affecting nested pytest child runs.
 Each partition retains JUnit evidence and one-day coverage data. The `unit-coverage` job
 requires all four files, combines them, enforces 95% floors over the core-and-scripts measurement
-and separately over `src/nci_si_mcp` plus `src/ncit_index`, and reports the above-98% aim over
+and separately over `src/nci_sip_mcp` plus `src/ncit_index`, and reports the above-98% aim over
 the combined measurement; individual partitions do not enforce a partial coverage floor. Local
 `pdm run test` checks the complete core-and-scripts suite. The mutation gate's local unit baseline
 also remains serial and unsharded.
@@ -474,7 +474,7 @@ during feature-branch cleanup; it is generated publication data.
 3. **Coverage: 95% is the checked minimum, above 98% is the aim.** The gap is deliberate: it
    keeps anyone from writing tests for the number. Cover untested behaviour whenever you can.
    Never add a test that asserts nothing, or only that a mock was called. Local `pdm run test`
-   checks the minimum over `src/nci_si_mcp`, `src/ncit_index` and every script in `scripts/`
+   checks the minimum over `src/nci_sip_mcp`, `src/ncit_index` and every script in `scripts/`
    except those `omit`ted in `pyproject.toml`. CI checks both the combined core-and-scripts and
    core-only minimums, and reports the aim over the combined measurement. Harness self-tests
    check their own 95% minimum and above-98% aim. Omit nothing to raise a number.
@@ -547,7 +547,7 @@ pytest's original report. Local report files live under ignored `tmp/` directori
 | gitleaks, zizmor | No secrets; safe GitHub Actions workflows |
 | actionlint, shellcheck | Workflow syntax, expressions and shell scripts; both binaries are pinned in the PDM lint group. Only the unsupported `$/` self-repository diagnostics are ignored in `.github/actionlint.yaml`; local target existence is tested separately. |
 | Upstream requirement packages | `docs/upstream/*.md` are the current render of `docs/upstream/catalogue.yaml` (`scripts/upstream_requirements.py --check`) |
-| Installer requirements | The package-shipped server lock is the current PDM export of the `server` and `build` groups: `pdm export -G server -G build --no-default -o src/nci_si_mcp/server-requirements.txt` |
+| Installer requirements | The package-shipped server lock is the current PDM export of the `server` and `build` groups: `pdm export -G server -G build --no-default -o src/nci_sip_mcp/server-requirements.txt` |
 | Acceptance ratchet (CI) | Every fixture-mode test has the outcome in `acceptance/expected/fixture.json`. An intentional move updates that file in the same pull request; a base `passed` outcome that regresses or is removed also needs its exact base-bound transition in `acceptance/expected/regressions.yaml`. `pdm run acceptance-expected update acceptance/fixture.json` writes current outcomes from a fresh report, and `pdm run acceptance-status` updates the functional-status tables. |
 | Tests and coverage | The suite passes before each push and in CI; CI fails below the coverage minimum of standard 3 and warns when the aim is missed |
 | Local run (CI only) | The documented setup, walked literally on `macos-latest` and `ubuntu-24.04` (`.github/workflows/local-run.yml`, on pushes to `main`, weekly, by hand, and on pull requests that touch the install paths). Every command is copied from the document that gives it; the test of the workflow compares the two, so change a documented command and its workflow line together. Not a required check: it uses live EVS |
@@ -613,19 +613,19 @@ Fixture checks never establish live-service assurance.
 
 Only protected live checks need issued credentials. Anonymous live checks and fixture CI need
 none. A maintainer may run `pdm run github-setup` after authenticating `gh`; it creates missing
-names with `NCI_SI_CONFIGURE_ME`, never overwrites an existing name, and never reads secret values.
+names with `NCI_SIP_CONFIGURE_ME`, never overwrites an existing name, and never reads secret values.
 The live workflow treats the placeholder as absent and lists absent names in its summary.
 Existing names may still contain dummy values: setup cannot inspect them. No caDSR credential
 has been issued. The owner deleted the dummy on 24 October; setup can create its placeholder.
 
 | Secret | Purpose | Workflow |
 | --- | --- | --- |
-| `NCI_SI_CADSR_CREDENTIAL` | Issued caDSR user:password for protected live checks | Acceptance (live) |
-| `NCI_SI_EVS_LICENSE_KEY` | Issued EVS licence key for restricted live checks | Acceptance (live) |
+| `NCI_SIP_CADSR_CREDENTIAL` | Issued caDSR user:password for protected live checks | Acceptance (live) |
+| `NCI_SIP_EVS_LICENSE_KEY` | Issued EVS licence key for restricted live checks | Acceptance (live) |
 
-Maintainer: run gh secret set NCI_SI_CADSR_CREDENTIAL --repo CBIIT/nci-sip-mcp in your own terminal; it prompts for the value.
+Maintainer: run gh secret set NCI_SIP_CADSR_CREDENTIAL --repo CBIIT/nci-sip-mcp in your own terminal; it prompts for the value.
 
-Maintainer: run gh secret set NCI_SI_EVS_LICENSE_KEY --repo CBIIT/nci-sip-mcp in your own terminal; it prompts for the value.
+Maintainer: run gh secret set NCI_SIP_EVS_LICENSE_KEY --repo CBIIT/nci-sip-mcp in your own terminal; it prompts for the value.
 
 `GITHUB_TOKEN` is automatic and is never created by setup. No repository Actions variables are
 required. INT, UAT and Production environments remain deferred to the AWS phases; setup creates
@@ -633,7 +633,7 @@ no environments. Never put a credential in command arguments or shell history.
 
 ## Pull requests and releases
 
-The government sponsor approves changes; the NCI SI MCP project coordinator relays that approval,
+The government sponsor approves changes; the NCI SIP MCP project coordinator relays that approval,
 and the reviewer acts for the coordinator.
 
 Merge clearance is a reviewer PR comment naming the head commit; a subsequent push needs new
@@ -646,7 +646,7 @@ squash remains an allowed alternative. Use the pull request title as the landing
 subject and leave its body blank. The title must be a
 [Conventional Commit](https://www.conventionalcommits.org) subject; a check on the pull request
 fails otherwise. Changes to `spec/` and `acceptance/` follow the change control in
-[acceptance/README.md](acceptance/README.md#change-control): the NCI SI MCP project coordinator is
+[acceptance/README.md](acceptance/README.md#change-control): the NCI SIP MCP project coordinator is
 their code owner.
 
 Merge landings preserve the issue and review commits. Releases take the highest eligible bump
@@ -684,7 +684,7 @@ For the complete fixture ratchet, select the registry checks this server support
 the furnished secured adapter and index preparation explicitly, as CI does:
 
 ```bash
-NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SI_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json
+NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SIP_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SIP_ACCEPTANCE_PREPARE='nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json
 ```
 
 The harness default remains `optional`. Successors must supply their own secured adapter;

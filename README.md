@@ -1,4 +1,4 @@
-# NCI SI MCP
+# NCI SIP MCP
 
 [![CI](https://github.com/CBIIT/nci-sip-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CBIIT/nci-sip-mcp/actions/workflows/ci.yml?query=branch%3Amain)
 [![CodeQL](https://github.com/CBIIT/nci-sip-mcp/actions/workflows/github-code-scanning/codeql/badge.svg?branch=main)](https://github.com/CBIIT/nci-sip-mcp/actions/workflows/github-code-scanning/codeql?query=branch%3Amain)
@@ -13,7 +13,7 @@ from successful main CI, with the measured commit and run linked; they are not a
 Scorecard measures repository security practices, not acceptance outcomes.
 [SCORECARD.md](SCORECARD.md) explains the score and what keeps it below 10.
 
-The NCI Semantic Infrastructure Model Context Protocol (MCP) server, built to production standards
+The NCI Semantic Infrastructure Program MCP server, built to production standards
 and likely to become the production codebase, though not yet declared production. It serves
 terminology (NCI Thesaurus through EVS) and metadata (common data elements through caDSR), with
 the cross-domain tools that join them, and it never returns content it did not retrieve:
@@ -46,7 +46,7 @@ Install a released server with the [local guide prerequisites and server sequenc
 
 ```bash
 pdm install                  # Python 3.14+ and PDM; see the prerequisites below
-pdm run nci-si-mcp serve     # the server, over MCP stdio
+pdm run nci-sip-mcp serve     # the server, over MCP stdio
 pdm run acceptance           # the acceptance suite against it, on recorded upstream answers
 ```
 
@@ -56,7 +56,7 @@ outside the supported configuration. [GitHub Releases](https://github.com/CBIIT/
 are the changelog.
 A plain `pdm run acceptance` skips prepared, secured and optional registry-release checks.
 The [complete fixture command](CONTRIBUTING.md#complete-fixture-ratchet) supplies preparation, the security
-adapter and `NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required` to run all cases.
+adapter and `NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=required` to run all cases.
 
 [QUICKSTART.md](QUICKSTART.md) has the rest: connecting a client, settings, tools and errors.
 Protected live workflow checks need issued [workflow credentials](CONTRIBUTING.md#workflow-credentials);

@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 from fakes import concept
-from nci_si_mcp.bounds import check_deadline
+from nci_sip_mcp.bounds import check_deadline
 from test_server import ServerFixture
 
 
@@ -18,7 +18,7 @@ class DeadlineTraversalTest(ServerFixture):
             return found
 
         with (
-            patch("nci_si_mcp.bounds.monotonic", side_effect=lambda: now[0]),
+            patch("nci_sip_mcp.bounds.monotonic", side_effect=lambda: now[0]),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=spend),
         ):
             failed, result = self.call(
@@ -48,7 +48,7 @@ class DeadlineTraversalTest(ServerFixture):
             check_deadline()
 
         with (
-            patch("nci_si_mcp.bounds.monotonic", side_effect=lambda: now[0]),
+            patch("nci_sip_mcp.bounds.monotonic", side_effect=lambda: now[0]),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=spend),
         ):
             failed, result = self.call("get_concept_neighborhood", code="C3262", kinds=["child"])
@@ -77,7 +77,7 @@ class DeadlineTraversalTest(ServerFixture):
             return fetch(codes, **kwargs)
 
         with (
-            patch("nci_si_mcp.bounds.monotonic", side_effect=lambda: now[0]),
+            patch("nci_sip_mcp.bounds.monotonic", side_effect=lambda: now[0]),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=spend),
         ):
             failed, result = self.call(

@@ -1,7 +1,7 @@
 import unittest
 
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.evs import (
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import (
     EVSResponseError,
     normalize_concept,
     object_list,

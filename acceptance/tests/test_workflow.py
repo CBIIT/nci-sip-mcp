@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nci_si_acceptance.results import (
+from nci_sip_acceptance.results import (
     UNPINNED_REGISTRY,
     bare_code,
     element_ids,
@@ -15,7 +15,7 @@ from nci_si_acceptance.results import (
     sparql_rows,
     value_ids,
 )
-from nci_si_acceptance.spec import TOOLS, defaults
+from nci_sip_acceptance.spec import TOOLS, defaults
 
 GROUND = "ground_value"
 COHORT = "expand_cohort"

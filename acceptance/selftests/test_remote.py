@@ -24,12 +24,12 @@ import pytest
 from restart_stub import stop
 
 from conftest import LICENCE_KEY, STAND_IN
-from nci_si_acceptance import client, environments
-from nci_si_acceptance import remote as remote_module
-from nci_si_acceptance.client import Target, open_remote_session, wait_for_endpoint
-from nci_si_acceptance.fixture_server import FixtureServer, FixtureSet
-from nci_si_acceptance.remote import StateHook, announcement, probe
-from nci_si_acceptance.tools import Process
+from nci_sip_acceptance import client, environments
+from nci_sip_acceptance import remote as remote_module
+from nci_sip_acceptance.client import Target, open_remote_session, wait_for_endpoint
+from nci_sip_acceptance.fixture_server import FixtureServer, FixtureSet
+from nci_sip_acceptance.remote import StateHook, announcement, probe
+from nci_sip_acceptance.tools import Process
 
 pytest_plugins = ["pytester"]
 
@@ -58,11 +58,11 @@ import pytest
 pytestmark = pytest.mark.gate
 
 def test_echo(tools):
-    assert "echoed" == os.environ["NCI_SI_ACCEPTANCE_AUTHORIZATION"]
+    assert "echoed" == os.environ["NCI_SIP_ACCEPTANCE_AUTHORIZATION"]
 
 
 def test_echo_token(tools):
-    assert "echoed" == os.environ["NCI_SI_ACCEPTANCE_AUTHORIZATION"].partition(" ")[2]
+    assert "echoed" == os.environ["NCI_SIP_ACCEPTANCE_AUTHORIZATION"].partition(" ")[2]
 """
 
 
@@ -92,7 +92,7 @@ def stub(tmp_path_factory):
     directory = tmp_path_factory.mktemp("stub")
     port, fixture_port = free_port(), free_port()
     environment = {
-        "NCI_SI_EVS_BASE_URL": f"http://127.0.0.1:{fixture_port}/evs",
+        "NCI_SIP_EVS_BASE_URL": f"http://127.0.0.1:{fixture_port}/evs",
         "COMPLIANT_SERVER_PORT": str(port),
         "COMPLIANT_SERVER_AUTHORIZATION": CREDENTIAL,
         "COMPLIANT_SERVER_AUTH_LOG": str(directory / "credentials.log"),
@@ -121,14 +121,14 @@ def remote(compliant, monkeypatch, stub):
     """The suite's tests, run against the remote server: `run(*arguments)` gives the result of
     the run and its report."""
 
-    monkeypatch.delenv("NCI_SI_ACCEPTANCE_SERVER")
-    monkeypatch.delenv("NCI_SI_ACCEPTANCE_PREPARE")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_URL", stub.url)
+    monkeypatch.delenv("NCI_SIP_ACCEPTANCE_SERVER")
+    monkeypatch.delenv("NCI_SIP_ACCEPTANCE_PREPARE")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_URL", stub.url)
     # Unbuffered output reaches the captured file descriptor at once; a harness line written
     # while the test's output is captured is then lost, so the run proves it is shown anyway.
     monkeypatch.setenv("PYTHONUNBUFFERED", "1")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_AUTHORIZATION", CREDENTIAL)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_FIXTURE_BIND", f"127.0.0.1:{stub.fixture_port}")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_AUTHORIZATION", CREDENTIAL)
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_FIXTURE_BIND", f"127.0.0.1:{stub.fixture_port}")
     # What the operator's restart command is given by the environment it runs in.
     for name, value in stub.environment.items():
         monkeypatch.setenv(name, value)
@@ -200,8 +200,8 @@ def test_the_harness_tells_the_operator_what_to_set_on_the_server(remote, stub):
     result.stdout.fnmatch_lines(
         [
             "settings of the server under test:",
-            "*NCI_SI_UPSTREAM_MODE=fixture",
-            f"*NCI_SI_EVS_BASE_URL=http://127.0.0.1:{stub.fixture_port}/evs",
+            "*NCI_SIP_UPSTREAM_MODE=fixture",
+            f"*NCI_SIP_EVS_BASE_URL=http://127.0.0.1:{stub.fixture_port}/evs",
         ]
     )
 
@@ -210,7 +210,7 @@ def test_without_a_restart_command_the_tests_that_need_a_server_of_their_own_are
     result, report = remote(TOOLS_LIST, UNKNOWN_RELEASE, OWN_SERVER)
 
     result.stdout.fnmatch_lines(
-        ["SKIPPED * needs a server of its own (NCI_SI_ACCEPTANCE_STATE_HOOK)"]
+        ["SKIPPED * needs a server of its own (NCI_SIP_ACCEPTANCE_STATE_HOOK)"]
     )
     assert outcomes_of(report) == {
         TOOLS_LIST.partition("::")[2]: "passed",
@@ -226,7 +226,7 @@ def test_a_test_that_needs_the_index_is_not_run_until_the_operator_declares_it_p
     result, report = remote(PREPARED)
 
     result.stdout.fnmatch_lines(
-        ["SKIPPED * NOT RUN: the server is not declared prepared (NCI_SI_ACCEPTANCE_PREPARED)"]
+        ["SKIPPED * NOT RUN: the server is not declared prepared (NCI_SIP_ACCEPTANCE_PREPARED)"]
     )
     assert outcomes_of(report) == {PREPARED.partition("::")[2]: "skipped"}
 
@@ -234,8 +234,8 @@ def test_a_test_that_needs_the_index_is_not_run_until_the_operator_declares_it_p
 def test_the_state_hook_gives_scenario_and_own_server_tests_a_server_of_their_own(
     remote, stub, monkeypatch
 ):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_STATE_HOOK", f"{sys.executable} {RESTART_STUB}")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PREPARED", "1")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_STATE_HOOK", f"{sys.executable} {RESTART_STUB}")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PREPARED", "1")
     chosen = (UNKNOWN_RELEASE, LICENCE_REACHES, OWN_SERVER, TOOLS_LIST, PREPARED)
 
     _, report = remote(*chosen)
@@ -262,7 +262,7 @@ def test_dependent_tests_fail_when_the_server_does_not_reach_the_fixture_server(
     remote, monkeypatch, stub
 ):
     elsewhere = free_port()
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_FIXTURE_BIND", f"127.0.0.1:{elsewhere}")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_FIXTURE_BIND", f"127.0.0.1:{elsewhere}")
 
     result, report = remote(TOOLS_LIST)
 
@@ -272,7 +272,7 @@ def test_dependent_tests_fail_when_the_server_does_not_reach_the_fixture_server(
 
 
 def test_every_dependent_test_fails_when_the_server_does_not_answer(remote, monkeypatch):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_URL", f"http://127.0.0.1:{free_port()}/mcp")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_URL", f"http://127.0.0.1:{free_port()}/mcp")
 
     result, report = remote(TOOLS_LIST, "tests/test_echo.py")
 
@@ -286,32 +286,32 @@ def test_every_dependent_test_fails_when_the_server_does_not_answer(remote, monk
 
 
 def test_selected_live_mode_refuses_a_remote_target_without_a_report(remote, monkeypatch):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "live")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "live")
     monkeypatch.setenv(environments.VARIABLE, "evs-only")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PROFILE", "unified")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PROFILE", "unified")
     for key in list(os.environ):
         if environments.external_runtime_setting(key) or key in {
             *client.UPSTREAM_VARIABLES,
             *environments.CREDENTIAL_SURFACES,
-            "NCI_SI_ACCEPTANCE_FIXTURE_BIND",
+            "NCI_SIP_ACCEPTANCE_FIXTURE_BIND",
         }:
             monkeypatch.delenv(key)
     result, report = remote(TOOLS_LIST)
     assert result.ret == USAGE_ERROR
     assert report is None
     assert result.stderr.str().strip() == (
-        "ERROR: NCI_SI_ACCEPTANCE_URL is incompatible with the selected live environment"
+        "ERROR: NCI_SIP_ACCEPTANCE_URL is incompatible with the selected live environment"
     )
 
 
 def test_naming_a_command_and_an_endpoint_stops_the_run_with_a_usage_error(compliant, monkeypatch):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_URL", "http://127.0.0.1:9/mcp")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_URL", "http://127.0.0.1:9/mcp")
 
     result = compliant.runpytest_subprocess("tests", "-p", "no:cacheprovider", "-p", STAND_IN)
 
     assert result.ret == USAGE_ERROR
     result.stderr.fnmatch_lines(
-        ["*NCI_SI_ACCEPTANCE_URL and NCI_SI_ACCEPTANCE_SERVER are both set; name one server*"]
+        ["*NCI_SIP_ACCEPTANCE_URL and NCI_SIP_ACCEPTANCE_SERVER are both set; name one server*"]
     )
 
 
@@ -320,7 +320,7 @@ def fetches_at_startup(path):
 
     code = f"""import os, urllib.error, urllib.request
 try:
-    with urllib.request.urlopen(os.environ['NCI_SI_EVS_BASE_URL'] + '{path}'):
+    with urllib.request.urlopen(os.environ['NCI_SIP_EVS_BASE_URL'] + '{path}'):
         pass
 except urllib.error.HTTPError as error:
     with error:
@@ -333,8 +333,8 @@ def test_a_server_that_asks_the_fixture_server_while_the_hook_starts_it_passes_t
     remote, monkeypatch
 ):
     # The compliant server keeps asking the fixture server it was given, not this one.
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_FIXTURE_BIND", f"127.0.0.1:{free_port()}")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_STATE_HOOK", fetches_at_startup("/api/v1/version"))
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_FIXTURE_BIND", f"127.0.0.1:{free_port()}")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_STATE_HOOK", fetches_at_startup("/api/v1/version"))
 
     result, report = remote(TOOLS_LIST)
 
@@ -345,7 +345,7 @@ def test_a_server_that_asks_the_fixture_server_while_the_hook_starts_it_passes_t
 def test_requests_without_a_fixture_while_the_hook_starts_the_server_fail_dependent_tests(
     remote, monkeypatch
 ):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_STATE_HOOK", fetches_at_startup("/api/v1/nothing"))
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_STATE_HOOK", fetches_at_startup("/api/v1/nothing"))
 
     result, report = remote(TOOLS_LIST, "tests/test_echo.py")
 
@@ -365,8 +365,8 @@ def test_requests_without_a_fixture_while_the_hook_starts_the_server_fail_depend
 
 def test_unmatched_requests_during_a_state_change_are_reported_for_its_test(remote, monkeypatch):
     fetch = fetches_at_startup("/api/v1/nothing")
-    command = f'if [ -n "$NCI_SI_ACCEPTANCE_SCENARIOS" ]; then {fetch}; fi'
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_STATE_HOOK", command)
+    command = f'if [ -n "$NCI_SIP_ACCEPTANCE_SCENARIOS" ]; then {fetch}; fi'
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_STATE_HOOK", command)
 
     result, report = remote(TOOLS_LIST, UNKNOWN_RELEASE)
 
@@ -379,8 +379,8 @@ def test_unmatched_requests_during_a_state_change_are_reported_for_its_test(remo
 
 
 def test_a_failed_scenario_state_change_is_reported_for_its_test(remote, monkeypatch):
-    command = 'if [ -n "$NCI_SI_ACCEPTANCE_SCENARIOS" ]; then echo "state unavailable"; exit 3; fi'
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_STATE_HOOK", command)
+    command = 'if [ -n "$NCI_SIP_ACCEPTANCE_SCENARIOS" ]; then echo "state unavailable"; exit 3; fi'
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_STATE_HOOK", command)
 
     result, report = remote(TOOLS_LIST, UNKNOWN_RELEASE)
 
@@ -397,7 +397,7 @@ def test_a_remote_server_is_tested_by_one_process(remote):
 
     assert result.ret == USAGE_ERROR
     result.stderr.fnmatch_lines(
-        ["*a remote server (NCI_SI_ACCEPTANCE_URL) is tested by one process*"]
+        ["*a remote server (NCI_SIP_ACCEPTANCE_URL) is tested by one process*"]
     )
 
 
@@ -437,33 +437,33 @@ def test_the_hook_gets_the_fixture_and_scenario_settings_but_none_of_the_develop
     stub, tmp_path, monkeypatch
 ):
     seen = tmp_path / "environment.txt"
-    monkeypatch.setenv("NCI_SI_EVS_LICENSE_KEY", "developers-own-key")
-    monkeypatch.setenv("NCI_SI_UPSTREAM_MODE", "live")
-    monkeypatch.setenv("NCI_SI_DATA_DIR", "/developers/data")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PREPARED", "1")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_AUTHORIZATION", CREDENTIAL)
+    monkeypatch.setenv("NCI_SIP_EVS_LICENSE_KEY", "developers-own-key")
+    monkeypatch.setenv("NCI_SIP_UPSTREAM_MODE", "live")
+    monkeypatch.setenv("NCI_SIP_DATA_DIR", "/developers/data")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PREPARED", "1")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_AUTHORIZATION", CREDENTIAL)
     with hook_for(stub, tmp_path, f"env > {seen}") as hook:
-        hook.apply(("a/one", "a/two"), {"NCI_SI_EVS_LICENSE_KEY": "the-scenarios"})
+        hook.apply(("a/one", "a/two"), {"NCI_SIP_EVS_LICENSE_KEY": "the-scenarios"})
 
     given = dict(
         line.split("=", 1) for line in seen.read_text(encoding="utf-8").splitlines() if "=" in line
     )
-    assert given["NCI_SI_EVS_LICENSE_KEY"] == "the-scenarios"
-    assert given["NCI_SI_UPSTREAM_MODE"] == "fixture"
-    assert given["NCI_SI_EVS_BASE_URL"].endswith("/evs")
-    assert given["NCI_SI_ACCEPTANCE_SCENARIOS"] == "a/one,a/two"
-    assert given["NCI_SI_ACCEPTANCE_PREPARED"] == "1"
-    assert "NCI_SI_DATA_DIR" not in given
-    assert "NCI_SI_ACCEPTANCE_AUTHORIZATION" not in given
+    assert given["NCI_SIP_EVS_LICENSE_KEY"] == "the-scenarios"
+    assert given["NCI_SIP_UPSTREAM_MODE"] == "fixture"
+    assert given["NCI_SIP_EVS_BASE_URL"].endswith("/evs")
+    assert given["NCI_SIP_ACCEPTANCE_SCENARIOS"] == "a/one,a/two"
+    assert given["NCI_SIP_ACCEPTANCE_PREPARED"] == "1"
+    assert "NCI_SIP_DATA_DIR" not in given
+    assert "NCI_SIP_ACCEPTANCE_AUTHORIZATION" not in given
 
 
 def test_a_state_hook_that_fails_fails_the_test_with_what_it_said_less_the_credential(
     stub, tmp_path, monkeypatch
 ):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_AUTHORIZATION", CREDENTIAL)
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_AUTHORIZATION", CREDENTIAL)
     command = (
         f'printf "%s" "{"x" * 3000}"; '
-        f'echo "told {CREDENTIAL}, has [$NCI_SI_ACCEPTANCE_AUTHORIZATION]"; exit 3'
+        f'echo "told {CREDENTIAL}, has [$NCI_SIP_ACCEPTANCE_AUTHORIZATION]"; exit 3'
     )
 
     with pytest.raises(pytest.fail.Exception) as ended, hook_for(stub, tmp_path, command) as hook:
@@ -580,10 +580,10 @@ def test_the_operator_is_told_the_urls_the_server_reaches_the_fixture_server_by(
 
     assert told[:3] == [
         "settings of the server under test:",
-        "  NCI_SI_UPSTREAM_MODE=fixture",
-        "  NCI_SI_EVS_BASE_URL=https://fixtures.example/evs",
+        "  NCI_SIP_UPSTREAM_MODE=fixture",
+        "  NCI_SIP_EVS_BASE_URL=https://fixtures.example/evs",
     ]
-    assert f"  NCI_SI_EVS_BASE_URL={upstream.url}/evs" in default
+    assert f"  NCI_SIP_EVS_BASE_URL={upstream.url}/evs" in default
 
 
 def test_a_server_that_asks_the_fixture_server_passes_the_probe_and_leaves_its_log_clean(stub):
@@ -667,6 +667,6 @@ def test_the_operator_is_warned_when_the_fixture_server_listens_on_every_address
     assert [line for line in warned if line.startswith("warning:")] == [
         "warning: the fixture server listens on every address but the URLs name "
         f"{upstream.url}; if the server under test runs elsewhere, set "
-        "NCI_SI_ACCEPTANCE_FIXTURE_URL"
+        "NCI_SIP_ACCEPTANCE_FIXTURE_URL"
     ]
     assert not [line for line in told + quiet if line.startswith("warning:")]

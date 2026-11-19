@@ -1,6 +1,6 @@
 # Code of conduct
 
-This project builds the NCI Semantic Infrastructure MCP server with the NCI teams who will carry it
+This project builds the NCI Semantic Infrastructure Program MCP server with the NCI teams who will carry it
 forward and the EVS and caDSR teams whose systems it serves. This code states the conduct we
 practise, so that everyone who takes part in the repository, its issues, its pull requests and its
 reviews can rely on it.

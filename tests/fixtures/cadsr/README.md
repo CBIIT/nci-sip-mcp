@@ -29,11 +29,11 @@ There is no alternative-header fallback or matching registry-pin field.
 
 Keyword search is **requested OP-C03**, absent from the published contract. Its test envelope
 follows the crafted `crafted/OP-C03/search-no-match.json` (made in memory by `cadsr_over_cap` in
-`acceptance/src/nci_si_acceptance/craft.py`); it is not evidence of a live
+`acceptance/src/nci_sip_acceptance/craft.py`); it is not evidence of a live
 search capability. A live type-E response stays an upstream error, with no alternate route.
 The published-registry fixture is likewise a future capability from
 `scenarios/cadsr/with-registry-release/registry-releases.json`, crafted in memory by
-`cadsr_with_registry_release` in `acceptance/src/nci_si_acceptance/craft.py` (C-1).
+`cadsr_with_registry_release` in `acceptance/src/nci_sip_acceptance/craft.py` (C-1).
 
 The listing parser is tested against the existing recorded export-folder fixture, plus
 crafted reordered columns, ambiguous links and invalid dates. It preserves the local date-time

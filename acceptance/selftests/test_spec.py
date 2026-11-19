@@ -6,21 +6,21 @@ from pathlib import Path
 
 import pytest
 
-from nci_si_acceptance import client, environments
-from nci_si_acceptance.client import (
+from nci_sip_acceptance import client, environments
+from nci_sip_acceptance.client import (
     ADAPTER_AUTHORITY_VARIABLE,
     ADAPTER_PORT_VARIABLE,
     CREDENTIAL_VARIABLES,
     INDEX_CODES_VARIABLE,
 )
-from nci_si_acceptance.fixture_server import (
+from nci_sip_acceptance.fixture_server import (
     HARNESS_VARIABLES,
     SCENARIOS,
     SETTINGS,
     fixture_documents,
 )
-from nci_si_acceptance.record import FIXTURES
-from nci_si_acceptance.spec import (
+from nci_sip_acceptance.record import FIXTURES
+from nci_sip_acceptance.spec import (
     PROFILES,
     PROMPTS,
     RECORDS,
@@ -158,8 +158,10 @@ def _settings_rows():
     """Each setting the specification says the suite gives a server, with when it does."""
 
     rows = _section("Settings the suite gives a server").splitlines()
-    cells = [row.split(" | ") for row in rows if row.startswith("| `NCI_SI_")]
-    return {name: when for first, when, _ in cells for name in re.findall(r"`(NCI_SI_\w+)`", first)}
+    cells = [row.split(" | ") for row in rows if row.startswith("| `NCI_SIP_")]
+    return {
+        name: when for first, when, _ in cells for name in re.findall(r"`(NCI_SIP_\w+)`", first)
+    }
 
 
 def _scenario_settings():
@@ -413,14 +415,14 @@ def test_the_specification_names_every_setting_of_a_run_and_the_readme_links_it(
         value
         for name, value in vars(client).items()
         if name.endswith("_VARIABLE")
-        and value.startswith("NCI_SI_ACCEPTANCE_")
+        and value.startswith("NCI_SIP_ACCEPTANCE_")
         and value != INDEX_CODES_VARIABLE
     }
     operator.add(environments.VARIABLE)
     rows = _section("Settings of a run")
     readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
 
-    assert set(re.findall(r"^\| `(NCI_SI_ACCEPTANCE_\w+)`", rows, re.MULTILINE)) == operator
+    assert set(re.findall(r"^\| `(NCI_SIP_ACCEPTANCE_\w+)`", rows, re.MULTILINE)) == operator
     # The README restates no setting table; it points to the one owner.
     assert "(../spec/acceptance.md#settings-of-a-run)" in readme
     assert "| Setting |" not in readme

@@ -12,8 +12,8 @@ from scripts.portal_configuration import (
     SnapshotInvalidError,
 )
 
-from nci_si_mcp.config import Settings
-from nci_si_mcp.config_snapshot import capture
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.config_snapshot import capture
 
 
 class PortalConfigurationTest(unittest.TestCase):
@@ -21,7 +21,7 @@ class PortalConfigurationTest(unittest.TestCase):
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.path = Path(self.temporary.name) / "target.json"
-        self.snapshot = capture(Settings(timeout_seconds=17), {"NCI_SI_TIMEOUT_SECONDS"})
+        self.snapshot = capture(Settings(timeout_seconds=17), {"NCI_SIP_TIMEOUT_SECONDS"})
         self.path.write_text(json.dumps(self.snapshot))
         self.configuration = LocalConfiguration(self.path)
 

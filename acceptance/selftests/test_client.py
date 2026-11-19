@@ -8,8 +8,8 @@ import pytest
 from mcp.shared.exceptions import MCPError
 
 from conftest import STAND_IN
-from nci_si_acceptance import client
-from nci_si_acceptance.client import (
+from nci_sip_acceptance import client
+from nci_sip_acceptance.client import (
     AUTHORIZATION_VARIABLE,
     FIXTURE_BIND_VARIABLE,
     FIXTURE_URL_VARIABLE,
@@ -31,13 +31,13 @@ from nci_si_acceptance.client import (
     wait_for_endpoint,
     withhold_authorization,
 )
-from nci_si_acceptance.fixture_server import UPSTREAM_VARIABLES, FixtureServer, FixtureSet
-from nci_si_acceptance.spec import PROMPTS, resources_listed
+from nci_sip_acceptance.fixture_server import UPSTREAM_VARIABLES, FixtureServer, FixtureSet
+from nci_sip_acceptance.spec import PROMPTS, resources_listed
 
 pytest_plugins = ["pytester"]
 
 # The furnished server, started from the environment the tests run in.
-BASELINE_SERVER = [sys.executable, "-m", "nci_si_mcp.cli", "serve"]
+BASELINE_SERVER = [sys.executable, "-m", "nci_sip_mcp.cli", "serve"]
 COMPLIANT_SERVER = Path(__file__).parent / "compliant_server.py"
 
 
@@ -47,10 +47,10 @@ def test_standalone_harness_collects_without_server(compliant, monkeypatch, remo
         "import sys\nfrom pathlib import Path\n"
         "class MissingServer:\n"
         "    def find_spec(self, name, path=None, target=None):\n"
-        "        if name.partition('.')[0] == 'nci_si_mcp':\n"
+        "        if name.partition('.')[0] == 'nci_sip_mcp':\n"
         "            raise ModuleNotFoundError(name, name=name)\n"
         "sys.meta_path.insert(0, MissingServer())\n"
-        "try: import nci_si_mcp\n"
+        "try: import nci_sip_mcp\n"
         "except ModuleNotFoundError: Path('core-availability').write_text('absent')\n"
         "else: Path('core-availability').write_text('present')\n"
     )
@@ -72,7 +72,7 @@ def test_the_default_target_is_the_installed_server_against_fixtures(monkeypatch
     monkeypatch.delenv(SERVER_VARIABLE, raising=False)
     monkeypatch.delenv(PROFILE_VARIABLE, raising=False)
 
-    assert Target.from_env() == Target("fixture", ["nci-si-mcp", "serve"], "unified")
+    assert Target.from_env() == Target("fixture", ["nci-sip-mcp", "serve"], "unified")
 
 
 def test_the_target_is_read_from_the_environment(monkeypatch):
@@ -140,40 +140,40 @@ def test_a_wrong_target_is_refused_naming_its_variable(monkeypatch, variable, va
 
 
 def test_in_fixture_mode_every_upstream_names_the_fixture_server(monkeypatch, tmp_path):
-    monkeypatch.setenv("NCI_SI_EVS_BASE_URL", "https://developer.example")
-    monkeypatch.setenv("NCI_SI_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("NCI_SIP_EVS_BASE_URL", "https://developer.example")
+    monkeypatch.setenv("NCI_SIP_LOG_LEVEL", "DEBUG")
 
     environment = server_environment("fixture", tmp_path, "http://127.0.0.1:9")
 
     # The upstream settings of docs/implementation-plan.md §8, each naming its fixture surface.
     assert {name: environment[name] for name in UPSTREAM_VARIABLES} == {
-        "NCI_SI_EVS_BASE_URL": "http://127.0.0.1:9/evs",
-        "NCI_SI_EVS_FHIR_BASE_URL": "http://127.0.0.1:9/evs-fhir",
-        "NCI_SI_CADSR_BASE_URL": "http://127.0.0.1:9/cadsr",
-        "NCI_SI_CADSR_FTP_URL": "http://127.0.0.1:9/cadsr-ftp",
-        "NCI_SI_SSIS_SPARQL_URL": "http://127.0.0.1:9/ssis-sparql",
+        "NCI_SIP_EVS_BASE_URL": "http://127.0.0.1:9/evs",
+        "NCI_SIP_EVS_FHIR_BASE_URL": "http://127.0.0.1:9/evs-fhir",
+        "NCI_SIP_CADSR_BASE_URL": "http://127.0.0.1:9/cadsr",
+        "NCI_SIP_CADSR_FTP_URL": "http://127.0.0.1:9/cadsr-ftp",
+        "NCI_SIP_SSIS_SPARQL_URL": "http://127.0.0.1:9/ssis-sparql",
     }
-    assert (environment["NCI_SI_UPSTREAM_MODE"], environment["NCI_SI_DATA_DIR"]) == (
+    assert (environment["NCI_SIP_UPSTREAM_MODE"], environment["NCI_SIP_DATA_DIR"]) == (
         "fixture",
         str(tmp_path),
     )
-    assert "NCI_SI_LOG_LEVEL" not in environment
+    assert "NCI_SIP_LOG_LEVEL" not in environment
 
 
 def test_fixture_mode_strips_credentials_and_preserves_custom_runtime_settings(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setenv("NCI_SI_EVS_BASE_URL", "https://developer.example")
+    monkeypatch.setenv("NCI_SIP_EVS_BASE_URL", "https://developer.example")
     # The credentials of docs/implementation-plan.md §8.
-    credentials = {"NCI_SI_EVS_LICENSE_KEY": "evs key", "NCI_SI_CADSR_CREDENTIAL": "cadsr key"}
+    credentials = {"NCI_SIP_EVS_LICENSE_KEY": "evs key", "NCI_SIP_CADSR_CREDENTIAL": "cadsr key"}
     for name, value in credentials.items():
         monkeypatch.setenv(name, value)
 
     monkeypatch.setenv("LD_LIBRARY_PATH", "synthetic-never-executed")
     fixture = server_environment("fixture", tmp_path, "http://127.0.0.1:9")
 
-    assert fixture["NCI_SI_EVS_BASE_URL"] == "http://127.0.0.1:9/evs"
-    assert fixture["NCI_SI_UPSTREAM_MODE"] == "fixture"
+    assert fixture["NCI_SIP_EVS_BASE_URL"] == "http://127.0.0.1:9/evs"
+    assert fixture["NCI_SIP_UPSTREAM_MODE"] == "fixture"
     assert fixture["LD_LIBRARY_PATH"] == "synthetic-never-executed"
     assert not set(credentials) & set(fixture)
 
@@ -330,7 +330,7 @@ def test_a_stdio_target_has_an_index_only_where_the_harness_prepares_one(monkeyp
 
 
 def test_naming_a_command_and_an_endpoint_is_a_usage_error(remote):
-    remote.setenv(SERVER_VARIABLE, "nci-si-mcp serve")
+    remote.setenv(SERVER_VARIABLE, "nci-sip-mcp serve")
 
     with pytest.raises(ValueError, match=f"{URL_VARIABLE} and {SERVER_VARIABLE} are both set"):
         Target.from_env()
@@ -409,9 +409,9 @@ def test_the_token_after_the_scheme_is_withheld_too_where_it_is_long_enough(remo
 def test_the_operator_sets_the_fixture_mode_and_every_upstream_on_a_remote_server():
     settings = remote_settings("https://fixtures.example")
 
-    assert settings["NCI_SI_UPSTREAM_MODE"] == "fixture"
-    assert settings["NCI_SI_EVS_BASE_URL"] == "https://fixtures.example/evs"
-    assert set(settings) - {"NCI_SI_UPSTREAM_MODE"} == set(UPSTREAM_VARIABLES)
+    assert settings["NCI_SIP_UPSTREAM_MODE"] == "fixture"
+    assert settings["NCI_SIP_EVS_BASE_URL"] == "https://fixtures.example/evs"
+    assert set(settings) - {"NCI_SIP_UPSTREAM_MODE"} == set(UPSTREAM_VARIABLES)
 
 
 def test_waiting_for_an_endpoint_that_does_not_answer_ends_with_the_time_given():

@@ -1492,17 +1492,20 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                 "TMPDIR": str(root / ("long" * 30)),
                 "TMP": "parent-tmp",
                 "TEMP": "parent-temp",
-                "NCI_SI_DATA_DIR": str(caller),
+                "NCI_SI_DATA_DIR": str(caller / "legacy"),
+                "NCI_SI_EVS_LICENSE_KEY": "legacy-private-marker",
+                "NCI_SIP_DATA_DIR": str(caller),
+                "NCI_SIP_EVS_LICENSE_KEY": "current-private-marker",
                 "PYTHONDONTWRITEBYTECODE": "0",
                 "PATH": "/parent-search",
             }
             code = (
                 "import json, os, shutil, sys, example\nfrom pathlib import Path\n"
-                "data = Path(os.environ['NCI_SI_DATA_DIR'])\n"
+                "data = Path(os.environ['NCI_SIP_DATA_DIR'])\n"
                 "data.mkdir(parents=True, exist_ok=True)\n(data / 'written').write_text('owned')\n"
                 "print(json.dumps({'settings': {key: value for key, value in os.environ.items() "
                 "if key in ('TMPDIR', 'TMP', 'TEMP', 'PATH', 'PYTHONDONTWRITEBYTECODE') "
-                "or key.startswith('NCI_SI_') or key.endswith('__mutated')}, "
+                "or key.startswith(('NCI_SI_', 'NCI_SIP_')) or key.endswith('__mutated')}, "
                 "'python': shutil.which('python')}))\n"
             )
             for has_path in (True, False):
@@ -1520,13 +1523,16 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                         check=True,
                     )
                     observed = json.loads(child.stdout)
+                    self.assertNotIn("NCI_SI_EVS_LICENSE_KEY", observed["settings"])
+                    self.assertNotIn("NCI_SIP_EVS_LICENSE_KEY", observed["settings"])
+                    self.assertNotIn("NCI_SI_DATA_DIR", observed["settings"])
                     self.assertEqual(
                         observed["settings"],
                         {
                             "TMPDIR": tempfile.gettempdir(),
                             "TMP": tempfile.gettempdir(),
                             "TEMP": tempfile.gettempdir(),
-                            "NCI_SI_DATA_DIR": str(work / "data"),
+                            "NCI_SIP_DATA_DIR": str(work / "data"),
                             "PYTHONDONTWRITEBYTECODE": "1",
                             "PATH": str(Path(sys.executable).parent)
                             + os.pathsep
@@ -1549,7 +1555,7 @@ class MutationEvidenceContractsTest(unittest.TestCase):
             (root / "acceptance/tests/test_contract.py").write_text(
                 "import json, os\nfrom pathlib import Path\ndef test_settings():\n"
                 f"    Path({str(marker)!r}).write_text(json.dumps({{key: value for key, value "
-                "in os.environ.items() if key.startswith('NCI_SI_ACCEPTANCE_')}))\n"
+                "in os.environ.items() if key.startswith('NCI_SIP_ACCEPTANCE_')}))\n"
                 "    assert True\n"
             )
             result, _ = runner.run_domain(root, "fixture", [], 30)
@@ -1557,11 +1563,13 @@ class MutationEvidenceContractsTest(unittest.TestCase):
             self.assertEqual(
                 json.loads(marker.read_text()),
                 {
-                    "NCI_SI_ACCEPTANCE_MODE": "fixture",
-                    "NCI_SI_ACCEPTANCE_REGISTRY_RELEASE": "required",
-                    "NCI_SI_ACCEPTANCE_SECURITY_SERVER": "python ../scripts/permissions_fixture.py",
-                    "NCI_SI_ACCEPTANCE_PREPARE": (
-                        'nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")'
+                    "NCI_SIP_ACCEPTANCE_MODE": "fixture",
+                    "NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE": "required",
+                    "NCI_SIP_ACCEPTANCE_SECURITY_SERVER": (
+                        "python ../scripts/permissions_fixture.py"
+                    ),
+                    "NCI_SIP_ACCEPTANCE_PREPARE": (
+                        'nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")'
                     ),
                 },
             )
@@ -2270,14 +2278,14 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                 contract=(
                     "import os\n"
                     "    assert {key: os.environ.get(key) for key in "
-                    "('NCI_SI_ACCEPTANCE_MODE', 'NCI_SI_ACCEPTANCE_REGISTRY_RELEASE', "
-                    "'NCI_SI_ACCEPTANCE_SECURITY_SERVER', 'NCI_SI_ACCEPTANCE_PREPARE')} == "
-                    "{'NCI_SI_ACCEPTANCE_MODE': 'fixture', "
-                    "'NCI_SI_ACCEPTANCE_REGISTRY_RELEASE': 'required', "
-                    "'NCI_SI_ACCEPTANCE_SECURITY_SERVER': "
+                    "('NCI_SIP_ACCEPTANCE_MODE', 'NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE', "
+                    "'NCI_SIP_ACCEPTANCE_SECURITY_SERVER', 'NCI_SIP_ACCEPTANCE_PREPARE')} == "
+                    "{'NCI_SIP_ACCEPTANCE_MODE': 'fixture', "
+                    "'NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE': 'required', "
+                    "'NCI_SIP_ACCEPTANCE_SECURITY_SERVER': "
                     "'python ../scripts/permissions_fixture.py', "
-                    "'NCI_SI_ACCEPTANCE_PREPARE': "
-                    "'nci-si-mcp index-sample $(cat \"$NCI_SI_ACCEPTANCE_INDEX_CODES\")'}\n"
+                    "'NCI_SIP_ACCEPTANCE_PREPARE': "
+                    "'nci-sip-mcp index-sample $(cat \"$NCI_SIP_ACCEPTANCE_INDEX_CODES\")'}\n"
                     "    assert example.answer() is True"
                 ),
             )

@@ -10,12 +10,12 @@ import httpx2
 from mcp.client import Client
 
 from fakes import concept, release, terminology_row
-from nci_si_mcp.bounds import Budget
-from nci_si_mcp.evs import EVSClient, EVSReleaseNotFoundError
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.release_selection import SessionRelease, session_scope
-from nci_si_mcp.server import create_mcp
-from nci_si_mcp.transport import create_http_app
+from nci_sip_mcp.bounds import Budget
+from nci_sip_mcp.evs import EVSClient, EVSReleaseNotFoundError
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.release_selection import SessionRelease, session_scope
+from nci_sip_mcp.server import create_mcp
+from nci_sip_mcp.transport import create_http_app
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
 
@@ -142,7 +142,7 @@ class ReleaseSelectionTest(ServerFixture):
     def test_completion_audit_names_all_three_selection_sources(self):
         logging.disable(logging.NOTSET)
         with (
-            self.assertLogs("nci_si_mcp.audit", level="INFO") as captured,
+            self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured,
             session_scope(SessionRelease()),
         ):
             self.get()
@@ -230,9 +230,9 @@ class ReleaseSelectionTest(ServerFixture):
     def test_implicit_discovery_spends_the_same_outbound_budget_as_the_catalogue(self):
         self.context.evs = EVSClient("https://evs.invalid", max_attempts=1)
         with (
-            patch("nci_si_mcp.content.Budget", return_value=Budget(requests=1)),
+            patch("nci_sip_mcp.content.Budget", return_value=Budget(requests=1)),
             patch(
-                "nci_si_mcp.http_client._open",
+                "nci_sip_mcp.http_client._open",
                 side_effect=[
                     FakeResponse(json.dumps([terminology_row()]).encode()),
                     FakeResponse(b"[]"),
@@ -508,9 +508,9 @@ class ReleaseSelectionBoundaryTest(ServerFixture):
         ):
             with (
                 self.subTest(operation=operation, arguments=arguments),
-                patch("nci_si_mcp.content.Budget", return_value=Budget(requests=1)),
+                patch("nci_sip_mcp.content.Budget", return_value=Budget(requests=1)),
                 patch(
-                    "nci_si_mcp.http_client._open",
+                    "nci_sip_mcp.http_client._open",
                     side_effect=[
                         FakeResponse(json.dumps([terminology_row()]).encode()),
                         FakeResponse(b"[]"),
@@ -526,7 +526,7 @@ class ReleaseSelectionBoundaryTest(ServerFixture):
 
     def test_retired_lookup_audit_retains_implicit_selection(self):
         logging.disable(logging.NOTSET)
-        with self.assertLogs("nci_si_mcp.audit", level="INFO") as captured:
+        with self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured:
             result = invoke(self.context, "resolve_retired_code", terminology="ncit", code="C3262")
         self.assertTrue(result["active"])
         self.assertEqual(
@@ -536,7 +536,7 @@ class ReleaseSelectionBoundaryTest(ServerFixture):
     def test_failed_discovery_is_audited_but_a_nonselecting_tool_has_no_selection(self):
         logging.disable(logging.NOTSET)
         self.evs.rows = []
-        with self.assertLogs("nci_si_mcp.audit", level="INFO") as captured:
+        with self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured:
             failed = invoke(self.context, "get_concept", terminology="ncit", code="C3262")
             listed = invoke(self.context, "list_terminologies")
         self.assertEqual(failed["error"]["code"], "release_not_available")
@@ -560,7 +560,7 @@ class ReleaseSelectionBoundaryTest(ServerFixture):
         self.evs.release = release("2026.09-weekly", channel="weekly")
         self.evs.concepts = {"C1": concept("C1", active=True, version="2026.09-weekly")}
         logging.disable(logging.NOTSET)
-        with self.assertLogs("nci_si_mcp.audit", level="INFO") as captured:
+        with self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured:
             result = invoke(
                 self.context, "get_concept", terminology="ncit", code="C1", release="2026.09-weekly"
             )

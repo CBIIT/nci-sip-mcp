@@ -8,7 +8,7 @@ from typing import Any, Literal
 from scripts.evidence_benchmark import comparable
 from scripts.site_assets import STYLESHEETS, FooterLink, load_footer
 
-from nci_si_acceptance.environments import EnvironmentRecord
+from nci_sip_acceptance.environments import EnvironmentRecord
 
 # Read once at start-up: a missing or malformed table stops the portal rather than render an
 # empty footer.

@@ -102,9 +102,9 @@ jobs:
     # depth for the listed names on hosted runners; none of this proves that no other request
     # leaves the runner.
     env:
-      NCI_SI_CADSR_BASE_URL: http://127.0.0.1:8767/cadsr
-      NCI_SI_CADSR_FTP_URL: http://127.0.0.1:8767/cadsr-ftp
-      NCI_SI_SSIS_SPARQL_URL: http://127.0.0.1:8767/ssis-sparql
+      NCI_SIP_CADSR_BASE_URL: http://127.0.0.1:8767/cadsr
+      NCI_SIP_CADSR_FTP_URL: http://127.0.0.1:8767/cadsr-ftp
+      NCI_SIP_SSIS_SPARQL_URL: http://127.0.0.1:8767/ssis-sparql
       no_proxy: 127.0.0.1,localhost,::1,cadsrapi.cancer.gov,cadsrapi-stage.cancer.gov,cadsr.nci.nih.gov,shared.semantics.cancer.gov
     steps:
       # Defense in depth on hosted runners, not an egress guarantee: a request for a listed name
@@ -197,20 +197,25 @@ jobs:
           case "$base" in "$managed"/*) ;; *) fail "the project's Python is $base, not a uv-managed one under $managed" ;; esac
       - name: Print the EVS release
         if: matrix.combination == 'server'
-        run: pdm run nci-si-mcp release-info
-      - name: Select the released index source (CI only)
+        run: pdm run nci-sip-mcp release-info
+      - name: Select release or candidate index source (CI only)
         if: matrix.server || matrix.index
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "pull_request" ]; then
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            RELEASE_TAG="$(git describe --tags --abbrev=0)"
+            RELEASE_DISTRIBUTION="$(git show "$RELEASE_TAG:pyproject.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["name"])')"
+            if [ "$RELEASE_DISTRIBUTION" != "nci-sip-mcp" ]; then
+              echo "::error::Scheduled tag $RELEASE_TAG provides $RELEASE_DISTRIBUTION; no compatible NCI SIP release is available, so released SIP verification was not performed."
+              exit 1
+            fi
+          else
             RELEASE_TAG=v0.0.0
             git tag "$RELEASE_TAG" HEAD
             git config --global --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-si-mcp
             git config --global --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-sip-mcp
-          else
-            RELEASE_TAG="$(git describe --tags --abbrev=0)"
           fi
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
       - name: Install released server and optional index environments
@@ -221,11 +226,11 @@ jobs:
           INDEX_VENV="$RUNNER_TEMP/index-venv"
           SERVER_VENV="$RUNNER_TEMP/server-venv"
           python3.14 -m venv "$SERVER_VENV"
-          "$SERVER_VENV/bin/python" -m pip install "nci-si-mcp[server] @ git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"
+          "$SERVER_VENV/bin/python" -m pip install "nci-sip-mcp[server] @ git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"
           echo "SERVER_VENV=$SERVER_VENV" >> "$GITHUB_ENV"
           if [ "$WITH_INDEX" = "true" ]; then
             python3.14 -m venv "$INDEX_VENV"
-            "$INDEX_VENV/bin/python" -m pip install "nci-si-mcp[server,index] @ git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"
+            "$INDEX_VENV/bin/python" -m pip install "nci-sip-mcp[server,index] @ git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"
             echo "INDEX_VENV=$INDEX_VENV" >> "$GITHUB_ENV"
           fi
           echo "INDEX_DATA=$RUNNER_TEMP/index-data" >> "$GITHUB_ENV"
@@ -253,16 +258,16 @@ jobs:
           STDIO_ROOT="$RUNNER_TEMP/guide-stdio"
           HTTP_ROOT="$RUNNER_TEMP/guide-http"
           mkdir -p "$STDIO_ROOT" "$HTTP_ROOT"
-          "$SERVER_VENV/bin/nci-si-install" check --target local
-          "$SERVER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
-          "$SERVER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
-          "$SERVER_VENV/bin/nci-si-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
-          "$SERVER_VENV/bin/nci-si-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
-          "$SERVER_VENV/bin/nci-si-install" status --target local --transport http --data-dir "$HTTP_ROOT"
-          "$SERVER_VENV/bin/nci-si-install" start --target local --transport http --data-dir "$HTTP_ROOT"
+          "$SERVER_VENV/bin/nci-sip-install" check --target local
+          "$SERVER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
+          "$SERVER_VENV/bin/nci-sip-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
+          "$SERVER_VENV/bin/nci-sip-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
+          "$SERVER_VENV/bin/nci-sip-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
+          "$SERVER_VENV/bin/nci-sip-install" status --target local --transport http --data-dir "$HTTP_ROOT"
+          "$SERVER_VENV/bin/nci-sip-install" start --target local --transport http --data-dir "$HTTP_ROOT"
           curl --fail --silent http://127.0.0.1:8000/ready
-          "$SERVER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
-          "$SERVER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
+          "$SERVER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
+          "$SERVER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
       # Runs whenever the recorder step ran, so a failed lifecycle still stops the owned recorder.
       - name: Stop the loopback recorder and check its requests (CI only)
         if: always() && matrix.server && steps.recorder.outcome != 'skipped'
@@ -299,9 +304,9 @@ jobs:
       - name: Build and evaluate a small local index
         if: matrix.index
         run: |
-          export NCI_SI_DATA_DIR="$INDEX_DATA"
-          "$INDEX_VENV/bin/nci-si-mcp" index-sample C3262 C2991 C40704 C153397 C116938
-          "$INDEX_VENV/bin/nci-si-mcp" evaluate
+          export NCI_SIP_DATA_DIR="$INDEX_DATA"
+          "$INDEX_VENV/bin/nci-sip-mcp" index-sample C3262 C2991 C40704 C153397 C116938
+          "$INDEX_VENV/bin/nci-sip-mcp" evaluate
 
       # CI-only helper for documented foreground commands and already-owned processes: wait for
       # the health outcome while requiring the selected process to remain alive.
@@ -356,7 +361,7 @@ jobs:
           request = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
               "protocolVersion": "2025-06-18", "capabilities": {},
               "clientInfo": {"name": "local-run", "version": "0"}}}
-          server = subprocess.Popen(["pdm", "run", "nci-si-mcp", "serve"], stdin=subprocess.PIPE,
+          server = subprocess.Popen(["pdm", "run", "nci-sip-mcp", "serve"], stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, text=True)
           try:
               server.stdin.write(json.dumps(request) + "\n")
@@ -396,9 +401,9 @@ jobs:
             exit "$status"
           }
           trap cleanup EXIT
-          export NCI_SI_DATA_DIR="$INDEX_DATA"
-          export NCI_SI_HTTP_REQUIRE_INDEX=1
-          "$INDEX_VENV/bin/nci-si-mcp" serve --transport streamable-http &
+          export NCI_SIP_DATA_DIR="$INDEX_DATA"
+          export NCI_SIP_HTTP_REQUIRE_INDEX=1
+          "$INDEX_VENV/bin/nci-sip-mcp" serve --transport streamable-http &
           server=$!
           python3 "$RUNNER_TEMP/ready.py" http://127.0.0.1:8000/ready --pid "$server"
           "$INDEX_VENV/bin/python" - <<'PY'
@@ -422,7 +427,7 @@ jobs:
         if: matrix.index
         timeout-minutes: 3
         run: |
-          export NCI_SI_DATA_DIR="$RUNNER_TEMP/server-only-data"
+          export NCI_SIP_DATA_DIR="$RUNNER_TEMP/server-only-data"
           "$SERVER_VENV/bin/python" - <<'PY'
           import asyncio
           import os
@@ -431,9 +436,9 @@ jobs:
 
           async def check():
               server = StdioServerParameters(
-                  command=os.environ["SERVER_VENV"] + "/bin/nci-si-mcp",
+                  command=os.environ["SERVER_VENV"] + "/bin/nci-sip-mcp",
                   args=["serve"],
-                  env={"NCI_SI_DATA_DIR": os.environ["RUNNER_TEMP"] + "/server-only-data"},
+                  env={"NCI_SIP_DATA_DIR": os.environ["RUNNER_TEMP"] + "/server-only-data"},
               )
               async with Client(stdio_client(server)) as client:
                   arguments = {"terminology": "ncit", "query": "Neoplasm", "mode": "semantic"}
@@ -452,7 +457,7 @@ jobs:
         shell: bash {0}
         run: |
           # shellcheck disable=SC2016 # the single quotes are the documented form
-          NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SI_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json
+          NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SIP_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SIP_ACCEPTANCE_PREPARE='nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json
           status=$?
           [ "$status" -le 1 ] && [ -s acceptance/fixture.json ] || { echo "::error::The fixture run did not finish (exit status $status)."; exit 1; }
       - name: Compare the outcomes with the expected ones
@@ -595,7 +600,7 @@ jobs:
             exit "$status"
           }
           trap cleanup EXIT
-          NCI_SI_DATA_DIR="$INDEX_DATA" NCI_SI_HTTP_REQUIRE_INDEX=1 "$INDEX_VENV/bin/nci-si-mcp" serve --transport streamable-http &
+          NCI_SIP_DATA_DIR="$INDEX_DATA" NCI_SIP_HTTP_REQUIRE_INDEX=1 "$INDEX_VENV/bin/nci-sip-mcp" serve --transport streamable-http &
           names+=(index); pids+=("$!")
           python3 "$RUNNER_TEMP/ready.py" http://127.0.0.1:8000/ready --pid "${pids[0]}"
           if [ "$HOST_DOCS" = "true" ]; then

@@ -27,13 +27,13 @@ from scripts.benchmark_records import (
 from scripts.benchmark_report import Report
 from scripts.operator_files import write_json
 
-from nci_si_acceptance.client import Mode, Session, Target, open_session, server_environment
-from nci_si_acceptance.environments import LAUNCHER
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
-from nci_si_acceptance.report import Absent
-from nci_si_acceptance.suite import unmatched_requests
-from nci_si_acceptance.suite_identity import identity
-from nci_si_mcp.registry import SPECS
+from nci_sip_acceptance.client import Mode, Session, Target, open_session, server_environment
+from nci_sip_acceptance.environments import LAUNCHER
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_sip_acceptance.report import Absent
+from nci_sip_acceptance.suite import unmatched_requests
+from nci_sip_acceptance.suite_identity import identity
+from nci_sip_mcp.registry import SPECS
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "acceptance/fixtures"
@@ -114,11 +114,11 @@ def opened(environment: dict[str, str]):
     with TemporaryDirectory(prefix="benchmark-", dir=ROOT / "tmp") as temporary:
         directory = Path(temporary)
         log = directory / "audit.jsonl"
-        settings = environment | {"NCI_SI_DATA_DIR": str(directory / "data")}
+        settings = environment | {"NCI_SIP_DATA_DIR": str(directory / "data")}
         command = (
             [*LAUNCHER, "serve"]
-            if environment["NCI_SI_UPSTREAM_MODE"] == "live"
-            else [sys.executable, "-m", "nci_si_mcp.cli", "serve"]
+            if environment["NCI_SIP_UPSTREAM_MODE"] == "live"
+            else [sys.executable, "-m", "nci_sip_mcp.cli", "serve"]
         )
         with (
             log.open("w") as stream,
@@ -159,7 +159,7 @@ def environment_for(
 def source_digest() -> str:
     digest = hashlib.sha256()
     paths = [
-        *sorted((ROOT / "src/nci_si_mcp").glob("*.py")),
+        *sorted((ROOT / "src/nci_sip_mcp").glob("*.py")),
         Path(__file__),
         ROOT / "scripts/benchmark_records.py",
         ROOT / "scripts/benchmark_report.py",
@@ -172,10 +172,10 @@ def source_digest() -> str:
 def _target(mode: Mode) -> Target:
     # Acceptance-only target selectors have never configured fixture benchmarking.
     if mode == "fixture":
-        return Target(mode, [sys.executable, "-m", "nci_si_mcp.cli", "serve"])
+        return Target(mode, [sys.executable, "-m", "nci_sip_mcp.cli", "serve"])
     target = Target.from_env(mode_override=mode)
     if target.prepare is not None:
-        raise ValueError("NCI_SI_ACCEPTANCE_PREPARE is not supported by the index-free benchmark")
+        raise ValueError("NCI_SIP_ACCEPTANCE_PREPARE is not supported by the index-free benchmark")
     return target
 
 
@@ -189,7 +189,7 @@ def run(mode: Mode, names: list[str], repetitions: int, output: Path) -> dict[st
         environment=target.environment.to_record() if target.environment else Absent.FIELD,
         transport="stdio",
         createdAt=datetime.now(UTC).isoformat(),
-        serverVersion=version("nci-si-mcp"),
+        serverVersion=version("nci-sip-mcp"),
         sourceSha256=source_digest(),
         python=platform.python_version(),
         platform=platform.platform(),

@@ -6,11 +6,11 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from fakes import cde_response, cde_row, vm_response, vm_row
-from nci_si_mcp.caching import cache_call
-from nci_si_mcp.cadsr import CDE_MATCH, VM_MATCH
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.caching import cache_call
+from nci_sip_mcp.cadsr import CDE_MATCH, VM_MATCH
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.registry import invoke
 from test_cadsr_client import reply
 from test_http_client import Reply, ServerTestCase
 
@@ -284,10 +284,10 @@ class MatchingTest(ServerTestCase):
         ):
             with self.subTest(operation=operation):
                 context = self.context(self.serve(), match_timeout_seconds=0.01)
-                with patch("nci_si_mcp.http_client._open", side_effect=TimeoutError):
+                with patch("nci_sip_mcp.http_client._open", side_effect=TimeoutError):
                     result = invoke(context, operation, **args)
                 self.assertEqual(result["error"]["code"], "timeout")
-                self.assertIn("NCI_SI_MATCH_TIMEOUT_SECONDS", result["error"]["message"])
+                self.assertIn("NCI_SIP_MATCH_TIMEOUT_SECONDS", result["error"]["message"])
                 self.assertEqual(result["error"]["details"]["seconds"], 0.01)
                 self.assertEqual(result["error"]["details"]["surface"], "cadsr")
 

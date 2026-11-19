@@ -1,7 +1,7 @@
 import unittest
 from typing import TypedDict
 
-from nci_si_mcp.parameters import FIELD_DESCRIPTIONS, Described, describe_fields
+from nci_sip_mcp.parameters import FIELD_DESCRIPTIONS, Described, describe_fields
 
 
 class Row(TypedDict):

@@ -14,9 +14,9 @@ from scripts.evidence_envelope import MAX_REPORT_BYTES
 from scripts.processes import stop, wait_until
 from scripts.vocabulary import JobOutcome, JobReason
 
-from nci_si_mcp.audit import emit
+from nci_sip_mcp.audit import emit
 
-LIFELINE = "NCI_SI_OPERATOR_LIFELINE"
+LIFELINE = "NCI_SIP_OPERATOR_LIFELINE"
 WORKER_LOG = "worker.log"
 LOG_PART_BYTES = 512 * 1024
 LOG_JOIN_SECONDS = 10

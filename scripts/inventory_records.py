@@ -10,7 +10,7 @@ from typing import Any, Literal
 from scripts.evidence_envelope import EvidenceError, decode_json
 from scripts.formats import SHA256_HEX
 
-from nci_si_acceptance.report import RANK, Attribution
+from nci_sip_acceptance.report import RANK, Attribution
 
 ORIGINAL = ("catalogue", "stories", "expectations", "selection")
 

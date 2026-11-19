@@ -136,7 +136,7 @@ requirements, for the harness's own tests.
     cadsr-no-accept   data element lookup leaves Accept out and reports the HTML    (X-15)
     cadsr-html-accepted data element lookup leaves Accept out and succeeds on HTML  (X-15)
 
-`COMPLIANT_SERVER_CADSR=1` makes a data element lookup ask caDSR (`NCI_SI_CADSR_BASE_URL`) for
+`COMPLIANT_SERVER_CADSR=1` makes a data element lookup ask caDSR (`NCI_SIP_CADSR_BASE_URL`) for
 `/NCIAPI/1.0/api/DataElement/{publicId}`, naming Accept: application/json, and answer
 upstream_unavailable where the body is no data element (HTML); without it every call asks EVS.
 
@@ -197,8 +197,8 @@ from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import MCPError
 from starlette.responses import PlainTextResponse
 
-from nci_si_acceptance.results import EXPORT, SHORT_TTL, UNPINNED_REGISTRY
-from nci_si_acceptance.spec import (
+from nci_sip_acceptance.results import EXPORT, SHORT_TTL, UNPINNED_REGISTRY
+from nci_sip_acceptance.spec import (
     PROMPTS,
     RECORDS,
     RESOURCES,
@@ -222,12 +222,12 @@ PORT = int(os.environ.get("COMPLIANT_SERVER_PORT", "0"))
 NO_CACHE = bool(os.environ.get("COMPLIANT_SERVER_NO_CACHE"))
 AUTHORIZATION = os.environ.get("COMPLIANT_SERVER_AUTHORIZATION")
 AUTHORIZATION_LOG = os.environ.get("COMPLIANT_SERVER_AUTH_LOG")
-EVS = os.environ["NCI_SI_EVS_BASE_URL"]
+EVS = os.environ["NCI_SIP_EVS_BASE_URL"]
 CADSR = (
-    os.environ.get("NCI_SI_CADSR_BASE_URL") if os.environ.get("COMPLIANT_SERVER_CADSR") else None
+    os.environ.get("NCI_SIP_CADSR_BASE_URL") if os.environ.get("COMPLIANT_SERVER_CADSR") else None
 )
-TIMEOUT = float(os.environ.get("NCI_SI_TIMEOUT_SECONDS", "10"))
-LICENCE_KEY = os.environ.get("NCI_SI_EVS_LICENSE_KEY")
+TIMEOUT = float(os.environ.get("NCI_SIP_TIMEOUT_SECONDS", "10"))
+LICENCE_KEY = os.environ.get("NCI_SIP_EVS_LICENSE_KEY")
 LICENSED = {"mdr"}
 # The licensed placeholder concept and its child (license/restricted, license/attributed).
 LICENSED_CODES = ["10000000", "10000001"]
@@ -339,7 +339,7 @@ def _leak(headers: dict[str, str]) -> None:
         sys.stderr.write(f"asking with {headers}\n")
         sys.stderr.flush()
     if DEFECT == "files-key":
-        (Path(os.environ["NCI_SI_DATA_DIR"]) / "requests.txt").write_text(str(headers))
+        (Path(os.environ["NCI_SIP_DATA_DIR"]) / "requests.txt").write_text(str(headers))
 
 
 def _asked(name: str, arguments: dict, correlation: str) -> tuple[int, dict]:

@@ -15,7 +15,7 @@ from itertools import combinations
 
 import pytest
 
-from nci_si_acceptance.results import (
+from nci_sip_acceptance.results import (
     EXPORT_LISTING,
     bare_code,
     element_ids,
@@ -26,7 +26,7 @@ from nci_si_acceptance.results import (
     sparql_rows,
     value_ids,
 )
-from nci_si_acceptance.spec import TOOLS, defaults
+from nci_sip_acceptance.spec import TOOLS, defaults
 
 FIND = "find_data_elements_for_concept"
 PERMISSIBLE = "get_concept_for_permissible_value"

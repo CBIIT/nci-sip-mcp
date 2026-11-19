@@ -6,18 +6,18 @@ from http.client import HTTPException
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from nci_si_mcp import http_client
-from nci_si_mcp.bounds import (
+from nci_sip_mcp import http_client
+from nci_sip_mcp.bounds import (
     Budget,
     CallDeadlineError,
     RequestBudgetError,
     budgeted,
     deadline_scope,
 )
-from nci_si_mcp.config import Settings
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.http_client import RequestRecord, UpstreamRejectedError
-from nci_si_mcp.invocation import call
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.http_client import RequestRecord, UpstreamRejectedError
+from nci_sip_mcp.invocation import call
 from test_http_client import BufferedPolicy, Reply, ServerTestCase
 
 
@@ -89,7 +89,7 @@ class DeadlineHttpTest(ServerTestCase):
         self.clock = Clock()
         self.records: list[RequestRecord] = []
         self.responses: list[ProgressResponse] = []
-        clock_patch = patch("nci_si_mcp.bounds.monotonic", self.clock.monotonic)
+        clock_patch = patch("nci_sip_mcp.bounds.monotonic", self.clock.monotonic)
         clock_patch.start()
         self.addCleanup(clock_patch.stop)
 
@@ -121,7 +121,7 @@ class DeadlineHttpTest(ServerTestCase):
             self.responses.append(wrapper)
             return wrapper
 
-        return patch("nci_si_mcp.http_client._open", open_progress)
+        return patch("nci_sip_mcp.http_client._open", open_progress)
 
     def test_expired_budget_starts_no_request_and_reports_zero_attempts(self):
         """Given an expired call, when HTTP is requested, then no attempt starts."""
@@ -159,7 +159,7 @@ class DeadlineHttpTest(ServerTestCase):
         def monotonic():
             return next(readings, 0.0)
 
-        with patch("nci_si_mcp.bounds.monotonic", monotonic), budgeted(budget):
+        with patch("nci_sip_mcp.bounds.monotonic", monotonic), budgeted(budget):
             with deadline_scope(1):
                 refused = call("read", lambda: client.get_json("/refused"))
             self.assertEqual(
@@ -330,7 +330,7 @@ class DeadlineHttpTest(ServerTestCase):
             timeouts.append(timeout)
             return open_real(request, timeout)
 
-        with patch("nci_si_mcp.http_client._open", open_timed), deadline_scope(10):
+        with patch("nci_sip_mcp.http_client._open", open_timed), deadline_scope(10):
             self.assertEqual(client.get_json("/first"), {"ok": True})
             self.clock.advance(8)
             self.assertEqual(client.get_json("/second"), {"ok": True})
@@ -365,7 +365,7 @@ class DeadlineHttpTest(ServerTestCase):
                     return next(readings, 1.0)
 
                 with (
-                    patch("nci_si_mcp.bounds.monotonic", monotonic),
+                    patch("nci_sip_mcp.bounds.monotonic", monotonic),
                     deadline_scope(1),
                     self.assertRaises(CallDeadlineError) as raised,
                 ):
@@ -390,7 +390,7 @@ class DeadlineHttpTest(ServerTestCase):
             raise AssertionError("expired uncontrolled transport was invoked")
 
         with (
-            patch("nci_si_mcp.bounds.monotonic", monotonic),
+            patch("nci_sip_mcp.bounds.monotonic", monotonic),
             patch.object(http_client, "_open", forbidden_open),
             deadline_scope(1),
             self.assertRaises(CallDeadlineError) as raised,
@@ -557,7 +557,7 @@ class DeadlineSettingsTest(unittest.TestCase):
         """Given default or explicit configuration, callers get the selected budget."""
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(Settings.from_env().call_deadline_seconds, 50.0)
-        with patch.dict(os.environ, {"NCI_SI_CALL_DEADLINE_SECONDS": "2.5"}, clear=True):
+        with patch.dict(os.environ, {"NCI_SIP_CALL_DEADLINE_SECONDS": "2.5"}, clear=True):
             self.assertEqual(Settings.from_env().call_deadline_seconds, 2.5)
         self.assertEqual(Settings(call_deadline_seconds=0.25).call_deadline_seconds, 0.25)
 
@@ -566,8 +566,8 @@ class DeadlineSettingsTest(unittest.TestCase):
         for value in ("0", "-1", "nan", "inf", "-inf", "disabled", ""):
             with (
                 self.subTest(value=value),
-                patch.dict(os.environ, {"NCI_SI_CALL_DEADLINE_SECONDS": value}, clear=True),
-                self.assertRaisesRegex(ValueError, "NCI_SI_CALL_DEADLINE_SECONDS"),
+                patch.dict(os.environ, {"NCI_SIP_CALL_DEADLINE_SECONDS": value}, clear=True),
+                self.assertRaisesRegex(ValueError, "NCI_SIP_CALL_DEADLINE_SECONDS"),
             ):
                 Settings.from_env()
 
@@ -576,6 +576,6 @@ class DeadlineSettingsTest(unittest.TestCase):
         for value in (0, -1, float("nan"), float("inf"), float("-inf")):
             with (
                 self.subTest(value=value),
-                self.assertRaisesRegex(ValueError, "NCI_SI_CALL_DEADLINE_SECONDS"),
+                self.assertRaisesRegex(ValueError, "NCI_SIP_CALL_DEADLINE_SECONDS"),
             ):
                 Settings(call_deadline_seconds=value)

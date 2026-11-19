@@ -1,4 +1,4 @@
-# NCI SI MCP Architecture
+# NCI SIP MCP Architecture
 
 Shared SI cross-domain joins and `ground_value` carry a maintenance dependency risk:
 the team's [8 October 2026 response](docs/upstream/team-responses-2026-10-08.md) reports
@@ -69,7 +69,7 @@ flowchart LR
     Consumer["MCP client / application"]
     Operator["Operator / developer"]
     Suite["Acceptance harness"]
-    SI["NCI SI MCP server<br/>EVS · caDSR · cross-domain · workflows"]
+    SI["NCI SIP MCP server<br/>EVS · caDSR · cross-domain · workflows"]
     EVS["NCI EVS<br/>REST and FHIR"]
     CADSR["NCI caDSR<br/>APIs and export metadata"]
     SSIS["Shared SI<br/>SPARQL"]
@@ -188,7 +188,7 @@ traces; [Mutation gate](CONTRIBUTING.md#mutation-gate) documents budgets and evi
 ## Portable index package
 
 The top-level `ncit_index` package ships in the same distribution but imports neither
-`nci_si_mcp` nor MCP. Optional NumPy and sentence-transformers imports remain lazy.
+`nci_sip_mcp` nor MCP. Optional NumPy and sentence-transformers imports remain lazy.
 
 | Module in `ncit_index` | Responsibility |
 | --- | --- |
@@ -205,7 +205,7 @@ The top-level `ncit_index` package ships in the same distribution but imports ne
 
 `registry.invoke` establishes one request-local monotonic deadline for MCP, CLI and resource
 invocations, reused by nested producers and workflow hops and restored on exit. Release
-discovery and every upstream client spend the same budget. `NCI_SI_CALL_DEADLINE_SECONDS`
+discovery and every upstream client spend the same budget. `NCI_SIP_CALL_DEADLINE_SECONDS`
 defaults to 50 seconds, must be finite and positive, and cannot disable the deadline.
 Long-running index operator commands are outside this scope through `ToolSpec.deadline`.
 
@@ -217,8 +217,8 @@ in full: never sleep past the deadline or retry earlier than Retry-After permits
 and connection setup are bounded only by the per-request timeout, so this is an elapsed-time
 budget, not hard real-time; no detached worker continues after a timeout response.
 One stalled body read can overrun the deadline by at most the socket timeout chosen at request
-open: `min(timeout, remaining)`, where `timeout` is `NCI_SI_TIMEOUT_SECONDS` or, for matching,
-`NCI_SI_MATCH_TIMEOUT_SECONDS`. Connection-level timeout refresh is deferred: no mid-body stall
+open: `min(timeout, remaining)`, where `timeout` is `NCI_SIP_TIMEOUT_SECONDS` or, for matching,
+`NCI_SIP_MATCH_TIMEOUT_SECONDS`. Connection-level timeout refresh is deferred: no mid-body stall
 has been observed, and HTTP/HTTPS connection subclasses would add TLS-sensitive transport
 complexity. Measure recorded EVS/caDSR live timings for stalls before building that refresh.
 
@@ -625,7 +625,7 @@ fetches the full concept for its details, that payload is verified.
 `get_concepts` makes one nonempty batch request, deduplicating codes on the wire and
 reconciling the unordered reply by code. Both output lists retain input order and duplicate
 occurrences. Unsolicited or duplicate upstream identities fail closed. Empty input makes no
-request; response-size failure returns `bound_exceeded` with `NCI_SI_EVS_MAX_RESPONSE_BYTES`, never a partial batch.
+request; response-size failure returns `bound_exceeded` with `NCI_SIP_EVS_MAX_RESPONSE_BYTES`, never a partial batch.
 
 EVS [limits batches to 1000 codes](https://github.com/NCIEVS/evsrestapi/blob/af1b2794ba944dad5c00e7958eaafb90267f2df0/src/main/java/gov/nih/nci/evs/api/controller/ConceptController.java#L177),
 but the deployed URL ceiling is lower. Credential-free IPv4 probes on 5 October 2026, using
@@ -641,8 +641,8 @@ applies before deduplication; either excess is `invalid_request`, without trunca
 `expand_value_set` accepts exactly one of `valueSet` or `code`, with required terminology
 and release. EVS enumerates NCIt subsets only; other terminologies return
 `capability_unavailable` after argument validation and without a request. The FHIR client uses
-`NCI_SI_EVS_FHIR_BASE_URL` and shares REST's timeout, retry, licence-key and
-`NCI_SI_EVS_MAX_RESPONSE_BYTES` settings through `HttpClient`.
+`NCI_SIP_EVS_FHIR_BASE_URL` and shares REST's timeout, retry, licence-key and
+`NCI_SIP_EVS_MAX_RESPONSE_BYTES` settings through `HttpClient`.
 
 The recorded platform rejects `system-version`, and its subset enumeration uses latest monthly.
 Under A3.2 the client requests the unpinned expansion directly, verifies its identity and exact

@@ -22,11 +22,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import nci_si_acceptance
-import nci_si_mcp
-from nci_si_acceptance import request_budget, request_children
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_mcp.http_client import RequestPolicyError
+import nci_sip_acceptance
+import nci_sip_mcp
+from nci_sip_acceptance import request_budget, request_children
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_mcp.http_client import RequestPolicyError
 
 KNOWN_BODY_BYTES = 5
 OBSERVED_FAILURE_COUNT = 2
@@ -85,7 +85,7 @@ def authorization():
 
 def supervisor(directory):
     # Drive the new public entry point without turning its absence into collection failure.
-    name = "nci_si_acceptance.request_supervision"
+    name = "nci_sip_acceptance.request_supervision"
     assert importlib.util.find_spec(name) is not None, "An owned caller needs SupervisedRun"
     return importlib.import_module(name).SupervisedRun.create(authorization(), directory)
 
@@ -254,7 +254,7 @@ def test_terminal_refusal_cannot_publish_completed(tmp_path):
 
 
 def test_caught_refusal_preserves_failed_state_and_five_known_bytes(tmp_path):
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     original = authorization()
     auth = Authorization(original.grants, Limits(logical=1), original.policy_sha256)
     owner = entry.SupervisedRun.create(auth, tmp_path)
@@ -279,20 +279,22 @@ def test_registered_short_worker_is_reaped_and_streams_closed(tmp_path):
     destination = tmp_path / "child.json"
     descriptor = tmp_path / "descriptor.json"
     descriptor.write_text(json.dumps(owner.run.descriptor.to_record()))
-    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
+    roots = [
+        str(Path(package.__file__).parents[1]) for package in (nci_sip_acceptance, nci_sip_mcp)
+    ]
     script = (
         "import sys,json; from pathlib import Path; "
-        "sys.path[:0]=sys.argv[1:3]; import nci_si_acceptance,nci_si_mcp; "
+        "sys.path[:0]=sys.argv[1:3]; import nci_sip_acceptance,nci_sip_mcp; "
         "sys.stdin.buffer.read(1); "
-        "from nci_si_acceptance.request_authorization import "
+        "from nci_sip_acceptance.request_authorization import "
         "Authorization,Limits,RequestGrant,RunDescriptor; "
-        "from nci_si_acceptance.request_budget import ControlledRun; "
+        "from nci_sip_acceptance.request_budget import ControlledRun; "
         "auth=Authorization((RequestGrant('GET','http://127.0.0.1:9/probe',()),),Limits(),'a'*64); "
         "descriptor=RunDescriptor.from_record(json.loads(Path(sys.argv[4]).read_text())); "
         "run=ControlledRun.attach(descriptor,auth,participant='worker-1'); "
         "run.check_wait(0); "
         "Path(sys.argv[3]).write_text(json.dumps([sys.executable,"
-        "nci_si_acceptance.__file__,nci_si_mcp.__file__]))"
+        "nci_sip_acceptance.__file__,nci_sip_mcp.__file__]))"
     )
     with subprocess.Popen(  # noqa: S603 - owned interpreter and explicit synthetic child program.
         [sys.executable, "-I", "-c", script, *roots, str(destination), str(descriptor)],
@@ -317,8 +319,8 @@ def test_registered_short_worker_is_reaped_and_streams_closed(tmp_path):
         assert child.stdin.closed and child.stdout.closed and child.stderr.closed
     assert json.loads(destination.read_text()) == [
         sys.executable,
-        nci_si_acceptance.__file__,
-        nci_si_mcp.__file__,
+        nci_sip_acceptance.__file__,
+        nci_sip_mcp.__file__,
     ]
     assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "completed"
 
@@ -327,13 +329,15 @@ def test_zero_exit_worker_with_pending_read_refuses_live_admission(tmp_path, mon
     owner = supervisor(tmp_path)
     descriptor = tmp_path / "descriptor.json"
     descriptor.write_text(json.dumps(owner.run.descriptor.to_record()))
-    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
+    roots = [
+        str(Path(package.__file__).parents[1]) for package in (nci_sip_acceptance, nci_sip_mcp)
+    ]
     script = (
         "import sys,json,os; from pathlib import Path; sys.path[:0]=sys.argv[1:3]; "
         "sys.stdin.buffer.read(1); "
-        "from nci_si_acceptance.request_authorization import "
+        "from nci_sip_acceptance.request_authorization import "
         "Authorization,Limits,RequestGrant,RunDescriptor; "
-        "from nci_si_acceptance.request_budget import ControlledRun; "
+        "from nci_sip_acceptance.request_budget import ControlledRun; "
         "auth=Authorization((RequestGrant('GET','http://127.0.0.1:9/probe',()),),Limits(),'a'*64); "
         "run=ControlledRun.attach(RunDescriptor.from_record(json.loads(Path(sys.argv[3]).read_text())),"
         "auth,participant='worker'); logical=run.logical(auth.grants[0]); "
@@ -502,7 +506,7 @@ def test_live_observer_after_join_timeout_prevents_completed_success(tmp_path, m
     owner = supervisor(tmp_path)
     release = threading.Event()
     owner._observer = threading.Thread(target=lambda: release.wait(5))
-    monkeypatch.setattr("nci_si_acceptance.request_supervision.JOIN_SECONDS", 0.05)
+    monkeypatch.setattr("nci_sip_acceptance.request_supervision.JOIN_SECONDS", 0.05)
     started = time.monotonic()
     try:
         with (
@@ -592,7 +596,7 @@ def test_unexpected_real_child_exit_closes_admission(
 
 def test_close_precedes_actual_owned_service_stop(tmp_path, monkeypatch):
     owner = supervisor(tmp_path)
-    module = importlib.import_module("nci_si_acceptance.request_supervision")
+    module = importlib.import_module("nci_sip_acceptance.request_supervision")
     original_stop = module.stop_child
     admitted = []
 
@@ -903,7 +907,7 @@ def test_later_marker_publication_keeps_earlier_local_latch(tmp_path, monkeypatc
 
 def test_attached_constructor_cannot_change_controller_summary(tmp_path):
     owner = supervisor(tmp_path)
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     with owner:
         owner.run.authorize_participant("attached")
         attached = request_budget.ControlledRun.attach(
@@ -919,7 +923,7 @@ def test_attached_constructor_cannot_change_controller_summary(tmp_path):
 
 
 def test_unenrolled_constructor_rejection_preserves_unmanaged_caller(tmp_path):
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     run = request_budget.ControlledRun.create(authorization(), tmp_path)
     failure = None
     try:
@@ -935,7 +939,7 @@ def test_unenrolled_constructor_rejection_preserves_unmanaged_caller(tmp_path):
 
 def test_closed_constructor_cannot_overwrite_completed_summary(tmp_path):
     owner = supervisor(tmp_path)
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     with owner:
         pass
     path = owner.run.directory / "summary.json"
@@ -949,13 +953,15 @@ def test_closed_constructor_cannot_overwrite_completed_summary(tmp_path):
 @pytest.mark.parametrize("owner_state", ["paused", "lost"])
 def test_actual_controller_loss_refuses_attached_participant(tmp_path, owner_state):
     descriptor = tmp_path / "controller.json"
-    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
+    roots = [
+        str(Path(package.__file__).parents[1]) for package in (nci_sip_acceptance, nci_sip_mcp)
+    ]
     script = """
 import sys,json
 from pathlib import Path
 sys.path[:0] = sys.argv[1:3]
-from nci_si_acceptance.request_authorization import Authorization,Limits,RequestGrant
-from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.request_authorization import Authorization,Limits,RequestGrant
+from nci_sip_acceptance.request_supervision import SupervisedRun
 auth=Authorization((RequestGrant('GET','http://127.0.0.1:9/probe',()),),Limits(),'a'*64)
 with SupervisedRun.create(auth,Path(sys.argv[4])) as owner:
     owner.run.authorize_participant('participant')
@@ -1024,7 +1030,7 @@ def test_new_supervision_operations_recheck_private_identity(tmp_path, operation
 @pytest.mark.parametrize("role", ["worker", "service"])
 def test_actual_unreaped_child_failure_preserves_initiating_exception(tmp_path, monkeypatch, role):
     owner = supervisor(tmp_path)
-    module = importlib.import_module("nci_si_acceptance.request_supervision")
+    module = importlib.import_module("nci_sip_acceptance.request_supervision")
     original_stop = module.stop_child
     initiating = KeyError("initiating caller failure")
 
@@ -1079,7 +1085,7 @@ def test_paused_real_observer_cannot_bypass_shutdown_budget(tmp_path, monkeypatc
             finished.set()
 
     monkeypatch.setattr(owner, "_pulse", paused_pulse)
-    monkeypatch.setattr("nci_si_acceptance.request_supervision.JOIN_SECONDS", 0.05)
+    monkeypatch.setattr("nci_sip_acceptance.request_supervision.JOIN_SECONDS", 0.05)
     controller = threading.Thread(target=run)
     controller.start()
     try:
@@ -1250,8 +1256,8 @@ def test_handoff_append_order_decides_custody_during_shutdown(tmp_path, monkeypa
     owner = supervisor(tmp_path)
     arrived, release, finished = (threading.Event() for _ in range(3))
     registrations, shutdown = [], []
-    monkeypatch.setattr("nci_si_acceptance.request_supervision.JOIN_SECONDS", 0.05)
-    monkeypatch.setattr("nci_si_acceptance.request_supervision.STOP_SECONDS", 0.2)
+    monkeypatch.setattr("nci_sip_acceptance.request_supervision.JOIN_SECONDS", 0.05)
+    monkeypatch.setattr("nci_sip_acceptance.request_supervision.STOP_SECONDS", 0.2)
     with subprocess.Popen(
         [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
         stdin=subprocess.PIPE,
@@ -1302,7 +1308,7 @@ def test_handoff_append_order_decides_custody_during_shutdown(tmp_path, monkeypa
 
 @pytest.mark.parametrize("run", [None, object()])
 def test_constructor_refuses_foreign_run_before_attribute_access(run):
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     with pytest.raises(RequestPolicyError) as caught:
         entry.SupervisedRun(run)
     assert caught.value.reason == "authorization"
@@ -1456,7 +1462,7 @@ def test_initial_summary_must_be_incomplete_before_admission(tmp_path, state):
     path = owner.run.directory / "summary.json"
     value = owner.snapshot() | {"state": state}
     path.write_text(json.dumps(value))
-    reader = importlib.import_module("nci_si_acceptance.request_summary").read_summary
+    reader = importlib.import_module("nci_sip_acceptance.request_summary").read_summary
     assert reader(path, run_id=owner.run.descriptor.run_id, policy_sha256="a" * 64) == value
     try:
         with pytest.raises(RequestPolicyError) as caught:

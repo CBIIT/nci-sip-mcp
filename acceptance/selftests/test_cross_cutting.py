@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nci_si_acceptance.spec import TOOLS, profile_tools
+from nci_sip_acceptance.spec import TOOLS, profile_tools
 
 pytest_plugins = ["pytester"]
 

@@ -16,15 +16,15 @@ import pytest
 from http_receiver import WireReceiver
 from test_request_supervision import authorization, failure_leaves, supervisor
 
-from nci_si_acceptance import request_children, request_supervision
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_acceptance.request_budget import ControlledRun
-from nci_si_acceptance.request_children import CleanupDeadline, Completions, CompletionToken
-from nci_si_acceptance.request_stdio import _PortalCall
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.errors import RequestPolicyError
-from nci_si_mcp.http_client import HttpClient
+from nci_sip_acceptance import request_children, request_supervision
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_acceptance.request_budget import ControlledRun
+from nci_sip_acceptance.request_children import CleanupDeadline, Completions, CompletionToken
+from nci_sip_acceptance.request_stdio import _PortalCall
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.request_transport import ControlledHttpPolicy
+from nci_sip_mcp.errors import RequestPolicyError
+from nci_sip_mcp.http_client import HttpClient
 
 
 @pytest.fixture

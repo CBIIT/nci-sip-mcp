@@ -9,13 +9,13 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from fakes import FakeEVS, FakeSSIS, cde_response, cde_row, concept, release, vm_response, vm_row
-from nci_si_mcp.bounds import Budget, current_budget
-from nci_si_mcp.caching import cache_call
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.http_client import UpstreamTooLargeError
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.release_selection import SessionRelease, session_scope
+from nci_sip_mcp.bounds import Budget, current_budget
+from nci_sip_mcp.caching import cache_call
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.http_client import UpstreamTooLargeError
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.release_selection import SessionRelease, session_scope
 from test_bounds import BudgetEVS
 from test_cadsr_client import reply
 from test_http_client import Reply, ServerTestCase
@@ -37,7 +37,9 @@ class WorkflowFixture(unittest.TestCase):
         self.ssis = FakeSSIS(self.settings)
         self.context = Context(self.settings, evs=self.evs, ssis=self.ssis)
         self.addCleanup(patch.stopall)
-        patch("nci_si_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")).start()
+        patch(
+            "nci_sip_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")
+        ).start()
 
     def call(self, operation="ground_value", **arguments):
         with cache_call() as hint:
@@ -194,7 +196,7 @@ class GroundTest(WorkflowFixture):
             return []
 
         with (
-            patch("nci_si_mcp.workflows.Budget", return_value=Budget(requests=1)),
+            patch("nci_sip_mcp.workflows.Budget", return_value=Budget(requests=1)),
             patch.object(self.ssis, "get_graph_identities", charged_identity),
             patch.object(self.ssis, "find_data_elements", charged_rows),
         ):
@@ -427,7 +429,7 @@ class CohortTest(WorkflowFixture):
 
     def test_request_exhaustion_is_reported_instead_of_an_unverified_complete_cohort(self):
         self.context.evs = BudgetEVS(list(self.evs.concepts.values()))
-        with patch("nci_si_mcp.workflows.Budget", return_value=Budget(requests=7)):
+        with patch("nci_sip_mcp.workflows.Budget", return_value=Budget(requests=7)):
             result = self.call("expand_cohort", conceptCode="C1", includeNegative=True)
         self.assertEqual(result["truncation"]["bound"], "requests")
         self.assertEqual(result["truncation"]["reached"], 7)
@@ -547,8 +549,8 @@ class HarmonizationTest(ServerTestCase):
         context.cadsr.http.sleep = lambda _: None
         logging.disable(logging.NOTSET)
         with (
-            patch("nci_si_mcp.workflows.Budget", return_value=Budget(requests=2)),
-            self.assertLogs("nci_si_mcp.audit", level="INFO") as captured,
+            patch("nci_sip_mcp.workflows.Budget", return_value=Budget(requests=2)),
+            self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured,
         ):
             result = invoke(
                 context,
@@ -590,7 +592,7 @@ class GroundReleaseTest(WorkflowFixture):
             with (
                 self.subTest(arguments=arguments),
                 session_scope(SessionRelease()),
-                self.assertLogs("nci_si_mcp.audit", level="INFO") as captured,
+                self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured,
                 patch.object(
                     self.evs,
                     "search_concepts",
@@ -625,7 +627,7 @@ class GroundReleaseTest(WorkflowFixture):
             {"name": None},
         ]
         logging.disable(logging.NOTSET)
-        with self.assertLogs("nci_si_mcp.audit", level="INFO") as captured:
+        with self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured:
             result = self.call("harmonize_data_dictionary", columns=columns)
         self.assertEqual(result["error"]["code"], "invalid_request")
         record = captured.records[-1].structured

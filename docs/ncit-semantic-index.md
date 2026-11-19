@@ -37,7 +37,7 @@ and equal text in different concepts remains separate. Concept codes, relations,
 other properties are not concatenated into an embedding. Raw EVS payloads remain available for
 an explicit offline rebuild; absent content is not filled in.
 
-The implementation is [`evs.py`](../src/nci_si_mcp/evs.py) for extraction and
+The implementation is [`evs.py`](../src/nci_sip_mcp/evs.py) for extraction and
 [`storage.py`](../src/ncit_index/storage.py) for field selection. The
 [index builder](../src/ncit_index/index.py) processes batches of **64 concepts**, encoding all
 of their selected fields outside write transactions. This is a concept-batch size, not an
@@ -115,10 +115,10 @@ constructing its provider may download model assets; opening the index database 
 
 ```bash
 pdm install -G embeddings
-export NCI_SI_DATA_DIR=/absolute/path/to/dedicated-ncit-index
-export NCI_SI_EMBEDDING_PROVIDER=sentence-transformers
-export NCI_SI_EMBEDDING_MODEL=cambridgeltl/SapBERT-from-PubMedBERT-fulltext
-pdm run nci-si-mcp release-info
+export NCI_SIP_DATA_DIR=/absolute/path/to/dedicated-ncit-index
+export NCI_SIP_EMBEDDING_PROVIDER=sentence-transformers
+export NCI_SIP_EMBEDDING_MODEL=cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+pdm run nci-sip-mcp release-info
 ```
 
 **Stop and inspect the selected release before building.** The shipped calibration matches
@@ -132,8 +132,8 @@ changes between preflight and build, its evaluation must still match the actual 
 With the intended release/model and applicable calibration confirmed, build and list candidates:
 
 ```bash
-pdm run nci-si-mcp index-build
-pdm run nci-si-mcp index-builds
+pdm run nci-sip-mcp index-build
+pdm run nci-sip-mcp index-builds
 ```
 
 The build downloads unfiltered release-pinned EVS search pages of 1000 and reconciles each page's release, unique codes and
@@ -152,9 +152,9 @@ report: release, provider/model/dimensions, corpus count, evaluation version, mi
 concepts and pass/fail. Record the former active ID for rollback before changing it.
 
 ```bash
-pdm run nci-si-mcp evaluate --build-id "$BUILD_ID"
-pdm run nci-si-mcp index-activate "$BUILD_ID"
-pdm run nci-si-mcp index-builds
+pdm run nci-sip-mcp evaluate --build-id "$BUILD_ID"
+pdm run nci-sip-mcp index-activate "$BUILD_ID"
+pdm run nci-sip-mcp index-builds
 ```
 
 Evaluation reads that candidate without activating it. Activation requires a passing report
@@ -168,7 +168,7 @@ For rollback, set `PREVIOUS_BUILD_ID` to the retained predecessor, keep its matc
 settings, and explicitly activate it:
 
 ```bash
-pdm run nci-si-mcp index-activate "$PREVIOUS_BUILD_ID"
+pdm run nci-sip-mcp index-activate "$PREVIOUS_BUILD_ID"
 ```
 
 A developer `index-sample` instead activates its named subset and has no production evaluation
@@ -180,7 +180,7 @@ run as a complete NCIt candidate. Plain `evaluate` reports on the active build, 
 ## Rebuilds and future handover
 
 To re-embed stored raw concepts with selected settings, set `SOURCE_BUILD_ID` to a completed
-snapshot and run `pdm run nci-si-mcp index-rebuild "$SOURCE_BUILD_ID"`. This avoids an EVS download,
+snapshot and run `pdm run nci-sip-mcp index-rebuild "$SOURCE_BUILD_ID"`. This avoids an EVS download,
 not model loading; make the model assets available. It creates another inactive build and
 requires fresh evaluation for production classification before explicit activation. Rebuilding
 an unclassified legacy snapshot creates a production candidate; retain the original for rollback.

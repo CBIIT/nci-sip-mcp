@@ -5,8 +5,8 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs
 
-from nci_si_mcp.config import Settings
-from nci_si_mcp.ssis import SSISClient
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.ssis import SSISClient
 from test_http_client import Reply, ServerTestCase
 from test_server import ServerFixture
 from test_ssis_client import recording

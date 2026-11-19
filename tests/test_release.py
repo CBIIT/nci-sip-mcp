@@ -5,11 +5,11 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from fakes import FakeEVS, release, terminology_row
-from nci_si_mcp.errors import PlatformError, is_error_record, serialise
-from nci_si_mcp.evs import EVSClient, EVSNotFoundError, EVSReleaseNotFoundError
-from nci_si_mcp.invocation import call
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.release import registry_state, resolve_evs_release, served_evs_release
+from nci_sip_mcp.errors import PlatformError, is_error_record, serialise
+from nci_sip_mcp.evs import EVSClient, EVSNotFoundError, EVSReleaseNotFoundError
+from nci_sip_mcp.invocation import call
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.release import registry_state, resolve_evs_release, served_evs_release
 from test_evs_client import FakeResponse
 from test_handlers import NEOPLASM, HandlerTestCase
 
@@ -40,7 +40,7 @@ class ResolveEvsReleaseTest(unittest.TestCase):
             (lambda: served_evs_release([ambiguous], "ncit", "26.09d", "monthly"), "metadata"),
             (
                 lambda: resolve_evs_release(fake_with(), "ncit", "monthly"),
-                "NCI_SI_RELEASE_CHANNEL",
+                "NCI_SIP_RELEASE_CHANNEL",
             ),
         )
         for raiser, next_step in cases:
@@ -129,7 +129,7 @@ class ResolveEvsReleaseTest(unittest.TestCase):
             self.assertEqual(
                 error.message,
                 f"EVS lists {count} releases as latest, not exactly one. "
-                "Retry later, or set NCI_SI_RELEASE_CHANNEL "
+                "Retry later, or set NCI_SIP_RELEASE_CHANNEL "
                 "to the other channel (monthly or weekly)",
             )
 
@@ -143,7 +143,7 @@ class ResolveEvsReleaseTest(unittest.TestCase):
 
     def test_the_query_names_the_terminology_latest_and_the_channel(self):
         with (
-            patch("nci_si_mcp.http_client._open", return_value=FakeResponse(b"[]")) as opened,
+            patch("nci_sip_mcp.http_client._open", return_value=FakeResponse(b"[]")) as opened,
             self.assertRaises(PlatformError) as raised,
         ):
             resolve_evs_release(EVSClient("https://example.invalid"), "ncit", "weekly")
@@ -158,7 +158,7 @@ class ResolveEvsReleaseTest(unittest.TestCase):
 
     def test_the_unfiltered_listing_sends_no_filter(self):
         response = FakeResponse(json.dumps([MONTHLY]).encode())
-        with patch("nci_si_mcp.http_client._open", return_value=response) as opened:
+        with patch("nci_sip_mcp.http_client._open", return_value=response) as opened:
             rows = EVSClient("https://example.invalid").get_terminologies()
 
         self.assertEqual(rows, [MONTHLY])
@@ -172,7 +172,7 @@ class UnknownReleaseTest(HandlerTestCase):
     def answer_404(self, message):
         body = io.BytesIO(f'{{"message": "{message}"}}'.encode())
         error = HTTPError("https://example.invalid", 404, "Not Found", {}, body)
-        return patch("nci_si_mcp.http_client._open", side_effect=[error])
+        return patch("nci_sip_mcp.http_client._open", side_effect=[error])
 
     def test_a_release_evs_does_not_serve_is_a_release_failure_naming_it(self):
         with (
@@ -367,7 +367,7 @@ class SelectionMetadataTest(unittest.TestCase):
         ):
             with (
                 patch(
-                    "nci_si_mcp.evs.EVSClient.get_terminologies", return_value=[MONTHLY | change]
+                    "nci_sip_mcp.evs.EVSClient.get_terminologies", return_value=[MONTHLY | change]
                 ),
                 self.subTest(change=change),
                 self.assertRaises(PlatformError) as raised,

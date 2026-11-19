@@ -6,8 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from nci_si_mcp.config import Settings
-from nci_si_mcp.config_snapshot import PROPOSABLE, read_snapshot
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.config_snapshot import PROPOSABLE, read_snapshot
 
 MAX_VALUE = 100
 

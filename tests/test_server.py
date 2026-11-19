@@ -18,13 +18,13 @@ from mcp.server.session import ServerSession
 from mcp.shared.exceptions import MCPError
 
 from fakes import FakeEVS, concept, release
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.index_adapter import LocalIndexAdapter, index_event
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.server import INSTRUCTIONS, create_mcp
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.index_adapter import LocalIndexAdapter, index_event
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.server import INSTRUCTIONS, create_mcp
 from ncit_index.embeddings import HashingEmbeddingProvider
 from ncit_index.index import LocalIndex
 from test_docs import QUICKSTART, bullet_names, section
@@ -129,7 +129,7 @@ def pinned(**arguments):
     return {"terminology": "ncit", "release": "26.06e"} | arguments
 
 
-@patch("nci_si_mcp.server.configure_logging")
+@patch("nci_sip_mcp.server.configure_logging")
 class ServerStartupTest(unittest.TestCase):
     def test_missing_or_incompatible_mcp_package_is_explained(self, _):
         with (
@@ -217,7 +217,7 @@ class ServerFixture(unittest.TestCase):
         return json.loads(result.contents[0].text)
 
 
-@patch("nci_si_mcp.server.configure_logging")
+@patch("nci_sip_mcp.server.configure_logging")
 class ServerTest(ServerFixture):
     def test_server_reports_its_version_and_its_instructions(self, _):
         async def server_info(client):
@@ -225,7 +225,9 @@ class ServerTest(ServerFixture):
 
         info, instructions = self.session(server_info)
 
-        self.assertEqual((info.name, info.version), ("nci-si-mcp", metadata.version("nci-si-mcp")))
+        self.assertEqual(
+            (info.name, info.version), ("nci-sip-mcp", metadata.version("nci-sip-mcp"))
+        )
         self.assertRegex(instructions, r"2026-07-28 HTTP.*per call")
         self.assertRegex(instructions, r"pin.*handshake.*stdio")
         self.assertRegex(instructions, r"pass.*release.*first result's provenance.*stable")
@@ -742,7 +744,7 @@ class ServerTest(ServerFixture):
                 opened.append(value)
                 yield value
 
-        with patch("nci_si_mcp.audit.correlated", spy), self.assertRaises(MCPError) as raised:
+        with patch("nci_sip_mcp.audit.correlated", spy), self.assertRaises(MCPError) as raised:
             self.read(uri)
         return json.loads(str(raised.exception))["error"]["correlationId"], opened
 

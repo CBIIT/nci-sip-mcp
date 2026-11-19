@@ -7,15 +7,15 @@ from unittest.mock import patch
 from mcp.shared.exceptions import MCPError
 
 from fakes import terminology_row
-from nci_si_mcp.caching import cache_call, select_cache_hint
-from nci_si_mcp.context import Context
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.registry import OPERATIONS, ToolSpec, invoke
-from nci_si_mcp.server import _cache_results
+from nci_sip_mcp.caching import cache_call, select_cache_hint
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.registry import OPERATIONS, ToolSpec, invoke
+from nci_sip_mcp.server import _cache_results
 from test_server import ServerFixture, pinned
 
 
-@patch("nci_si_mcp.server.configure_logging")
+@patch("nci_sip_mcp.server.configure_logging")
 class CachingTest(ServerFixture):
     def test_tool_policy_follows_its_declaration_after_a_rename(self, _):
         def status(context: Context):
@@ -23,7 +23,7 @@ class CachingTest(ServerFixture):
 
         spec = ToolSpec(status, "evs", dict[str, str], True, name="renamed_status")
         with (
-            patch("nci_si_mcp.server.SPECS", (spec,)),
+            patch("nci_sip_mcp.server.SPECS", (spec,)),
             patch.dict(OPERATIONS, {spec.operation: spec}),
         ):
             result = self.session(lambda client: client.call_tool("renamed_status"))
@@ -36,7 +36,7 @@ class CachingTest(ServerFixture):
 
         spec = ToolSpec(content, "evs", dict, False, uri="nci-si://renamed/{code}")
         with (
-            patch("nci_si_mcp.server.SPECS", (spec,)),
+            patch("nci_sip_mcp.server.SPECS", (spec,)),
             patch.dict(OPERATIONS, {spec.operation: spec}),
         ):
             result = self.session(lambda client: client.read_resource("nci-si://renamed/C1"))
@@ -91,7 +91,7 @@ class CachingTest(ServerFixture):
                 self.assertNotIn("ttlMs", result.model_dump(by_alias=True))
                 self.assertNotIn("_meta", json.loads(result.content[0].text))
                 self.assertEqual(
-                    result.meta["io.modelcontextprotocol/serverInfo"]["name"], "nci-si-mcp"
+                    result.meta["io.modelcontextprotocol/serverInfo"]["name"], "nci-sip-mcp"
                 )
 
     def test_empty_retired_search_is_successful_cacheable_content(self, _):

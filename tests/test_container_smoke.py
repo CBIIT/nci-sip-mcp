@@ -249,7 +249,7 @@ class DefaultAuthRefusalTest(unittest.TestCase):
         self.assertIn("--network", command)
         self.assertEqual(command[command.index("--network") + 1], "none")
         environment = [command[i + 1] for i, arg in enumerate(command) if arg == "-e"]
-        self.assertFalse(any(value.startswith("NCI_SI_HTTP_AUTH_MODE=") for value in environment))
+        self.assertFalse(any(value.startswith("NCI_SIP_HTTP_AUTH_MODE=") for value in environment))
         self.assertEqual(cleanup, ("rm", "-f", command[command.index("--name") + 1]))
 
     def test_command_failure_still_reaps_owned_container(self):

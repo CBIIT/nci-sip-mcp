@@ -4,9 +4,15 @@ The server, optional NCIt index, documentation site and validation companion are
 local components. Choose one row, then run only the linked component sections. The installer
 owns the server only. It never installs an index, documentation or the companion.
 
-Current release examples use `CBIIT/nci-sip-mcp`. Installers from v0.29.1 accept both canonical
-origins; older installers need the [old-origin instructions](installer-targets.md#verify-a-released-local-installation).
-Package, import, command, environment and data-directory names are unchanged.
+The repository URL and package namespace changed in different releases. The commands below require
+a tag that contains the NCI SIP namespace (`nci-sip-mcp`, `nci_sip_mcp`, `nci-sip-install`,
+`NCI_SIP_*`). Pre-SIP tags retain `nci-si-mcp`, `nci_si_mcp`, `nci-si-install` and `NCI_SI_*`;
+those names are not aliases in the new package. The `.nci-si-mcp` data directory remains unchanged.
+Use the [pre-SIP release instructions](installer-targets.md#pre-sip-package-release) for an older
+tag. Installers from v0.29.1 accept both exact repository origins; older installers need the
+[old-origin instructions](installer-targets.md#verify-a-released-local-installation). In Local run
+CI, PR, push and manual branch runs verify the checked-out candidate; the weekly schedule verifies
+the latest released tag.
 
 ## Combinations
 
@@ -25,8 +31,8 @@ server replaces the installer's HTTP server. Documentation uses 8080. The compan
 
 ## Prerequisites
 
-Use Python 3.14 or newer and Git. Replace `vX.Y.Z` below with the exact tag from the releases
-page. Before the server and index commands, set `SERVER_VENV`, `INDEX_VENV`, `STDIO_ROOT`,
+Use Python 3.14 or newer and Git. Replace `vX.Y.Z` below with an exact post-SIP namespace tag
+from the releases page. Before the server and index commands, set `SERVER_VENV`, `INDEX_VENV`, `STDIO_ROOT`,
 `HTTP_ROOT` and `INDEX_DATA` to five fresh absolute paths; the two installer roots must differ
 because each state record binds its transport and profile. An omitted `--profile` means `unified`;
 when selecting `evs` or `cadsr`, pass that same profile to every installer lifecycle command.
@@ -48,27 +54,27 @@ Create a virtual environment and install the tagged server package:
 
 ```bash
 python3.14 -m venv "$SERVER_VENV"
-"$SERVER_VENV/bin/python" -m pip install "nci-si-mcp[server] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"
+"$SERVER_VENV/bin/python" -m pip install "nci-sip-mcp[server] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"
 ```
 
 Walk the stdio lifecycle:
 
 ```bash
-"$SERVER_VENV/bin/nci-si-install" check --target local
-"$SERVER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
-"$SERVER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
-"$SERVER_VENV/bin/nci-si-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" check --target local
+"$SERVER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
+"$SERVER_VENV/bin/nci-sip-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
 ```
 
 Walk the loopback HTTP lifecycle:
 
 ```bash
-"$SERVER_VENV/bin/nci-si-install" check --target local
-"$SERVER_VENV/bin/nci-si-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
-"$SERVER_VENV/bin/nci-si-install" status --target local --transport http --data-dir "$HTTP_ROOT"
-"$SERVER_VENV/bin/nci-si-install" start --target local --transport http --data-dir "$HTTP_ROOT"
-"$SERVER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
-"$SERVER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" check --target local
+"$SERVER_VENV/bin/nci-sip-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
+"$SERVER_VENV/bin/nci-sip-install" status --target local --transport http --data-dir "$HTTP_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" start --target local --transport http --data-dir "$HTTP_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
+"$SERVER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
 ```
 
 The stdio `start` command prints the client configuration instead of opening a listener. The HTTP
@@ -81,12 +87,12 @@ start the one required-index server for this combination:
 
 ```bash
 python3.14 -m venv "$INDEX_VENV"
-"$INDEX_VENV/bin/python" -m pip install "nci-si-mcp[server,index] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"
-export NCI_SI_DATA_DIR="$INDEX_DATA"
-"$INDEX_VENV/bin/nci-si-mcp" index-sample C3262 C2991 C40704 C153397 C116938
-"$INDEX_VENV/bin/nci-si-mcp" evaluate
-export NCI_SI_HTTP_REQUIRE_INDEX=1
-"$INDEX_VENV/bin/nci-si-mcp" serve --transport streamable-http
+"$INDEX_VENV/bin/python" -m pip install "nci-sip-mcp[server,index] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"
+export NCI_SIP_DATA_DIR="$INDEX_DATA"
+"$INDEX_VENV/bin/nci-sip-mcp" index-sample C3262 C2991 C40704 C153397 C116938
+"$INDEX_VENV/bin/nci-sip-mcp" evaluate
+export NCI_SIP_HTTP_REQUIRE_INDEX=1
+"$INDEX_VENV/bin/nci-sip-mcp" serve --transport streamable-http
 ```
 
 Verify `http://127.0.0.1:8000/ready`, then call `search_concepts` with terminology `ncit`, query

@@ -19,7 +19,7 @@ REGISTRY_CHECKS = {
 }
 REASON = (
     "registry-release requirement suspended pending sponsor decision "
-    "(NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=optional)"
+    "(NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=optional)"
 )
 
 
@@ -31,9 +31,9 @@ def test_registry_checks_skip_only_in_optional_mode(compliant, monkeypatch, mode
     # Given a server that returns unpinned content even when a registry pin is requested,
     # when the real caDSR checks run, optional suspends exactly five in fixture or live mode
     # as ordinary skips; required detects the violation against fixtures.
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_REGISTRY_RELEASE", mode)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", run_mode)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PROFILE", "unified")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE", mode)
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", run_mode)
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PROFILE", "unified")
     monkeypatch.setenv("COMPLIANT_SERVER_PROFILE", "unified")
     shutil.rmtree(compliant.path / "fixtures")
     shutil.copytree(SUITE.parent / "fixtures", compliant.path / "fixtures")

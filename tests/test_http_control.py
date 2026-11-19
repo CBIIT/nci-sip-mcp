@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 from scripts import acceptance_http
 
-from nci_si_acceptance.client import OwnedServer
+from nci_sip_acceptance.client import OwnedServer
 
 
 def listening(port):
@@ -54,7 +54,7 @@ def answering_hook(directory, server):
 
 LISTENS = (
     "import os, socket, time; listener = socket.socket(); "
-    "listener.bind(('127.0.0.1', int(os.environ['NCI_SI_HTTP_PORT']))); "
+    "listener.bind(('127.0.0.1', int(os.environ['NCI_SIP_HTTP_PORT']))); "
     "listener.listen(); time.sleep(300)"
 )
 
@@ -77,7 +77,7 @@ class StateHookReadinessTest(unittest.TestCase):
                 with (
                     patch.object(acceptance_http.subprocess, "Popen", launch),
                     answering_hook(root, server) as socket_path,
-                    patch.dict(os.environ, {"NCI_SI_PROFILE": "fixture-profile"}, clear=True),
+                    patch.dict(os.environ, {"NCI_SIP_PROFILE": "fixture-profile"}, clear=True),
                 ):
                     yield server, root, lambda: acceptance_http.state(socket_path)
             finally:
@@ -148,7 +148,7 @@ class HTTPControlTest(unittest.TestCase):
             root.mkdir()
 
             def suite(_port, socket_path, **_options):
-                with patch.dict(os.environ, {"NCI_SI_PROFILE": "fixture-profile"}, clear=True):
+                with patch.dict(os.environ, {"NCI_SIP_PROFILE": "fixture-profile"}, clear=True):
                     acceptance_http.state(str(socket_path))
                 return 0
 
@@ -175,7 +175,7 @@ class HTTPControlTest(unittest.TestCase):
             ):
                 result = acceptance_http.run()
             self.assertEqual(result, 0)
-            self.assertEqual(settings, [{"NCI_SI_PROFILE": "fixture-profile"}])
+            self.assertEqual(settings, [{"NCI_SIP_PROFILE": "fixture-profile"}])
             self.assertEqual(list((root / "tmp").iterdir()), [])
 
     def test_preparation_uses_supplied_environment_without_inherited_secrets(self):
@@ -192,12 +192,12 @@ class HTTPControlTest(unittest.TestCase):
             acceptance_http.prepare(Path(directory), environment={"HOME": directory})
         self.assertEqual(observed[0]["HOME"], directory)
         self.assertNotIn("PRIVATE-CANARY", str(observed))
-        self.assertTrue(observed[0]["NCI_SI_EVS_BASE_URL"].startswith("http://127.0.0.1:"))
+        self.assertTrue(observed[0]["NCI_SIP_EVS_BASE_URL"].startswith("http://127.0.0.1:"))
 
     def test_unrecorded_preparation_request_cannot_be_treated_as_prepared(self):
         def prepare_with_an_unrecorded_request(_command, *, env, **_options):
             try:
-                url = env["NCI_SI_EVS_BASE_URL"] + "/unrecorded"
+                url = env["NCI_SIP_EVS_BASE_URL"] + "/unrecorded"
                 with urllib.request.urlopen(url, timeout=5) as response:  # noqa: S310 - local fixture
                     response.read()
             except urllib.error.HTTPError as error:
@@ -215,7 +215,7 @@ class HTTPControlTest(unittest.TestCase):
 
         def suite(port, socket_path, **_options):
             ports.append(port)
-            with patch.dict(os.environ, {"NCI_SI_PROFILE": "fixture-profile"}, clear=True):
+            with patch.dict(os.environ, {"NCI_SIP_PROFILE": "fixture-profile"}, clear=True):
                 acceptance_http.state(str(socket_path))
             self.assertTrue(listening(port))
             raise KeyboardInterrupt
@@ -252,8 +252,8 @@ class HTTPControlTest(unittest.TestCase):
                     with patch.dict(
                         os.environ,
                         {
-                            "NCI_SI_EVS_BASE_URL": "http://fixture.invalid",
-                            "NCI_SI_ACCEPTANCE_URL": "http://control.invalid",
+                            "NCI_SIP_EVS_BASE_URL": "http://fixture.invalid",
+                            "NCI_SIP_ACCEPTANCE_URL": "http://control.invalid",
                             "UNRELATED": "not a server setting",
                         },
                         clear=True,
@@ -262,7 +262,7 @@ class HTTPControlTest(unittest.TestCase):
                 finally:
                     thread.join(timeout=35)
                 self.assertFalse(thread.is_alive())
-            self.assertEqual(settings, [{"NCI_SI_EVS_BASE_URL": "http://fixture.invalid"}])
+            self.assertEqual(settings, [{"NCI_SIP_EVS_BASE_URL": "http://fixture.invalid"}])
 
     def test_state_hook_rejects_a_failed_restart(self):
         class FailedRestart(socketserver.StreamRequestHandler):
@@ -288,7 +288,7 @@ class HTTPControlTest(unittest.TestCase):
         children = []
         script = (
             "import json, os, sys; "
-            "print(json.dumps({k:v for k,v in os.environ.items() if k.startswith('NCI_SI_')}), "
+            "print(json.dumps({k:v for k,v in os.environ.items() if k.startswith('NCI_SIP_')}), "
             "file=sys.stderr, flush=True); " + LISTENS
         )
 
@@ -301,11 +301,11 @@ class HTTPControlTest(unittest.TestCase):
             server = owned_server(root)
             try:
                 with (
-                    patch.dict(os.environ, {"NCI_SI_PROFILE": "inherited-profile"}),
+                    patch.dict(os.environ, {"NCI_SIP_PROFILE": "inherited-profile"}),
                     patch.object(acceptance_http.subprocess, "Popen", launch),
                 ):
-                    server.restart({"NCI_SI_EVS_BASE_URL": "http://first.invalid"})
-                    server.restart({"NCI_SI_EVS_BASE_URL": "http://second.invalid"})
+                    server.restart({"NCI_SIP_EVS_BASE_URL": "http://first.invalid"})
+                    server.restart({"NCI_SIP_EVS_BASE_URL": "http://second.invalid"})
                     running = listening(server.port)
                 server.stop()
                 statuses = [child.poll() for child in children]
@@ -317,16 +317,16 @@ class HTTPControlTest(unittest.TestCase):
                         child.wait(timeout=5)
             observed = [json.loads(line) for line in (root / "server.log").read_text().splitlines()]
             forced = {
-                "NCI_SI_DATA_DIR": str(root / "index"),
-                "NCI_SI_TRANSPORT": "streamable-http",
-                "NCI_SI_HTTP_PORT": str(server.port),
-                "NCI_SI_HTTP_SESSIONS": "stateful",
-                "NCI_SI_HTTP_REQUIRE_INDEX": "1",
+                "NCI_SIP_DATA_DIR": str(root / "index"),
+                "NCI_SIP_TRANSPORT": "streamable-http",
+                "NCI_SIP_HTTP_PORT": str(server.port),
+                "NCI_SIP_HTTP_SESSIONS": "stateful",
+                "NCI_SIP_HTTP_REQUIRE_INDEX": "1",
             }
             self.assertEqual(
                 observed,
                 [
-                    forced | {"NCI_SI_EVS_BASE_URL": f"http://{name}.invalid"}
+                    forced | {"NCI_SIP_EVS_BASE_URL": f"http://{name}.invalid"}
                     for name in ("first", "second")
                 ],
             )

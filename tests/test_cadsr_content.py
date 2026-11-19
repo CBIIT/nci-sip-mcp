@@ -7,12 +7,12 @@ from urllib.parse import parse_qs, urlsplit
 
 from fakes import code_map
 from fakes import data_element as element
-from nci_si_mcp import cursor
-from nci_si_mcp.caching import cache_call
-from nci_si_mcp.cadsr import EXPORT_FOLDER
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp import cursor
+from nci_sip_mcp.caching import cache_call
+from nci_sip_mcp.cadsr import EXPORT_FOLDER
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.registry import invoke
 from test_cadsr_client import LISTING, reply
 from test_http_client import Reply, ServerTestCase
 
@@ -465,7 +465,7 @@ class CaDSRContentTest(CaDSRFixture):
             reply({"DataElements": [{"publicId": "123"}], "registryRelease": "known"}),
             reply({"DataElement": element(), "registryRelease": "known"}),
         )
-        with self.assertLogs("nci_si_mcp", level="INFO") as logs:
+        with self.assertLogs("nci_sip_mcp", level="INFO") as logs:
             result = self.call(server, questionText="Q", registryRelease="known")
         self.assertEqual(result["publicId"], "123")
         self.assertEqual(
