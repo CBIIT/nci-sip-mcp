@@ -124,6 +124,97 @@ def test_wheel():
 """
 
 
+COMPOSITION_CONTEXT_TEST = """\
+import json, os, subprocess, venv
+from pathlib import Path
+from unittest.mock import patch
+import pytest
+from scripts.validation.mutation_child_trace import ChildRoute, child_environment
+
+STATE = {}
+ROOT = Path(__file__).resolve().parents[1]
+
+@pytest.fixture(scope="module")
+def environments(tmp_path_factory):
+    work = tmp_path_factory.mktemp("owned-environments")
+    result = []
+    for name in ("one", "two"):
+        environment = work / name
+        venv.EnvBuilder(with_pip=False, system_site_packages=False).create(environment)
+        interpreter = environment / "bin/python"
+        site = subprocess.run(
+            [str(interpreter), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+            capture_output=True, text=True, check=True,
+        )
+        target = Path(site.stdout.strip()) / "example.py"
+        target.write_bytes((ROOT / "src/example.py").read_bytes())
+        result.append(environment)
+    return result
+
+def snapshot(directory):
+    return {path.name: path.read_bytes() for path in directory.iterdir()}
+
+def launch(environment):
+    route = ChildRoute("src/example.py", "example", environment)
+    prior = child_environment(route)
+    child = subprocess.run(
+        [str(environment / "bin/python"), "-B", "-c", "import example; print(example.__file__)"],
+        env=prior, capture_output=True, text=True, check=False,
+    )
+    assert child.returncode == 0, child.stdout + child.stderr
+    assert Path(child.stdout.strip()).resolve().is_relative_to(environment.resolve())
+    directory = Path(prior["MUTATION_CHILD_TRACE_DIR"])
+    config = Path(prior["MUTATION_CHILD_TRACE_CONFIG"])
+    request = config.with_name(config.name.replace(".config.json", ".request.json"))
+    return prior, directory, snapshot(directory), json.loads(request.read_text())
+
+def test_a_same_owner_rejects_foreign_environment_and_duplicate(environments, request):
+    prior, directory, before, record = launch(environments[0])
+    assert (record["node"], record["test_phase"]) == (request.node.nodeid, "run")
+    STATE.update(prior=prior, directory=directory, before=before, record=record)
+    with patch.dict(
+        os.environ, {"MUTATION_CHILD_TRACE_CONFIG": prior["MUTATION_CHILD_TRACE_CONFIG"]}
+    ):
+        with pytest.raises(ValueError, match="another producer or route"):
+            child_environment(ChildRoute("src/example.py", "example", environments[1]))
+    assert snapshot(directory) == before
+    duplicate = json.dumps([prior["MUTATION_CHILD_TRACE_CONFIG"]] * 2)
+    with patch.dict(os.environ, {"MUTATION_CHILD_TRACE_CONFIG": duplicate}):
+        with pytest.raises(ValueError, match="Duplicate installed child trace config"):
+            child_environment(ChildRoute("src/example.py", "example", environments[0]))
+    assert snapshot(directory) == before
+
+def test_b_different_owner_cannot_compose_prior(environments, request):
+    prior, directory, before, record = (
+        STATE[key] for key in ("prior", "directory", "before", "record")
+    )
+    assert record["node"] != request.node.nodeid and record["test_phase"] == "run"
+    with patch.dict(
+        os.environ, {"MUTATION_CHILD_TRACE_CONFIG": prior["MUTATION_CHILD_TRACE_CONFIG"]}
+    ):
+        with pytest.raises(ValueError, match="another producer or route"):
+            child_environment(ChildRoute("src/example.py", "example", environments[0]))
+    assert snapshot(directory) == before
+
+@pytest.fixture
+def setup_prior(environments, request):
+    prior, directory, before, record = launch(environments[0])
+    assert (record["node"], record["test_phase"]) == (request.node.nodeid, "setup")
+    return prior, directory, before, record
+
+def test_c_same_owner_cannot_compose_setup_route_during_call(environments, setup_prior, request):
+    prior, directory, before, record = setup_prior
+    assert record["node"] == request.node.nodeid
+    assert os.environ["MUTATION_COVERAGE_CONTEXT"] == request.node.nodeid + "|run"
+    with patch.dict(
+        os.environ, {"MUTATION_CHILD_TRACE_CONFIG": prior["MUTATION_CHILD_TRACE_CONFIG"]}
+    ):
+        with pytest.raises(ValueError, match="another producer or route"):
+            child_environment(ChildRoute("src/example.py", "example", environments[0]))
+    assert snapshot(directory) == before
+"""
+
+
 def wheel_project(root):
     project(root, "pass\n", unit="pass")
     package = root / "src/wheel_sample"
@@ -510,6 +601,24 @@ class MutationOperatorsTest(unittest.TestCase):
 
 
 class MutationExecutionTest(unittest.TestCase):
+    def test_composed_routes_reject_different_owner_phase_environment_and_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, "def answer():\n    return True\n")
+            (root / "tests/test_composition.py").write_text(COMPOSITION_CONTEXT_TEST)
+            nodes = [
+                "tests/test_composition.py::test_a_same_owner_rejects_foreign_environment_and_duplicate",
+                "tests/test_composition.py::test_b_different_owner_cannot_compose_prior",
+                "tests/test_composition.py::test_c_same_owner_cannot_compose_setup_route_during_call",
+            ]
+            outcome, data = run_domain(root, "unit", nodes, 60, baseline=True)
+            self.assertEqual(outcome["outcome"], "SURVIVED", outcome)
+            _, traces = child_trace.read_traces(data)
+            self.assertEqual(
+                {(trace.node, trace.test_phase, trace.outcome) for trace in traces},
+                {(nodes[0], "run", "reached"), (nodes[2], "setup", "reached")},
+            )
+
     def test_main_module_route_records_the_executed_installed_wheel(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -545,11 +654,11 @@ class MutationExecutionTest(unittest.TestCase):
             outcome, data = run_domain(
                 root, "unit", ["tests/test_installed_wheel.py"], 90, baseline=True
             )
+            self.assertEqual(outcome["outcome"], "SURVIVED", outcome)
             self.assertEqual((root / "sentinel.log").read_text(), "connect denied\n")
             directory = child_trace.trace_directory(data)
             self.assertEqual(len(list(directory.glob("*.request.json"))), 2)
             self.assertEqual(len(list(directory.glob("*.result.json"))), 2)
-            self.assertEqual(outcome["outcome"], "SURVIVED", outcome)
             _, traces = child_trace.read_traces(data)
             self.assertEqual(
                 {(trace.source, trace.module, trace.outcome) for trace in traces},
