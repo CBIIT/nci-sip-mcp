@@ -44,6 +44,44 @@ def digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def fingerprint_dump(node: ast.AST) -> str:
+    return _fingerprint_ast_node(node)
+
+
+def _fingerprint_value(value: object) -> str:
+    if isinstance(value, ast.AST):
+        return _fingerprint_ast_node(value)
+    if isinstance(value, list):
+        return f"[{', '.join(_fingerprint_value(item) for item in value)}]"
+    return repr(value)
+
+
+def _fingerprint_ast_node(node: ast.AST) -> str:
+    fields = []
+    for name in node._fields:
+        try:
+            value: object = getattr(node, name)
+        except AttributeError:
+            continue
+        default: object = getattr(type(node), name, ...)
+        if value is None and default is None:
+            continue
+        if _is_default_empty_list(node, name, value):
+            continue
+        fields.append(f"{name}={_fingerprint_value(value)}")
+    return f"{type(node).__name__}({', '.join(fields)})"
+
+
+def _is_default_empty_list(node: ast.AST, name: str, value: object) -> bool:
+    if not isinstance(value, list) or value:
+        return False
+    field_types: object = getattr(type(node), "_field_types", {})
+    if not isinstance(field_types, dict) or name not in field_types:
+        return False
+    field_type: object = field_types[name]
+    return getattr(field_type, "__origin__", ...) is list
+
+
 @dataclass(frozen=True)
 class Mutant:
     file: str
@@ -247,9 +285,9 @@ def candidates(path: str, source: bytes) -> tuple[list[Mutant], list[dict]]:
                     qualname or "<module>",
                     operator,
                     site,
-                    digest(ast.dump(cast("ast.AST", owner), include_attributes=False)),
-                    digest(ast.dump(node)),
-                    digest(ast.dump(ast.parse(after))),
+                    digest(fingerprint_dump(cast("ast.AST", owner))),
+                    digest(fingerprint_dump(node)),
+                    digest(fingerprint_dump(ast.parse(after))),
                     node.lineno,
                     int(getattr(node, "end_lineno", node.lineno)),
                     start,
