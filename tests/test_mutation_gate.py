@@ -5,24 +5,29 @@ import hashlib
 import io
 import json
 import os
+import queue
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import unittest
+import venv
 from dataclasses import asdict
 from pathlib import Path
-from threading import Thread
-from types import SimpleNamespace
+from threading import Event, Thread
+from types import FunctionType, SimpleNamespace
 from unittest.mock import patch
 
+import coverage.version
+import pytest
 import yaml
 from scripts.processes import stop, wait_until
 from scripts.validation import mutation_child_trace as child_trace
 from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
 from scripts.validation.mutation_gate import execute_job
+from scripts.validation.mutation_probe import child_context
 from scripts.validation.mutation_run import coverage_map, program, run_domain, selection, snapshot
 from scripts.validation.mutation_source import allowlist, candidates, diff_lines, scope
 
@@ -338,6 +343,188 @@ def child_trace_fixture(root):
         )
     )
     return data_file, request_path, config_path, result_path, environment, trace_environment
+
+
+class NativeTracerProducerContractTest(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def bind_item(self, request):
+        self.item = request.node
+
+    @staticmethod
+    def consume_real_events(tracer, module_path, source):
+        events = queue.Queue()
+        release = Event()
+        stop = Event()
+        filename = str(module_path)
+        compiled = compile(source, filename, "exec", dont_inherit=True, optimize=sys.flags.optimize)
+
+        def capture(frame, event, argument):
+            if stop.is_set():
+                return None
+            if frame.f_code.co_filename == filename:
+                events.put((frame, event, argument, frame.f_lineno))
+                if not release.wait(30):
+                    raise TimeoutError("Native event consumer did not release its frame")
+                release.clear()
+            return capture
+
+        def execute():
+            try:
+                sys.settrace(capture)
+                FunctionType(compiled, {"__name__": "coverage.version", "__file__": filename})()
+            except BaseException as error:  # noqa: BLE001 - return the worker failure to its owner
+                events.put(error)
+            finally:
+                sys.settrace(None)
+                events.put(None)
+
+        worker = Thread(target=execute)
+        worker.start()
+        observed = set()
+        try:
+            while True:
+                item = events.get(timeout=30)
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                frame, event, argument, line = item
+                try:
+                    tracer.trace(frame, event, argument)
+                    if event == "line":
+                        observed.add(line)
+                finally:
+                    release.set()
+        finally:
+            stop.set()
+            release.set()
+            worker.join(timeout=30)
+        if worker.is_alive():
+            raise RuntimeError("Native event producer did not finish")
+        return observed, compiled
+
+    def declared_trace(self, root, source_name, environment):
+        module_path = Path(coverage.version.__file__).resolve()
+        source = module_path.read_bytes()
+        source_copy = root / source_name
+        source_copy.parent.mkdir(parents=True)
+        source_copy.write_bytes(source)
+        self.assertEqual(source_copy.read_bytes(), module_path.read_bytes())
+        data_file = root / ".coverage"
+        trace_env = child_trace.prepare_run(data_file, root / "hook", "unit", "candidate", "local")
+        route = child_trace.ChildRoute(source_name, "coverage.version", environment)
+        with patch.dict(os.environ, trace_env), child_context(self.item, "run"):
+            child_env = child_trace.child_environment(route)
+        config = child_trace.read_object(Path(child_env["MUTATION_CHILD_TRACE_CONFIG"]))
+        return data_file, config, child_env, module_path, source
+
+    def test_native_tracer_records_real_installed_module_events(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, config, _, module_path, source = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            tracer = child_trace._ChildTracer(config)
+            observed, _compiled = self.consume_real_events(tracer, module_path, source)
+            tracer.finish()
+            self.assertTrue(
+                Path(str(config["record"])).is_file(), "The trace result was not written"
+            )
+            record = json.loads(Path(str(config["record"])).read_text())
+            self.assertEqual(record["outcome"], "reached")
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual(len(traces), 1)
+            trace = traces[0]
+            self.assertEqual(
+                (trace.node, trace.test_phase, trace.source, trace.module, trace.outcome),
+                (self.item.nodeid, "run", "src/coverage/version.py", "coverage.version", "reached"),
+            )
+            self.assertEqual(Path(trace.path), module_path)
+            self.assertEqual(
+                trace.source_digest, hashlib.sha256((root / trace.source).read_bytes()).hexdigest()
+            )
+            self.assertTrue(observed)
+            self.assertEqual(trace.lines, tuple(sorted(observed)))
+
+    def test_native_tracer_refuses_foreign_and_stale_real_frames(self):
+        for scenario in ("foreign source", "foreign environment", "stale code"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                environment = Path(sys.prefix)
+                if scenario == "foreign environment":
+                    environment = root / "owned-venv"
+                    venv.EnvBuilder(with_pip=False, system_site_packages=False).create(environment)
+                source_name = (
+                    "src/coverage/not_version.py"
+                    if scenario == "foreign source"
+                    else "src/coverage/version.py"
+                )
+                data_file, config, _, module_path, source = self.declared_trace(
+                    root, source_name, environment
+                )
+                if scenario == "stale code":
+                    old = b"The version and URL for coverage.py"
+                    replacement = b"The versioN and URL for coverage.py"
+                    self.assertEqual(source.count(old), 1)
+                    stale = source.replace(old, replacement)
+                    self.assertEqual(len(stale), len(source))
+                    code_source = stale
+                else:
+                    code_source = source
+                tracer = child_trace._ChildTracer(config)
+                self.consume_real_events(tracer, module_path, code_source)
+                tracer.finish()
+                self.assertTrue(
+                    Path(str(config["record"])).is_file(), "The trace result was not written"
+                )
+                message = (
+                    "Loaded bytecode does not match the installed source"
+                    if scenario == "stale code"
+                    else "Module did not execute from the declared installed environment"
+                )
+                with self.assertRaisesRegex(ValueError, message):
+                    child_trace.read_traces(data_file)
+                self.assertEqual(module_path.read_bytes(), source)
+
+    def test_native_consumer_refuses_a_truncated_genuine_trace(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, config, _, module_path, source = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            tracer = child_trace._ChildTracer(config)
+            self.consume_real_events(tracer, module_path, source)
+            tracer.finish()
+            self.assertTrue(
+                Path(str(config["record"])).is_file(), "The trace result was not written"
+            )
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual([trace.outcome for trace in traces], ["reached"])
+            Path(str(config["record"])).write_text('{"version":')
+            with self.assertRaises(json.JSONDecodeError):
+                child_trace.read_traces(data_file)
+
+    def test_native_consumer_refuses_failed_child_initialization(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, _, child_env, _, _ = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            (root / "hook/_mutation_child_trace.py").unlink()
+            child_env["PYTHONNOUSERSITE"] = "1"
+            child = subprocess.run(
+                [sys.executable, "-B", "-c", "print('child started')"],
+                cwd=root,
+                env=child_env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual((child.returncode, child.stdout), (0, "child started\n"))
+            with self.assertRaisesRegex(
+                ValueError, "Installed child request is missing its result"
+            ):
+                child_trace.read_traces(data_file)
 
 
 class MutationOperatorsTest(unittest.TestCase):
