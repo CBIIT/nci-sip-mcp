@@ -14,7 +14,7 @@ from nci_sip_mcp import installer, installer_state
 
 ROOT = Path(__file__).parent.parent
 INSTALLER = Path(sys.executable).with_name("nci-sip-install")
-ROOT_HELP = "usage: nci-sip-install [-h]\n                      {plan,check,run,status,start,stop,uninstall,help} ...\n\nInstall and operate the local NCI Semantic Infrastructure Program MCP server.\n\npositional arguments:\n  {plan,check,run,status,start,stop,uninstall,help}\n    plan                Print the ordered installation plan\n    check               Check every prerequisite before installation\n    run                 Run and record verified installation steps\n    status              Reverify and show installation status\n    start               Start HTTP or print the installed stdio client\n                        configuration\n    stop                Stop the installed local HTTP server\n    uninstall           Remove the recorded local installation\n    help                Explain an executable installation step\n\noptions:\n  -h, --help            show this help message and exit\n"  # noqa: E501
+ROOT_HELP = "usage: nci-sip-install [-h]\n                       {plan,check,run,status,start,stop,uninstall,help} ...\n\nInstall and operate the local NCI Semantic Infrastructure Program MCP server.\n\npositional arguments:\n  {plan,check,run,status,start,stop,uninstall,help}\n    plan                Print the ordered installation plan\n    check               Check every prerequisite before installation\n    run                 Run and record verified installation steps\n    status              Reverify and show installation status\n    start               Start HTTP or print the installed stdio client\n                        configuration\n    stop                Stop the installed local HTTP server\n    uninstall           Remove the recorded local installation\n    help                Explain an executable installation step\n\noptions:\n  -h, --help            show this help message and exit\n"  # noqa: E501
 
 SELECTION_OPTIONS = """options:
   -h, --help        show this help message and exit
@@ -27,8 +27,8 @@ CHECK_HELP = "usage: nci-sip-install check [-h] --target {local}\n\n" + SELECTIO
 
 RUN_HELP = (
     """usage: nci-sip-install run [-h] --target {local} [--transport {stdio,http}]
-                          [--profile {cadsr,evs,unified}] --data-dir DATA_DIR
-                          [--restart] [--non-interactive]
+                           [--profile {cadsr,evs,unified}] --data-dir DATA_DIR
+                           [--restart] [--non-interactive]
 """
     + """
 options:
@@ -48,8 +48,8 @@ STEP_HELP = "Step: check_prerequisites\nPurpose: Check every selected requiremen
 
 STATUS_HELP = (
     """usage: nci-sip-install status [-h] --target {local} [--transport {stdio,http}]
-                             [--profile {cadsr,evs,unified}]
-                             --data-dir DATA_DIR
+                              [--profile {cadsr,evs,unified}]
+                              --data-dir DATA_DIR
 """
     + """
 options:
