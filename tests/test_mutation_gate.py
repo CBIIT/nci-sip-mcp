@@ -142,6 +142,7 @@ class MutationOperatorsTest(unittest.TestCase):
                     "github.event_name == 'pull_request' && github.base_ref == 'main' && "
                     "!(github.repository == 'CBIIT/nci-sip-mcp' && "
                     "github.event.pull_request.head.repo.full_name == 'CBIIT/nci-sip-mcp' && "
+                    "github.event.pull_request.number == 514 && "
                     "github.event.pull_request.head.ref == 'milestone/recovery-naming-509' && "
                     "github.event.pull_request.base.sha == "
                     "'f49b766bf33c67ae42afd9bbda18be8ce4f65b06')"
