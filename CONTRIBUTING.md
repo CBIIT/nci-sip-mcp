@@ -392,6 +392,10 @@ the baseline coverage map per worker. The probe consumes its launch-only evidenc
 at configuration; only declared xdist workers receive it, so nested pytest programs cannot
 append to the parent's records.
 
+Persisted mutation keys use the Python 3.14 default structural AST rendering on every supported
+interpreter: present named fields retain `Load` and `Store`; optional `None` and declared empty-list
+defaults and source locations are omitted.
+
 The mutation runner supports Darwin and Linux. `mutation_run.program()` verifies that its
 direct child leads a new session and process group, observes exit with `waitid(WNOWAIT)` without
 reaping, then owns TERM, grace, final KILL if needed and actual-parent reap. The unreaped child
