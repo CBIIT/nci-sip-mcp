@@ -394,9 +394,10 @@ passed owning call. It fails the gate and cannot be allowlisted; inspect selecti
 evidence before concluding the code is unreachable.
 Explicitly opted-in installed-child routes retain their owning test, installed path, source
 and bytecode digests, executed lines, and producer/run identity. A child kill requires the
-same test to reach the mutated bytes and fail; another node cannot lend its reach. Completed
-unreached routes are `NO_TESTS`, not evidence failures, and do not block an independent
-in-process owner. Candidates with child routes collect coverage to distinguish these owners.
+same test to reach the mutated bytes and fail; another node cannot lend its reach. A passing,
+unreached route is `NO_TESTS` and does not block an independent in-process owner. A failing
+call without same-node child or ordinary reach is `INFRA`, with its observed failure retained.
+Candidates with child routes collect coverage to distinguish these owners.
 Malformed or missing trace evidence is `INFRA`; a timed-out run remains `TIMEOUT`.
 An opted-in child may declare several exact source/module routes for the same owning call and
 environment; each emits separate evidence. A module run with `python -m` is matched by its

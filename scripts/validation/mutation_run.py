@@ -626,10 +626,17 @@ def attribute_child_result(result: dict, evidence: Path, owners: set[str]) -> di
     if result.get("kind") == "import":
         return result
     if result["outcome"] == "KILLED":
-        return result if result["node"] in owners else {"outcome": "NO_TESTS"}
+        if result["node"] in owners:
+            return result
+        return {"outcome": "INFRA", "status": 1, "failures": failed_call_records(evidence)}
     if result["outcome"] == "SURVIVED":
         return result if passed_call_nodes(evidence) & owners else {"outcome": "NO_TESTS"}
     return result
+
+
+def failed_call_records(evidence: Path) -> list[dict]:
+    rows = [json.loads(line) for line in evidence.read_text().splitlines()]
+    return [row for row in rows if row["outcome"] == "failed"]
 
 
 def passed_call_nodes(evidence: Path) -> set[str]:
