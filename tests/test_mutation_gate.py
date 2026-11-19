@@ -25,6 +25,51 @@ from scripts.validation.mutation_run import coverage_map, program, run_domain, s
 from scripts.validation.mutation_source import allowlist, candidates, diff_lines, scope
 
 ROOT = Path(__file__).resolve().parents[1]
+RECORDED_WAIT_SOURCE = """class StdioOwner:
+    async def _wait(self, seconds: float, deadline: CleanupDeadline) -> bool:
+        try:
+            with anyio.fail_after(min(seconds, deadline.remaining())):
+                code = await self._process().wait()
+            if code != 0 and -code not in self._sent_signals:
+                self._initiate(RequestPolicyError("transport"))
+            return code == self._process().returncode
+        except TimeoutError:
+            return False
+        except BaseException as error:
+            self.errors.append(error)
+            return False
+"""
+RECORDED_WAIT_KEY = {
+    "file": "acceptance/src/nci_si_acceptance/request_stdio.py",
+    "qualname": "StdioOwner._wait",
+    "operator": "return:None",
+    "site": "/body/0/handlers/1/body/1",
+    "context": "4d533410f44b8c205783b80e88589472e0c5775284193ff99180dbbca3c5a881",
+    "original": "dd863ea504e8543d2fb185a820aa7e2cf2d0ceddec9c835185a3510fc2ab463d",
+    "mutated": "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51",
+}
+FINGERPRINT_SOURCE = """def fingerprint(value: str = "ctx=Load()"):
+    assigned = value
+    return "ctx=Load()"
+"""
+FINGERPRINT_RETURN_KEY = {
+    "file": "src/example.py",
+    "qualname": "fingerprint",
+    "operator": "return:None",
+    "site": "/body/1",
+    "context": "3163ffb7b54423f4c5c6140812861d6663e0f0a0d95931c4d0f6885902b63678",
+    "original": "11c13472822fbfa58bea0087abb1f480200f45a41c94cedde76db259ca7c79e6",
+    "mutated": "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51",
+}
+
+
+def return_none_key(source: str) -> dict[str, str]:
+    mutants, _ = candidates("src/example.py", source.encode())
+    return next(
+        mutant.key()
+        for mutant in mutants
+        if mutant.operator == "return:None" and mutant.site == "/body/1"
+    )
 
 
 def project(root, source, unit="assert example.answer() is True", contract="assert 1 == 1"):
@@ -75,6 +120,58 @@ def cli(root, *args):
 
 
 class MutationOperatorsTest(unittest.TestCase):
+    def test_recorded_314_allowlist_key_is_portable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / RECORDED_WAIT_KEY["file"]
+            source.parent.mkdir(parents=True)
+            source.write_text(RECORDED_WAIT_SOURCE, encoding="utf-8")
+            path = root / "allowlist.yaml"
+            path.write_text(yaml.safe_dump([{**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}]))
+
+            self.assertEqual(
+                allowlist(root, path),
+                [{**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}],
+            )
+
+    def test_fingerprint_preserves_314_defaults_contexts_and_literal_text(self):
+        key = return_none_key(FINGERPRINT_SOURCE)
+        self.assertEqual(key, FINGERPRINT_RETURN_KEY)
+        changed_name = return_none_key(
+            FINGERPRINT_SOURCE.replace("assigned = value", "assigned = other")
+        )
+        changed_literal = return_none_key(
+            FINGERPRINT_SOURCE.replace('return "ctx=Load()"', 'return "ctx=Store()"')
+        )
+        self.assertNotEqual(changed_name["context"], key["context"])
+        self.assertNotEqual(changed_literal["context"], key["context"])
+        self.assertNotEqual(changed_literal["original"], key["original"])
+
+    def test_recorded_allowlist_rejects_changed_source_site_and_operator(self):
+        entry = {**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / entry["file"]
+            source.parent.mkdir(parents=True)
+            source.write_text(RECORDED_WAIT_SOURCE, encoding="utf-8")
+            path = root / "allowlist.yaml"
+            path.write_text(yaml.safe_dump([entry]))
+            self.assertEqual(allowlist(root, path), [entry])
+
+            source.write_text(RECORDED_WAIT_SOURCE.replace("code != 0", "code == 0"))
+            with self.assertRaisesRegex(ValueError, "Stale, duplicate or ambiguous"):
+                allowlist(root, path)
+            source.write_text(RECORDED_WAIT_SOURCE, encoding="utf-8")
+
+            for field, value in (
+                ("site", "/body/0/handlers/1/body/0"),
+                ("operator", "return:True"),
+            ):
+                with self.subTest(field=field):
+                    path.write_text(yaml.safe_dump([{**entry, field: value}]))
+                    with self.assertRaisesRegex(ValueError, "Stale, duplicate or ambiguous"):
+                        allowlist(root, path)
+
     def test_fixed_function_context_hash_matches_the_ci_interpreter_contract(self):
         mutants, _ = candidates("src/example.py", b"def answer():\n    return True\n")
         self.assertEqual(
