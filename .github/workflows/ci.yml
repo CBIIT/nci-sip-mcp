@@ -29,11 +29,12 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
-    # Owner-approved #509 exception; this naming-branch mutation is unrun, not green, and branch cleanup prevents reuse.
+    # Owner-approved #509 PR 514 exception; this naming-branch mutation is unrun, not green, and branch cleanup prevents reuse.
     if: >-
       github.event_name == 'pull_request' && github.base_ref == 'main' &&
       !(github.repository == 'CBIIT/nci-sip-mcp' &&
       github.event.pull_request.head.repo.full_name == 'CBIIT/nci-sip-mcp' &&
+      github.event.pull_request.number == 514 &&
       github.event.pull_request.head.ref == 'milestone/recovery-naming-509' &&
       github.event.pull_request.base.sha == 'f49b766bf33c67ae42afd9bbda18be8ce4f65b06')
     permissions:
