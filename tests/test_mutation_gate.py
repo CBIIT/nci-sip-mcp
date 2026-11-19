@@ -1,5 +1,6 @@
 """The mutation command measures assertion sensitivity without editing its caller."""
 
+import atexit
 import contextlib
 import hashlib
 import io
@@ -11,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import venv
 from dataclasses import asdict
@@ -525,6 +527,129 @@ class NativeTracerProducerContractTest(unittest.TestCase):
                 ValueError, "Installed child request is missing its result"
             ):
                 child_trace.read_traces(data_file)
+
+    @staticmethod
+    def installed_module_run(module_path, source, in_thread):
+        compiled = compile(
+            source, str(module_path), "exec", dont_inherit=True, optimize=sys.flags.optimize
+        )
+        result = queue.Queue()
+
+        def execute_module():
+            namespace = {"__name__": "coverage.version", "__file__": str(module_path)}
+            try:
+                FunctionType(compiled, namespace)()
+                result.put(namespace["__version__"])
+            except BaseException as error:  # noqa: BLE001 - return the worker failure to its owner
+                result.put(error)
+
+        if in_thread:
+            worker = Thread(target=execute_module)
+            worker.start()
+            worker.join(timeout=30)
+            if worker.is_alive():
+                raise RuntimeError("Installed module worker did not finish")
+        else:
+            execute_module()
+        value = result.get(timeout=30)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    def assert_installed_events(self, in_thread):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, config, child_env, module_path, source = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            callbacks = []
+            register = atexit.register
+            previous_trace = sys.gettrace()
+            previous_thread_trace = threading.gettrace()
+
+            def register_owned(callback):
+                registered = register(callback)
+                callbacks.append(registered)
+                return registered
+
+            try:
+                with (
+                    patch.dict(
+                        os.environ,
+                        {"MUTATION_CHILD_TRACE_CONFIG": child_env["MUTATION_CHILD_TRACE_CONFIG"]},
+                    ),
+                    patch.object(atexit, "register", register_owned),
+                ):
+                    child_trace.install_child_trace()
+                    version = self.installed_module_run(module_path, source, in_thread)
+            finally:
+                sys.settrace(previous_trace)
+                threading.settrace(previous_thread_trace)
+                for callback in callbacks:
+                    atexit.unregister(callback)
+            for callback in callbacks:
+                callback()
+            self.assertEqual(version, coverage.version.__version__)
+            self.assertTrue(
+                Path(str(config["record"])).is_file(), "The installed tracer did not emit a result"
+            )
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual(len(traces), 1)
+            trace = traces[0]
+            self.assertEqual(
+                (trace.node, trace.outcome, Path(trace.path)),
+                (self.item.nodeid, "reached", module_path),
+            )
+            lines = source.decode().splitlines()
+            early = next(
+                index for index, line in enumerate(lines, 1) if line.startswith("version_info =")
+            )
+            late = next(
+                index for index, line in enumerate(lines, 1) if line.startswith("__url__ =")
+            )
+            self.assertIn(early, trace.lines)
+            self.assertIn(late, trace.lines)
+
+    def test_install_traces_main_thread_and_emits_result(self):
+        self.assert_installed_events(in_thread=False)
+
+    def test_install_traces_new_thread_and_emits_result(self):
+        self.assert_installed_events(in_thread=True)
+
+    def test_install_refuses_invalid_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, child_env, _, _ = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            Path(child_env["MUTATION_CHILD_TRACE_CONFIG"]).write_text('{"version":')
+            previous_trace = sys.gettrace()
+            previous_thread_trace = threading.gettrace()
+            callbacks = []
+            register = atexit.register
+
+            def register_owned(callback):
+                registered = register(callback)
+                callbacks.append(registered)
+                return registered
+
+            try:
+                with (
+                    patch.dict(
+                        os.environ,
+                        {"MUTATION_CHILD_TRACE_CONFIG": child_env["MUTATION_CHILD_TRACE_CONFIG"]},
+                    ),
+                    patch.object(atexit, "register", register_owned),
+                ):
+                    with self.assertRaises(json.JSONDecodeError):
+                        child_trace.install_child_trace()
+                    self.assertIs(sys.gettrace(), previous_trace)
+                    self.assertIs(threading.gettrace(), previous_thread_trace)
+            finally:
+                sys.settrace(previous_trace)
+                threading.settrace(previous_thread_trace)
+                for callback in callbacks:
+                    atexit.unregister(callback)
 
 
 class MutationOperatorsTest(unittest.TestCase):
