@@ -211,16 +211,23 @@ class MutationOperatorsTest(unittest.TestCase):
         class Malformed(ast.AST):
             _fields = ("a",)
 
+        class Scalar(ast.AST):
+            _fields = ("a",)
+            _field_types: ClassVar[dict[str, object]] = {"a": int}
+
         untyped, typed, falsy, malformed = Untyped(), Typed(), Typed(), Malformed()
+        scalar = Scalar()
         Malformed._field_types = None  # ast.AST.__init__ rejects a non-dict, so set it afterwards
         untyped.a = []
         typed.a = []
         falsy.a = ()
         malformed.a = []
+        scalar.a = []
         self.assertEqual(fingerprint_dump(untyped), "Untyped(a=[])")
         self.assertEqual(fingerprint_dump(typed), "Typed()")
         self.assertEqual(fingerprint_dump(falsy), "Typed(a=())")
         self.assertEqual(fingerprint_dump(malformed), "Malformed(a=[])")
+        self.assertEqual(fingerprint_dump(scalar), "Scalar(a=[])")
 
     def test_recorded_allowlist_rejects_changed_source_site_and_operator(self):
         entry = {**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}
