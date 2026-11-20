@@ -372,9 +372,11 @@ summaries count fallback mutants overall and per domain, alongside outcomes and 
 Domains run in unit, self-test, then fixture order. A domain result of `NO_TESTS` is skipped so
 later selected domains can provide evidence; a kill or infrastructure/timeout result still
 terminates measurement, and survivors are retained while later domains run. Fixture confirmation
-requires a fixture `KILLED` or `SURVIVED` result. `confirmation: unreached` means no valid fixture
-confirmation was established; a selected fixture process may still have run but returned
-`NO_TESTS`, `TIMEOUT` or `INFRA`. An overall `NO_TESTS` means no selected domain established an
+runs only tests whose baseline contexts reach the mutated lines (or the whole fixture domain under
+the fallback above); a fixture domain that does not reach them is not run. A selected fixture run
+confirms only when it returns `KILLED` or `SURVIVED`. `confirmation: unreached` means no valid
+fixture confirmation was established: either no fixture test reached the mutated lines, so none
+ran, or a selected fixture process returned `NO_TESTS`, `TIMEOUT` or `INFRA`. An overall `NO_TESTS` means no selected domain established an
 owner; it fails the gate and cannot be allowlisted. Inspect selection and call evidence before
 concluding the code is unreachable.
 Long-lived fixture servers retain the setup context present when they start; later RPCs
