@@ -2325,6 +2325,21 @@ class MultiLineHunkScopeTest(unittest.TestCase):
         self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {21, 22, 23}})
 
 
+class KeptPathScopeTest(unittest.TestCase):
+    def test_table_substitution_in_a_file_that_keeps_a_path_with_an_old_name_is_exempt(self):
+        path = "src/legacy_nci_si_mcp_shim.py"
+        base = LONG_BODY + "NAME = nci_si_mcp\n"
+        head = LONG_BODY + "NAME = nci_sip_mcp\n"
+        self.assertEqual(scope_between({path: base}, {path: head}), {})
+
+    def test_non_table_change_in_that_kept_file_is_still_selected(self):
+        path = "src/legacy_nci_si_mcp_shim.py"
+        base = LONG_BODY + "NAME = nci_si_mcp\n"
+        self.assertEqual(
+            scope_between({path: base}, {path: LONG_BODY + "NAME = other\n"}), {path: {21}}
+        )
+
+
 class RenameRobustnessScopeTest(unittest.TestCase):
     def test_move_from_an_eligible_to_an_ineligible_path_is_not_selected(self):
         self.assertEqual(
