@@ -40,7 +40,7 @@ a diagnosis of the underlying TLS failure.
 | `pdm run test` | The whole suite, with the coverage minimum |
 | `pdm run pytest tests/test_index.py -k name` | A selection of tests, without the minimum |
 | `pdm run lint` | Ruff and basedpyright: the fast check while you work |
-| `pdm run mutation-gate` | Kill every changed-site Python mutant before a PR; `--paths src/package/module.py` checks a whole module; review survivors with the printed AST keys in `scripts/validation/mutation-allowlist.yaml` |
+| `pdm run mutation-gate` | Focused sensitivity checks for a specific claim (`--paths src/package/module.py` selects a module); the full changed-site catalogue runs once in PR CI for each frozen candidate |
 | `pdm run fmt` | Format with Ruff |
 | `pdm run lock` | Refresh every Python group to the newest version admitted by the five-day release-age policy |
 | `pdm run github-setup` | Create missing workflow credential names with safe placeholders; never overwrite existing names |
@@ -62,7 +62,7 @@ a diagnosis of the underlying TLS failure.
 | `pdm run quickstart-tools` | Regenerate the table of tools in [QUICKSTART.md](QUICKSTART.md) from `spec/tools.yaml`; `--check` verifies it |
 | `pandoc -f gfm docs/specification.md -o specification.docx` | The Word copy of the specification, a build product: never committed or edited |
 
-CI runs the complete mutation catalogue as three stable-key hash partitions, each with two
+CI runs the complete changed-site mutation catalogue as three stable-key hash partitions, each with two
 workers and a 300-minute timeout: `--shard 1/3 -n 2`, `--shard 2/3 -n 2` and
 `--shard 3/3 -n 2`. All three must pass; a job timeout fails. Shard JSON lines report
 full/selected counts and a final outcome/kill-kind summary with elapsed seconds. An empty
@@ -70,6 +70,39 @@ partition reports `EMPTY`; allowlist freshness is checked before partitioning. C
 default PR merge checkout relative to the event's base SHA, just as the suite producers test it.
 The gate's nested self-tests require the larger timeout; current timing evidence belongs in
 the issue and pull request, not a standing runtime promise.
+
+This PR-CI job is the one campaign over the full changed-site catalogue for each frozen candidate. Do not run a
+separate full local campaign before the PR, or repeat it as the reviewer. Before opening the PR,
+complete the ordinary local gates and caller/test-design and focused-sensitivity review, and record
+the campaign plan/readiness in the issue. Select the sample from the actual mutation workload for
+the exact candidate: use about 20 distinct available items, or every distinct item once when the
+nonempty catalogue is smaller; never repeat items to manufacture a sample size. If the actual
+source-bound selection is empty, record the candidate/source and empty result and run no fabricated
+sample. Do not infer emptiness from a documentation-only diff or skip the actual selection. An
+empty sample is not a `NO_TESTS` waiver: reachable-candidate requirements and PR-CI outcome rules
+remain in force. For a nonempty sample, break down baseline/mutant time and explain outliers; when
+the actual selection is empty, do not invent sample timings or a projection.
+
+The pre-PR review and sample do not establish a mutation verdict or review PR-CI raw evidence. Once
+the PR-CI campaign exists, independently review its raw per-mutant results and restoration receipts
+before exact-head clearance. Bind that evidence to H (the PR head SHA), B (the event base SHA), and T
+(the actual tested PR merge checkout SHA), plus the CI run/attempt, job and shard,
+source/input/toolchain/lock/version identities. If H, B, T, inputs or toolchain change, re-establish
+the affected candidate evidence rather than reusing a matching-tree result.
+Producer and mutation-consumer evidence must be coherent within the same workflow attempt, not
+assembled from whichever attempt is globally latest. An unrelated job rerun that did not execute
+the mutation consumer does not by itself invalidate a completed campaign when H/B/T and inputs are
+unchanged and the raw per-mutant results are independently reviewed; an aggregate summary alone
+cannot establish that evidence.
+
+The reviewer independently examines the existing run's raw per-mutant results and restoration
+receipts; that evidence review is not an independent campaign. Missing/malformed results,
+unresolved infrastructure failures, or `NO_TESTS` block clearance; `NO_TESTS` is never allowlisted.
+`SURVIVED` equivalence still needs explicit review. Focused local mutation/test follow-ups establish
+the sensitivity of a named claim or resolve a finding and record their exact tested source and
+inputs; they do not replace or repeat the full campaign.
+Ordinary unit tests, acceptance self-tests, fixture-ratchet checks and all hooks remain required;
+this policy changes only the number of full mutation-catalogue campaigns.
 
 CI's existing unit, harness self-test and prepared-fixture jobs collect per-test and child-phase
 coverage once. Each job's generated config (`mutation_coverage configure`) names that job's own
@@ -82,10 +115,11 @@ import fails as `INFRA`, even for an empty catalogue; it never silently reruns a
 A fixture execution must exit zero to export a baseline, even if its ratchet expects failures.
 Collection/setup/teardown attribution retains the existing conservative selection rules.
 
-Without `--coverage-dir`, local `pdm run mutation-gate` still computes clean unit, harness
-self-test and prepared-fixture baselines itself; unit remains serial. Any baseline failure
-names its domain and fails the gate. The shard summary's `baseline_domains` records freshly
-computed domain outcomes and seconds; imported runs leave that list empty.
+For a focused local sensitivity run (for example with `--paths`), `pdm run mutation-gate` without
+`--coverage-dir` computes clean unit, harness self-test and prepared-fixture baselines itself;
+unit remains serial. Any baseline failure names its domain and fails the run. The shard summary's
+`baseline_domains` records freshly computed domain outcomes and seconds; imported PR-CI runs leave
+that list empty. Do not use the unselected local command to launch a second full catalogue.
 
 Ordinary `pdm run test` stores combined coverage in `tmp/coverage/unit/.coverage`;
 `pdm run acceptance-selftest` uses `tmp/coverage/harness/.coverage`. PDM supplies the required
@@ -369,12 +403,16 @@ call owners in that domain that execute any line of the same file, so consumers 
 and decorators need not repeat imports. With no identifiable call owner, the whole domain runs.
 Unrecognized contexts fail mapping. Each result names its `fallback_domains`; shard
 summaries count fallback mutants overall and per domain, alongside outcomes and kill kinds.
-Domains run in unit, self-test, then fixture order, stopping when a mutant is detected.
-Fixture confirmation runs only tests whose baseline contexts reach the mutated lines;
-`confirmation: unreached` records a survivor with no fixture reach and no fixture run.
-`NO_TESTS` means no domain covered the mutated span, or a selected domain run produced no
-passed owning call. It fails the gate and cannot be allowlisted; inspect selection and call
-evidence before concluding the code is unreachable.
+Domains run in unit, self-test, then fixture order. A domain result of `NO_TESTS` is skipped so
+later selected domains can provide evidence; a kill or infrastructure/timeout result still
+terminates measurement, and survivors are retained while later domains run. The fixture domain
+runs the tests the selection rules above choose; a fixture domain with no baseline context on the
+mutated lines is not run. A selected fixture run confirms only when it returns `KILLED` or
+`SURVIVED`. `confirmation: unreached` means no valid fixture confirmation was established: either
+the fixture domain was not run, or it returned `NO_TESTS`, `TIMEOUT` or `INFRA`. An overall
+`NO_TESTS` means no selected domain established an owner; it fails the gate and cannot be
+allowlisted. Inspect selection and call evidence before
+concluding the code is unreachable.
 Long-lived fixture servers retain the setup context present when they start; later RPCs
 cannot inherit changes to the parent's environment. Their setup-only lines therefore use
 the whole-fixture fallback, counted like the other domains, rather than claiming per-RPC ownership.
@@ -391,6 +429,10 @@ each source once, span/replacement edits and preselected test routes; it does no
 the baseline coverage map per worker. The probe consumes its launch-only evidence destination
 at configuration; only declared xdist workers receive it, so nested pytest programs cannot
 append to the parent's records.
+
+Persisted mutation keys use the Python 3.14 default structural AST rendering on every supported
+interpreter: present named fields retain `Load` and `Store`; optional `None` and declared empty-list
+defaults and source locations are omitted.
 
 The mutation runner supports Darwin and Linux. `mutation_run.program()` verifies that its
 direct child leads a new session and process group, observes exit with `waitid(WNOWAIT)` without
@@ -433,9 +475,20 @@ original file, with its synthesized row in `result-N.infra.json`. Corruption fai
 even after scheduler exit zero; file permission failures remain diagnostic. An incomplete row
 never counts as a kill or verified scratch restoration. Retained runs are never resumed automatically.
 The PR mutation job uploads this directory on success or failure as
-`mutation-results-<merge-tree-sha>-<shard>` for 30 days. An `EMPTY` shard creates no scheduler
-directory; missing or incomplete raw evidence for a nonempty shard blocks review clearance,
-regardless of the workflow's displayed status. The raw results do not contain every runner phase.
+`mutation-results-<merge-tree-sha>-<shard>` for 30 days; that is not the retention deadline. The
+tested synthetic PR merge ref can disappear when the PR closes, and producer coverage fragments
+expire after one day. Capture the exact tested Git object T and each required raw artifact as they
+become available, with their hashes, and verify retention before the earliest applicable loss
+opportunity. Complete retention before reviewer clearance/merge and before any applicable ref or
+artifact expiry, whichever comes first; do not wait for the 30-day mutation-artifact expiry. Retain
+T in a verified self-contained bundle or an existing controlled durable ref. Record H/B/T,
+run/attempt, job/shard, source/input/toolchain/lock/version identities, retention owner and expiry.
+Keep this operator-owned and limited to existing evidence; do not add private authority records or
+secrets to public artifacts or build a transfer/attestation framework. An `EMPTY` shard creates no
+scheduler directory; missing or incomplete raw evidence for a nonempty shard blocks review
+clearance, regardless of the workflow's displayed status. An empty pre-PR sample does not excuse a
+later `NO_TESTS` outcome for a reachable candidate. The raw results do not contain every runner
+phase.
 
 ## Coverage badges
 

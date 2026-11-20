@@ -1,5 +1,6 @@
 """The mutation command measures assertion sensitivity without editing its caller."""
 
+import ast
 import contextlib
 import io
 import json
@@ -14,6 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import patch
 
 import yaml
@@ -22,9 +24,76 @@ from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
 from scripts.validation.mutation_gate import execute_job
 from scripts.validation.mutation_run import coverage_map, program, run_domain, selection, snapshot
-from scripts.validation.mutation_source import allowlist, candidates, diff_lines, scope
+from scripts.validation.mutation_source import (
+    allowlist,
+    candidates,
+    diff_lines,
+    digest,
+    fingerprint_dump,
+    scope,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
+RECORDED_WAIT_SOURCE = """class StdioOwner:
+    async def _wait(self, seconds: float, deadline: CleanupDeadline) -> bool:
+        try:
+            with anyio.fail_after(min(seconds, deadline.remaining())):
+                code = await self._process().wait()
+            if code != 0 and -code not in self._sent_signals:
+                self._initiate(RequestPolicyError("transport"))
+            return code == self._process().returncode
+        except TimeoutError:
+            return False
+        except BaseException as error:
+            self.errors.append(error)
+            return False
+"""
+RECORDED_WAIT_KEY = {
+    "file": "acceptance/src/nci_sip_acceptance/request_stdio.py",
+    "qualname": "StdioOwner._wait",
+    "operator": "return:None",
+    "site": "/body/0/handlers/1/body/1",
+    "context": "4d533410f44b8c205783b80e88589472e0c5775284193ff99180dbbca3c5a881",
+    "original": "dd863ea504e8543d2fb185a820aa7e2cf2d0ceddec9c835185a3510fc2ab463d",
+    "mutated": "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51",
+}
+RECORDED_REMAINING_SOURCE = """class SupervisedRun:
+    def _remaining(self, seconds: float) -> float:
+        if not self._controlled_cleanup or self._deadline is None:
+            return seconds
+        return min(seconds, self._deadline.remaining())
+"""
+RECORDED_REMAINING_KEY = {
+    "file": "acceptance/src/nci_sip_acceptance/request_supervision.py",
+    "qualname": "SupervisedRun._remaining",
+    "operator": "boolean:drop:1",
+    "site": "/body/0/test/0",
+    "context": "f36f6bf2841ccd71d34ad08175fe1d1069198f811ea06b7c05f0633bf4f5e518",
+    "original": "ff105d5e1b393b7d932f3a338ac223fe44a1d825ca05e559507ad33386fa0a2d",
+    "mutated": "ccddcadc719010718fc95f86d8289368500076b3b7547b038cc86a0b34743b7e",
+}
+FINGERPRINT_SOURCE = """def fingerprint(value: str = "ctx=Load()"):
+    assigned = value
+    return "ctx=Load()"
+"""
+FINGERPRINT_RETURN_KEY = {
+    "file": "src/example.py",
+    "qualname": "fingerprint",
+    "operator": "return:None",
+    "site": "/body/1",
+    "context": "3163ffb7b54423f4c5c6140812861d6663e0f0a0d95931c4d0f6885902b63678",
+    "original": "11c13472822fbfa58bea0087abb1f480200f45a41c94cedde76db259ca7c79e6",
+    "mutated": "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51",
+}
+
+
+def return_none_key(source: str) -> dict[str, str]:
+    mutants, _ = candidates("src/example.py", source.encode())
+    return next(
+        mutant.key()
+        for mutant in mutants
+        if mutant.operator == "return:None" and mutant.site == "/body/1"
+    )
 
 
 def project(root, source, unit="assert example.answer() is True", contract="assert 1 == 1"):
@@ -55,6 +124,14 @@ def mutant_rows(rows):
     return [row for row in rows if "site" in row]
 
 
+def isolated_shard(mutants, target):
+    for count in range(len(mutants) + 1, len(mutants) + 100):
+        index = int(digest(json.dumps(target.key(), sort_keys=True)), 16) % count + 1
+        if mutation_gate.partition(mutants, (index, count)) == [target]:
+            return f"{index}/{count}"
+    raise AssertionError("Could not isolate the intended mutation shard")
+
+
 def domain_routes(rows):
     return [[run["domain"] for run in row["domains"]] for row in rows]
 
@@ -75,6 +152,107 @@ def cli(root, *args):
 
 
 class MutationOperatorsTest(unittest.TestCase):
+    def test_recorded_314_allowlist_key_is_portable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / RECORDED_WAIT_KEY["file"]
+            source.parent.mkdir(parents=True)
+            source.write_text(RECORDED_WAIT_SOURCE, encoding="utf-8")
+            path = root / "allowlist.yaml"
+            path.write_text(yaml.safe_dump([{**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}]))
+
+            self.assertEqual(
+                allowlist(root, path),
+                [{**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}],
+            )
+
+    def test_recorded_load_bearing_boolean_key_passes_allowlist_validation(self):
+        entry = {
+            **RECORDED_REMAINING_KEY,
+            "reason": "Recorded 3.14 key with loads in the original and replacement.",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / entry["file"]
+            source.parent.mkdir(parents=True)
+            source.write_text(RECORDED_REMAINING_SOURCE, encoding="utf-8")
+            path = root / "scripts/validation/mutation-allowlist.yaml"
+            path.parent.mkdir(parents=True)
+            path.write_text(yaml.safe_dump([entry]), encoding="utf-8")
+
+            self.assertEqual(allowlist(root, path), [entry])
+
+    def test_fingerprint_preserves_314_defaults_contexts_and_literal_text(self):
+        key = return_none_key(FINGERPRINT_SOURCE)
+        self.assertEqual(key, FINGERPRINT_RETURN_KEY)
+        changed_name = return_none_key(
+            FINGERPRINT_SOURCE.replace("assigned = value", "assigned = other")
+        )
+        changed_literal = return_none_key(
+            FINGERPRINT_SOURCE.replace('return "ctx=Load()"', 'return "ctx=Store()"')
+        )
+        self.assertNotEqual(changed_name["context"], key["context"])
+        self.assertNotEqual(changed_literal["context"], key["context"])
+        self.assertNotEqual(changed_literal["original"], key["original"])
+
+    def test_fingerprint_drops_only_empty_lists_the_node_type_declares(self):
+        call = ast.parse("f(x)", mode="eval").body
+        no_arguments = ast.parse("f()", mode="eval").body
+        self.assertIn("args=[Name(id='x', ctx=Load())]", fingerprint_dump(call))
+        self.assertNotIn("args=", fingerprint_dump(no_arguments))
+
+        class Untyped(ast.AST):
+            _fields = ("a",)
+
+        class Typed(ast.AST):
+            _fields = ("a",)
+            _field_types: ClassVar[dict[str, object]] = {"a": list[int]}
+
+        class Malformed(ast.AST):
+            _fields = ("a",)
+
+        class Scalar(ast.AST):
+            _fields = ("a",)
+            _field_types: ClassVar[dict[str, object]] = {"a": int}
+
+        untyped, typed, falsy, malformed = Untyped(), Typed(), Typed(), Malformed()
+        scalar = Scalar(a=[])
+        Malformed._field_types = None  # ast.AST.__init__ rejects a non-dict, so set it afterwards
+        untyped.a = []
+        typed.a = []
+        falsy.a = ()
+        malformed.a = []
+        self.assertEqual(fingerprint_dump(untyped), "Untyped(a=[])")
+        self.assertEqual(fingerprint_dump(typed), "Typed()")
+        self.assertEqual(fingerprint_dump(falsy), "Typed(a=())")
+        self.assertEqual(fingerprint_dump(malformed), "Malformed(a=[])")
+        self.assertEqual(fingerprint_dump(scalar), "Scalar(a=[])")
+
+    def test_recorded_allowlist_rejects_changed_source_site_and_operator(self):
+        entry = {**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / entry["file"]
+            source.parent.mkdir(parents=True)
+            source.write_text(RECORDED_WAIT_SOURCE, encoding="utf-8")
+            path = root / "allowlist.yaml"
+            path.write_text(yaml.safe_dump([entry]))
+            self.assertEqual(allowlist(root, path), [entry])
+
+            source.write_text(RECORDED_WAIT_SOURCE.replace("code != 0", "code == 0"))
+            with self.assertRaisesRegex(ValueError, "Stale, duplicate or ambiguous"):
+                allowlist(root, path)
+            source.write_text(RECORDED_WAIT_SOURCE, encoding="utf-8")
+
+            for field, value in (
+                ("site", "/body/0/handlers/1/body/0"),
+                ("operator", "return:True"),
+            ):
+                with self.subTest(field=field):
+                    path.write_text(yaml.safe_dump([{**entry, field: value}]))
+                    with self.assertRaisesRegex(ValueError, "Stale, duplicate or ambiguous"):
+                        allowlist(root, path)
+
     def test_fixed_function_context_hash_matches_the_ci_interpreter_contract(self):
         mutants, _ = candidates("src/example.py", b"def answer():\n    return True\n")
         self.assertEqual(
@@ -1213,6 +1391,93 @@ class MutationExecutionTest(unittest.TestCase):
             # One controller plus its four workers belong to the mandatory baseline.
             self.assertEqual(len(launches), 5, launches)
             self.assertEqual(launches, ["test"] * 5)
+
+    def test_unreached_domains_do_not_hide_survival_or_claim_fixture_confirmation(self):
+        orderings = (
+            ("fixture", "unit"),
+            ("unit", "fixture"),
+        )
+        for ordering in orderings:
+            with self.subTest(ordering=ordering):
+                selected = {domain: ["tests/test_owner.py::test_value"] for domain in ordering}
+                results = [
+                    (
+                        {
+                            "outcome": "NO_TESTS" if domain == "fixture" else "SURVIVED",
+                            "domain": domain,
+                            "elapsed_seconds": 0.01,
+                        },
+                        Path("coverage"),
+                    )
+                    for domain in ordering
+                ]
+                with patch.object(mutation_gate, "run_domain", side_effect=results):
+                    result = mutation_gate.measure(Path("."), selected, 1)
+
+                self.assertEqual(result["outcome"], "SURVIVED", result)
+                self.assertEqual(result["domain"], "unit", result)
+                self.assertEqual(result["confirmation"], "unreached", result)
+                self.assertEqual([row["domain"] for row in result["domains"]], list(ordering))
+
+    def test_fixture_timeout_is_not_reported_as_fixture_confirmation(self):
+        selected = {"fixture": ["tests/test_owner.py::test_value"]}
+        timed_out = {
+            "outcome": "TIMEOUT",
+            "domain": "fixture",
+            "elapsed_seconds": 0.01,
+        }
+        with patch.object(mutation_gate, "run_domain", return_value=(timed_out, Path("coverage"))):
+            result = mutation_gate.measure(Path("."), selected, 1)
+
+        self.assertEqual(result["outcome"], "TIMEOUT", result)
+        self.assertEqual(result["confirmation"], "unreached", result)
+        self.assertNotIn("kind", result)
+        self.assertNotIn("node", result)
+
+    def test_cli_continues_from_unreached_unit_to_independent_fixture_kill(self):
+        source = "def answer():\n    return True\n"
+        unit = (
+            "if example.answer():\n"
+            "        assert example.answer() is True\n"
+            "    else:\n"
+            "        import pytest\n"
+            "        pytest.skip('unit owner does not pass for this mutation')"
+        )
+        contract = "assert example.answer() is True"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, source, unit, contract)
+            source_path = root / "src/example.py"
+            original = source_path.read_bytes()
+            mutants, _ = candidates("src/example.py", original)
+            target = next(
+                mutant
+                for mutant in mutants
+                if (mutant.operator, mutant.before, mutant.after)
+                == ("boolean:literal", "True", "False")
+            )
+            shard = isolated_shard(mutants, target)
+
+            status, rows = command(root, "--paths", "src/example.py", "--shard", shard)
+
+            selected = mutant_rows(rows)
+            self.assertEqual(status, 0, rows)
+            self.assertEqual(len(selected), 1, rows)
+            result = selected[0]
+            self.assertEqual(
+                {key: result[key] for key in target.key()},
+                target.key(),
+            )
+            self.assertEqual(result["outcome"], "KILLED", result)
+            self.assertEqual(result["domain"], "fixture", result)
+            self.assertEqual(result["node"], "tests/test_contract.py::test_contract", result)
+            self.assertEqual(result["confirmation"], "fixture", result)
+            self.assertIs(result["restored"], True)
+            self.assertEqual(
+                [(row["domain"], row["outcome"]) for row in result["domains"]],
+                [("unit", "NO_TESTS"), ("fixture", "KILLED")],
+            )
+            self.assertEqual(source_path.read_bytes(), original)
 
     def test_fixture_only_child_line_selects_its_one_owner_and_kills_without_unit_coverage(self):
         # Given a line reached only in a fixture test's real child program, run
