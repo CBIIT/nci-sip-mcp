@@ -2237,11 +2237,20 @@ class MovedCodeScopeTest(unittest.TestCase):
             {"src/elsewhere/b.py": None},
         )
 
-    def test_module_split_selects_the_file_that_received_the_moved_code(self):
-        kept, moved = MODULE[: len(MODULE) * 2 // 5], MODULE[len(MODULE) * 2 // 5 :]
+    def test_module_split_leaves_every_moved_line_selected(self):
+        cut = len(MODULE) * 2 // 5
+        result = scope_between(
+            {"src/a.py": MODULE}, {"src/a.py": MODULE[:cut], "src/b.py": MODULE[cut:]}
+        )
+        self.assertEqual(result["src/b.py"], set(range(1, len(MODULE[cut:].splitlines()) + 1)))
+
+    def test_split_that_git_pairs_with_the_larger_part_selects_both_files_whole(self):
+        cut = len(MODULE) * 3 // 5
         self.assertEqual(
-            scope_between({"src/a.py": MODULE}, {"src/a.py": kept, "src/b.py": moved}),
-            {"src/b.py": None},
+            scope_between(
+                {"src/a.py": MODULE}, {"src/b.py": MODULE[:cut], "src/c.py": MODULE[cut:]}
+            ),
+            {"src/b.py": None, "src/c.py": set(range(1, len(MODULE[cut:].splitlines()) + 1))},
         )
 
     def test_table_rename_with_only_table_edits_is_not_selected(self):
