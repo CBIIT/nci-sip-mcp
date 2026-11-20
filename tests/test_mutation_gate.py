@@ -2158,3 +2158,65 @@ class MutationCommandTest(unittest.TestCase):
             self.assertEqual(survivors[0]["after"], "False")
             self.assertEqual(survivors[0]["confirmation"], "unreached")
             self.assertEqual((root / "src/example.py").read_bytes(), before)
+
+
+RENAME_BASE = (
+    "import nci_si_mcp\nimport json\n\n\n"
+    "def keep_a():\n    return 1\n\n\n"
+    "def keep_b():\n    return 2\n"
+)
+
+
+def scope_after_git_rename(head_text, base_text=RENAME_BASE):
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary).resolve()
+
+        def run(*args):
+            return subprocess.run(  # noqa: S603 - fixed git subcommands, owned temporary repository
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],  # noqa: S607
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+        run("init", "-q")
+        (root / "src").mkdir()
+        (root / "src/old_name.py").write_text(base_text)
+        run("add", ".")
+        run("commit", "-qm", "base")
+        base = run("rev-parse", "HEAD")
+        run("mv", "src/old_name.py", "src/new_name.py")
+        (root / "src/new_name.py").write_text(head_text)
+        run("add", ".")
+        run("commit", "-qm", "head")
+        return scope(root, [], base, "HEAD")
+
+
+class RenameExemptionScopeTest(unittest.TestCase):
+    def test_line_that_differs_only_by_the_sip_rename_is_not_selected(self):
+        head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp")
+        self.assertEqual(scope_after_git_rename(head), {})
+
+    def test_rename_plus_logic_change_is_selected(self):
+        base = RENAME_BASE + "if nci_si_mcp == 1:\n    pass\n"
+        head = RENAME_BASE + "if nci_sip_mcp != 1:\n    pass\n"
+        self.assertEqual(scope_after_git_rename(head, base), {"src/new_name.py": {11}})
+
+    def test_added_line_containing_the_new_name_is_selected(self):
+        head = RENAME_BASE + "import nci_sip_mcp\n"
+        self.assertEqual(scope_after_git_rename(head), {"src/new_name.py": {11}})
+
+    def test_substitution_outside_the_table_is_selected(self):
+        base = RENAME_BASE + "foo_si = 1\n"
+        head = RENAME_BASE + "foo_sip = 1\n"
+        self.assertEqual(scope_after_git_rename(head, base), {"src/new_name.py": {11}})
+
+    def test_mixed_hunk_is_selected_as_a_whole(self):
+        base = "import nci_si_mcp\nVALUE = 1\n" + RENAME_BASE
+        head = "import nci_sip_mcp\nVALUE = 2\n" + RENAME_BASE
+        self.assertEqual(scope_after_git_rename(head, base), {"src/new_name.py": {1, 2}})
+
+    def test_rename_git_cannot_pair_selects_every_line(self):
+        head = "import nci_sip_mcp\nX = 1\nY = 2\nZ = 3\n"
+        self.assertEqual(scope_after_git_rename(head), {"src/new_name.py": {1, 2, 3, 4}})
