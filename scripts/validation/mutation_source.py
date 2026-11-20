@@ -175,7 +175,7 @@ def renamed_only(old: Sequence[str], new: Sequence[str]) -> bool:
 
     Equal lines are not a rename: a line-ending or end-of-file change must stay selected.
     """
-    return bool(old) and old != new and tuple(apply_renames(line) for line in old) == tuple(new)
+    return old != new and tuple(apply_renames(line) for line in old) == tuple(new)
 
 
 @dataclass(frozen=True, slots=True)
