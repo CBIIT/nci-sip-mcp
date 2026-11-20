@@ -403,12 +403,16 @@ call owners in that domain that execute any line of the same file, so consumers 
 and decorators need not repeat imports. With no identifiable call owner, the whole domain runs.
 Unrecognized contexts fail mapping. Each result names its `fallback_domains`; shard
 summaries count fallback mutants overall and per domain, alongside outcomes and kill kinds.
-Domains run in unit, self-test, then fixture order, stopping when a mutant is detected.
-Fixture confirmation runs only tests whose baseline contexts reach the mutated lines;
-`confirmation: unreached` records a survivor with no fixture reach and no fixture run.
-`NO_TESTS` means no domain covered the mutated span, or a selected domain run produced no
-passed owning call. It fails the gate and cannot be allowlisted; inspect selection and call
-evidence before concluding the code is unreachable.
+Domains run in unit, self-test, then fixture order. A domain result of `NO_TESTS` is skipped so
+later selected domains can provide evidence; a kill or infrastructure/timeout result still
+terminates measurement, and survivors are retained while later domains run. The fixture domain
+runs the tests the selection rules above choose; a fixture domain with no baseline context on the
+mutated lines is not run. A selected fixture run confirms only when it returns `KILLED` or
+`SURVIVED`. `confirmation: unreached` means no valid fixture confirmation was established: either
+the fixture domain was not run, or it returned `NO_TESTS`, `TIMEOUT` or `INFRA`. An overall
+`NO_TESTS` means no selected domain established an owner; it fails the gate and cannot be
+allowlisted. Inspect selection and call evidence before
+concluding the code is unreachable.
 Long-lived fixture servers retain the setup context present when they start; later RPCs
 cannot inherit changes to the parent's environment. Their setup-only lines therefore use
 the whole-fixture fallback, counted like the other domains, rather than claiming per-RPC ownership.
