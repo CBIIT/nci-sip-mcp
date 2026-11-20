@@ -423,10 +423,11 @@ accounting but omits those three numeric fields and states `cost_error`; structu
 follows and the command exits 2. Candidate evidence stays unchanged: this reporting failure
 is not fabricated as a candidate-level result, and missing costs are never reported as zero.
 
-The changed-site scope uses git rename detection. Within a file renamed by the temporary #509
-`RENAMES` table in `scripts/validation/mutation_source.py`, a hunk whose removed lines equal its
-added lines after those substitutions is exempt. Every other rename, move or split selects the
-whole new file, and any other hunk is selected. #519 removes the table.
+The changed-site scope uses git rename detection (`-M`). In a file that keeps its path, or
+whose path the #509 `RENAMES` table (`scripts/validation/mutation_source.py`) maps to its new
+path, a hunk whose removed lines equal its added lines after those substitutions (and differ
+before them) is exempt. Every other rename, move or split selects the whole new file, and every
+other hunk is selected. The table is temporary and is removed by #519.
 
 Mutation JSON rows record monotonic `elapsed_seconds` for the whole mutant (including scratch
 setup) and a `domains` list of measured test-run durations and outcomes. The scheduler stores
