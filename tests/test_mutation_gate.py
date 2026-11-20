@@ -216,13 +216,12 @@ class MutationOperatorsTest(unittest.TestCase):
             _field_types: ClassVar[dict[str, object]] = {"a": int}
 
         untyped, typed, falsy, malformed = Untyped(), Typed(), Typed(), Malformed()
-        scalar = Scalar()
+        scalar = Scalar(a=[])
         Malformed._field_types = None  # ast.AST.__init__ rejects a non-dict, so set it afterwards
         untyped.a = []
         typed.a = []
         falsy.a = ()
         malformed.a = []
-        scalar.a = []
         self.assertEqual(fingerprint_dump(untyped), "Untyped(a=[])")
         self.assertEqual(fingerprint_dump(typed), "Typed()")
         self.assertEqual(fingerprint_dump(falsy), "Typed(a=())")
