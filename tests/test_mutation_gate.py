@@ -2238,10 +2238,11 @@ class SpacedFileNameScopeTest(unittest.TestCase):
 
     def test_table_rename_of_a_spaced_name_is_exempt_only_for_table_edits(self):
         old, new = "src/nci_si_mcp/a b.py", "src/nci_sip_mcp/a b.py"
-        base = "import nci_si_mcp\nA = 1\nB = 2\nC = 3\nD = 4\nE = 5\n"
+        body = "".join(f"V{n} = {n}\n" for n in range(1, 21))
+        base = "import nci_si_mcp\n" + body
         head = base.replace("nci_si_mcp", "nci_sip_mcp")
         self.assertEqual(scope_between({old: base}, {new: head}), {})
-        self.assertEqual(scope_between({old: base}, {new: head + "F = 6\n"}), {new: {7}})
+        self.assertEqual(scope_between({old: base}, {new: head + "F = 6\n"}), {new: {22}})
 
 
 MODULE = "".join(f"def f{n}():\n    return {n}\n\n\n" for n in range(10))
@@ -2259,7 +2260,7 @@ class MovedCodeScopeTest(unittest.TestCase):
         result = scope_between(
             {"src/a.py": MODULE}, {"src/a.py": MODULE[:cut], "src/b.py": MODULE[cut:]}
         )
-        self.assertEqual(result["src/b.py"], set(range(1, len(MODULE[cut:].splitlines()) + 1)))
+        self.assertEqual(result, {"src/a.py": set(), "src/b.py": set(range(1, 25))})
 
     def test_split_that_git_pairs_with_the_larger_part_selects_both_files_whole(self):
         cut = len(MODULE) * 3 // 5
@@ -2281,6 +2282,58 @@ class MovedCodeScopeTest(unittest.TestCase):
             scope_between({OLD_TABLE_PATH: MODULE}, {NEW_TABLE_PATH: head}),
             {NEW_TABLE_PATH: {14}},
         )
+
+
+EXPECTED_PAIRS = (
+    ("nci_si_mcp", "nci_sip_mcp"),
+    ("nci_si_acceptance", "nci_sip_acceptance"),
+    ("nci-si-mcp", "nci-sip-mcp"),
+    ("nci-si-install", "nci-sip-install"),
+    ("nci-si-acceptance", "nci-sip-acceptance"),
+    ("NCI_SI_", "NCI_SIP_"),
+    ("without_nci_si_settings", "without_nci_sip_settings"),
+)
+PAIR_FILES = {
+    "nci_si_mcp": ("src/nci_si_mcp/x.py", "src/nci_sip_mcp/x.py"),
+    "nci_si_acceptance": (
+        "acceptance/src/nci_si_acceptance/x.py",
+        "acceptance/src/nci_sip_acceptance/x.py",
+    ),
+}
+LONG_BODY = "".join(f"V{n} = {n}\n" for n in range(1, 21))
+
+
+class EveryRenamePairScopeTest(unittest.TestCase):
+    def test_each_table_pair_alone_is_not_selected(self):
+        for before, after in EXPECTED_PAIRS:
+            with self.subTest(pair=before):
+                old_path, new_path = PAIR_FILES.get(before, ("src/x.py", "src/x.py"))
+                base = LONG_BODY + f'NAME = "{before}"\n'
+                head = LONG_BODY + f'NAME = "{after}"\n'
+                self.assertEqual(scope_between({old_path: base}, {new_path: head}), {})
+
+
+class RenameRobustnessScopeTest(unittest.TestCase):
+    def test_move_from_an_eligible_to_an_ineligible_path_is_not_selected(self):
+        self.assertEqual(
+            scope_between({"src/a.py": MODULE}, {"src/tests/a.py": MODULE}),
+            {},
+        )
+
+    def test_table_rename_around_a_no_newline_marker_is_not_selected(self):
+        base = LONG_BODY + "import nci_si_mcp"
+        head = LONG_BODY + "import nci_sip_mcp"
+        self.assertEqual(scope_after_git_rename(head, base), {})
+
+    def test_pure_rename_is_found_even_when_git_config_disables_renames(self):
+        head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp")
+        env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "diff.renames",
+            "GIT_CONFIG_VALUE_0": "false",
+        }
+        with patch.dict(os.environ, env):
+            self.assertEqual(scope_after_git_rename(head), {})
 
 
 class HunkParsingTest(unittest.TestCase):
