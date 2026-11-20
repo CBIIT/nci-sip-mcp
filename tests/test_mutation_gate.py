@@ -1,5 +1,6 @@
 """The mutation command measures assertion sensitivity without editing its caller."""
 
+import ast
 import contextlib
 import io
 import json
@@ -14,6 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import patch
 
 import yaml
@@ -22,7 +24,15 @@ from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
 from scripts.validation.mutation_gate import execute_job
 from scripts.validation.mutation_run import coverage_map, program, run_domain, selection, snapshot
-from scripts.validation.mutation_source import allowlist, candidates, diff_lines, digest, scope
+from scripts.validation.mutation_source import (
+    _is_default_empty_list,
+    allowlist,
+    candidates,
+    diff_lines,
+    digest,
+    fingerprint_dump,
+    scope,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORDED_WAIT_SOURCE = """class StdioOwner:
@@ -185,6 +195,34 @@ class MutationOperatorsTest(unittest.TestCase):
         self.assertNotEqual(changed_name["context"], key["context"])
         self.assertNotEqual(changed_literal["context"], key["context"])
         self.assertNotEqual(changed_literal["original"], key["original"])
+
+    def test_fingerprint_drops_only_empty_lists_the_node_type_declares(self):
+        call = ast.parse("f(x)", mode="eval").body
+        no_arguments = ast.parse("f()", mode="eval").body
+        self.assertIn("args=[Name(id='x', ctx=Load())]", fingerprint_dump(call))
+        self.assertNotIn("args=", fingerprint_dump(no_arguments))
+
+        class Untyped(ast.AST):
+            _fields = ("a",)
+
+        class Typed(ast.AST):
+            _fields = ("a",)
+            _field_types: ClassVar[dict[str, object]] = {"a": list[int]}
+
+        class Malformed(ast.AST):
+            _fields = ("a",)
+
+        untyped, typed, falsy, malformed = Untyped(), Typed(), Typed(), Malformed()
+        Malformed._field_types = None  # ast.AST.__init__ rejects a non-dict, so set it afterwards
+        untyped.a = []
+        typed.a = []
+        falsy.a = ()
+        malformed.a = []
+        self.assertEqual(fingerprint_dump(untyped), "Untyped(a=[])")
+        self.assertEqual(fingerprint_dump(typed), "Typed()")
+        self.assertEqual(fingerprint_dump(falsy), "Typed(a=())")
+        self.assertEqual(fingerprint_dump(malformed), "Malformed(a=[])")
+        self.assertIs(_is_default_empty_list(typed, "a", 0), False)
 
     def test_recorded_allowlist_rejects_changed_source_site_and_operator(self):
         entry = {**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}
