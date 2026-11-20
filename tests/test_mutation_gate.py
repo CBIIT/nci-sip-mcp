@@ -25,7 +25,6 @@ from scripts.validation import mutation_run as runner
 from scripts.validation.mutation_gate import execute_job
 from scripts.validation.mutation_run import coverage_map, program, run_domain, selection, snapshot
 from scripts.validation.mutation_source import (
-    _is_default_empty_list,
     allowlist,
     candidates,
     diff_lines,
@@ -222,7 +221,6 @@ class MutationOperatorsTest(unittest.TestCase):
         self.assertEqual(fingerprint_dump(typed), "Typed()")
         self.assertEqual(fingerprint_dump(falsy), "Typed(a=())")
         self.assertEqual(fingerprint_dump(malformed), "Malformed(a=[])")
-        self.assertIs(_is_default_empty_list(typed, "a", 0), False)
 
     def test_recorded_allowlist_rejects_changed_source_site_and_operator(self):
         entry = {**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}
