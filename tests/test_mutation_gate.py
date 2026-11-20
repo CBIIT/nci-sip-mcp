@@ -2228,6 +2228,22 @@ class RenameExemptionScopeTest(unittest.TestCase):
         self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: {1, 2, 3, 4}})
 
 
+class SpacedFileNameScopeTest(unittest.TestCase):
+    def test_added_line_in_a_file_whose_name_contains_a_space_is_selected(self):
+        base = "A = 1\nB = 2\n"
+        self.assertEqual(
+            scope_between({"src/x y.py": base}, {"src/x y.py": base + "C = 3\n"}),
+            {"src/x y.py": {3}},
+        )
+
+    def test_table_rename_of_a_spaced_name_is_exempt_only_for_table_edits(self):
+        old, new = "src/nci_si_mcp/a b.py", "src/nci_sip_mcp/a b.py"
+        base = "import nci_si_mcp\nA = 1\nB = 2\nC = 3\nD = 4\nE = 5\n"
+        head = base.replace("nci_si_mcp", "nci_sip_mcp")
+        self.assertEqual(scope_between({old: base}, {new: head}), {})
+        self.assertEqual(scope_between({old: base}, {new: head + "F = 6\n"}), {new: {7}})
+
+
 MODULE = "".join(f"def f{n}():\n    return {n}\n\n\n" for n in range(10))
 
 
