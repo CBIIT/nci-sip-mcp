@@ -86,7 +86,7 @@ pdm run pytest tests/test_handlers.py -k LookupTest
 pdm run lint                              # ruff check + basedpyright, the fast check
 pdm run fmt                               # ruff format
 pdm run pre-commit run --all-files        # every commit-stage hook, as the CI quality job runs them
-pdm run mutation-gate                    # focused sensitivity follow-up; full catalogue runs once in PR CI
+pdm run mutation-gate                    # focused sensitivity follow-up; full changed-site catalogue runs once in PR CI
 NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SI_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json  # fixture mode, prepared as in CI
 pdm run acceptance-expected check acceptance/fixture.json    # the report against the expected outcomes
 pdm run acceptance-expected update acceptance/fixture.json   # rewrite the expected outcomes
@@ -285,43 +285,43 @@ adding exclusion pathspecs for generated files.
    1. **Code review:** the engineering standards above, the architecture, and the scope.
    2. **Silent failures:** swallowed exceptions, broad `except`, fallbacks that hide an error,
       results that look complete but are not.
-    3. **Tests:** apply the outside-in rules below to every changed behavioral claim. Before opening
-       the PR, complete the local caller/test-design and focused-sensitivity review, ordinary local
-       gates, and a campaign plan/readiness record. Select the sample from the actual mutation
-       workload for the exact candidate: use about 20 distinct available items, or every distinct
-       item once when the nonempty catalogue is smaller; do not repeat items to manufacture a
-       sample size. If the actual source-bound selection is empty, record the candidate/source and
-       empty selection and run no fabricated sample. Do not infer an empty selection from a
-       documentation-only diff or skip the actual selection. An empty sample is not a `NO_TESTS`
-       waiver; reachable-candidate requirements and the PR-CI outcome rules still apply. Explain
-       sample timing/outliers and the projection in the issue when a sample exists. This pre-PR
-       review does not establish a mutation verdict or review PR-CI raw evidence.
+   3. **Tests:** apply the outside-in rules below to every changed behavioral claim. Before opening
+      the PR, complete the local caller/test-design and focused-sensitivity review, ordinary local
+      gates, and a campaign plan/readiness record. Select the sample from the actual mutation
+      workload for the exact candidate: use about 20 distinct available items, or every distinct
+      item once when the nonempty catalogue is smaller; do not repeat items to manufacture a
+      sample size. If the actual source-bound selection is empty, record the candidate/source and
+      empty selection and run no fabricated sample. Do not infer an empty selection from a
+      documentation-only diff or skip the actual selection. An empty sample is not a `NO_TESTS`
+      waiver; reachable-candidate requirements and the PR-CI outcome rules still apply. Explain
+      sample timing/outliers and the projection in the issue when a sample exists. This pre-PR
+      review does not establish a mutation verdict or review PR-CI raw evidence.
 
-       The existing PR-CI mutation job is the one full catalogue campaign for a frozen candidate;
-       do not run a second full catalogue locally or as reviewer. Once that campaign exists,
-       independently review its raw results and retain their exact provenance
-       ([CONTRIBUTING.md](CONTRIBUTING.md#mutation-gate)) before exact-head clearance. Freeze and
-       record PR head H, event base B and the actual tested PR checkout T, plus run/attempt,
-       job/shard, source/input/toolchain/lock/version identities. A change to H, B, T, inputs or
-       toolchain requires re-establishing the affected proof. Producer and mutation-consumer
-       evidence must belong to one workflow attempt. An unrelated rerun that did not execute the
-       mutation consumer does not by itself invalidate a completed campaign when H/B/T and inputs
-       are unchanged and raw results are independently reviewed; an aggregate summary alone is
-       insufficient. This does not reduce ordinary test, self-test, fixture or hook gates.
-      Use focused follow-up tests/mutations for a concrete claim or finding.
-      Fix every survivor or allowlist only reviewed equivalent `SURVIVED` results in
-      `scripts/validation/mutation-allowlist.yaml` with their reasons. `NO_TESTS` is never
-      allowlisted: close reachable gaps at their owning boundary and remove verified dead code.
-      Timeouts count as killed by policy, not as assertion-strength evidence. Check exact error
-      contracts, boundary cases and independent expected values. Challenge internal spies,
-      duplicate claims and development scaffolding; retain component tests with independent
-      contracts. Before any removal, show which remaining test preserves each distinct failure
-      mechanism. Record each finding's retention, replacement or removal rationale in the review
-      table. Coverage percentages and passing tests alone do not establish assertion quality or
-      uniqueness. A behavioural change without a red commit is a finding; check its quoted failure.
-      Identify the caller scenario, owning interface and test, plausible regression, and observed
-      assertion failure under the original defect or a restored targeted mutation. Distinguish
-      setup failures from sensitivity evidence.
+      The existing PR-CI mutation job is the one campaign over the full changed-site catalogue for a frozen candidate;
+      do not run a second full catalogue locally or as reviewer. Once that campaign exists,
+      independently review its raw results and retain their exact provenance
+      ([CONTRIBUTING.md](CONTRIBUTING.md#mutation-gate)) before exact-head clearance. Freeze and
+      record PR head H, event base B and the actual tested PR checkout T, plus run/attempt,
+      job/shard, source/input/toolchain/lock/version identities. A change to H, B, T, inputs or
+      toolchain requires re-establishing the affected proof. Producer and mutation-consumer
+      evidence must belong to one workflow attempt. An unrelated rerun that did not execute the
+      mutation consumer does not by itself invalidate a completed campaign when H/B/T and inputs
+      are unchanged and raw results are independently reviewed; an aggregate summary alone is
+      insufficient. This does not reduce ordinary test, self-test, fixture or hook gates.
+     Use focused follow-up tests/mutations for a concrete claim or finding.
+     Fix every survivor or allowlist only reviewed equivalent `SURVIVED` results in
+     `scripts/validation/mutation-allowlist.yaml` with their reasons. `NO_TESTS` is never
+     allowlisted: close reachable gaps at their owning boundary and remove verified dead code.
+     Timeouts count as killed by policy, not as assertion-strength evidence. Check exact error
+     contracts, boundary cases and independent expected values. Challenge internal spies,
+     duplicate claims and development scaffolding; retain component tests with independent
+     contracts. Before any removal, show which remaining test preserves each distinct failure
+     mechanism. Record each finding's retention, replacement or removal rationale in the review
+     table. Coverage percentages and passing tests alone do not establish assertion quality or
+     uniqueness. A behavioural change without a red commit is a finding; check its quoted failure.
+     Identify the caller scenario, owning interface and test, plausible regression, and observed
+     assertion failure under the original defect or a restored targeted mutation. Distinguish
+     setup failures from sensitivity evidence.
    4. **Types and records:** invariants are expressed in the types, and records match `spec/`.
       Check the diff against the Typing conventions in CONTRIBUTING.md.
    5. **Comments and documentation:** docstrings, comments and documents say what the code

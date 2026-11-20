@@ -40,7 +40,7 @@ a diagnosis of the underlying TLS failure.
 | `pdm run test` | The whole suite, with the coverage minimum |
 | `pdm run pytest tests/test_index.py -k name` | A selection of tests, without the minimum |
 | `pdm run lint` | Ruff and basedpyright: the fast check while you work |
-| `pdm run mutation-gate` | Focused sensitivity checks for a specific claim (`--paths src/package/module.py` selects a module); the full catalogue runs once in PR CI for each frozen candidate |
+| `pdm run mutation-gate` | Focused sensitivity checks for a specific claim (`--paths src/package/module.py` selects a module); the full changed-site catalogue runs once in PR CI for each frozen candidate |
 | `pdm run fmt` | Format with Ruff |
 | `pdm run lock` | Refresh every Python group to the newest version admitted by the five-day release-age policy |
 | `pdm run github-setup` | Create missing workflow credential names with safe placeholders; never overwrite existing names |
@@ -62,7 +62,7 @@ a diagnosis of the underlying TLS failure.
 | `pdm run quickstart-tools` | Regenerate the table of tools in [QUICKSTART.md](QUICKSTART.md) from `spec/tools.yaml`; `--check` verifies it |
 | `pandoc -f gfm docs/specification.md -o specification.docx` | The Word copy of the specification, a build product: never committed or edited |
 
-CI runs the complete mutation catalogue as three stable-key hash partitions, each with two
+CI runs the complete changed-site mutation catalogue as three stable-key hash partitions, each with two
 workers and a 300-minute timeout: `--shard 1/3 -n 2`, `--shard 2/3 -n 2` and
 `--shard 3/3 -n 2`. All three must pass; a job timeout fails. Shard JSON lines report
 full/selected counts and a final outcome/kill-kind summary with elapsed seconds. An empty
@@ -71,7 +71,7 @@ default PR merge checkout relative to the event's base SHA, just as the suite pr
 The gate's nested self-tests require the larger timeout; current timing evidence belongs in
 the issue and pull request, not a standing runtime promise.
 
-This PR-CI job is the one full catalogue campaign for each frozen candidate. Do not run a
+This PR-CI job is the one campaign over the full changed-site catalogue for each frozen candidate. Do not run a
 separate full local campaign before the PR, or repeat it as the reviewer. Before opening the PR,
 complete the ordinary local gates and caller/test-design and focused-sensitivity review, and record
 the campaign plan/readiness in the issue. Select the sample from the actual mutation workload for
