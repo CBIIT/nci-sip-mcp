@@ -81,7 +81,7 @@ config:
 flowchart TB
     subgraph Host["Developer workstation"]
         Client["Desktop MCP client"]
-        Server["Python server process<br/>nci-si-mcp serve"]
+        Server["Python server process<br/>nci-sip-mcp serve"]
         Settings["Environment settings"]
         Index[("Local SQLite<br/>writable data directory")]
         Model["Embedding provider"]
@@ -206,7 +206,7 @@ Operational constraints apply whichever AWS services implement these boxes:
 - **Stage each replica before readiness.** Deploy a verified GHCR image digest, copy the
   prepared index and matching model, and inject settings and secrets through the environment.
   Each process exposes `/mcp`, `/health` and `/ready`; image evidence is attached to its release.
-- **Require approved authentication.** Set `NCI_SI_HTTP_AUTH_MODE=required` and install the
+- **Require approved authentication.** Set `NCI_SIP_HTTP_AUTH_MODE=required` and install the
   [governed HTTP integration](governed-http.md); absent integration fails before listening.
   The local default remains trusted-local. Configure actual Host/Origin authorities;
   forwarded identity headers never grant access. Production identity is still deferred/off.

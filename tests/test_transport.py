@@ -13,10 +13,10 @@ from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 
 from fakes import release
-from nci_si_mcp.audit import JsonFormatter
-from nci_si_mcp.evs import EVSReleaseNotFoundError
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.transport import create_http_app
+from nci_sip_mcp.audit import JsonFormatter
+from nci_sip_mcp.evs import EVSReleaseNotFoundError
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.transport import create_http_app
 from ncit_index.embeddings import HashingEmbeddingProvider
 from test_release_selection import initialize_http, version
 from test_server import ServerFixture
@@ -111,7 +111,7 @@ class HTTPTest(ServerFixture):
                         "UPDATE manifests SET payload = ?",
                         (json.dumps(replace(manifest, needs_rebuild=True).to_dict()),),
                     )
-                with self.assertLogs("nci_si_mcp.transport", level="WARNING") as captured:
+                with self.assertLogs("nci_sip_mcp.transport", level="WARNING") as captured:
                     blocked = await client.get("/ready")
                 return ready, blocked, captured.records
 
@@ -353,7 +353,7 @@ class HTTPTest(ServerFixture):
                 return [r.status_code for r in (missing, recovered, incompatible)]
 
         logging.disable(logging.NOTSET)
-        with self.assertLogs("nci_si_mcp.transport", level="WARNING") as logs:
+        with self.assertLogs("nci_sip_mcp.transport", level="WARNING") as logs:
             self.assertEqual(asyncio.run(scenario()), [503, 200, 503])
         records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
         self.assertEqual(len(records), 2)
@@ -396,7 +396,7 @@ class HTTPTest(ServerFixture):
                         (response.status_code, response.text), (413, "Request body too large")
                     )
 
-        with patch("nci_si_mcp.server.invoke", side_effect=AssertionError("must not run")):
+        with patch("nci_sip_mcp.server.invoke", side_effect=AssertionError("must not run")):
             asyncio.run(scenario())
         self.assertEqual(self.evs.calls, [])
 
@@ -469,7 +469,7 @@ class HTTPAuthTest(ServerFixture):
                 )
 
         logging.disable(logging.NOTSET)
-        with patch("nci_si_mcp.server.invoke", side_effect=AssertionError("must not run")):
+        with patch("nci_sip_mcp.server.invoke", side_effect=AssertionError("must not run")):
             allowed = asyncio.run(scenario())
         self.assertEqual(allowed.status_code, 200)
         self.assertIn("mcp-session-id", allowed.headers)

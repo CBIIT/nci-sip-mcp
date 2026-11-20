@@ -4,9 +4,9 @@ import sqlite3
 from unittest.mock import patch
 
 from fakes import concept
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.evs import normalize_concept
-from nci_si_mcp.index_adapter import LocalIndexAdapter
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import normalize_concept
+from nci_sip_mcp.index_adapter import LocalIndexAdapter
 from ncit_index import index as index_module
 from ncit_index.embeddings import HashingEmbeddingProvider
 from ncit_index.errors import (

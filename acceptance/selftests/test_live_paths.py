@@ -16,11 +16,11 @@ from urllib.request import ProxyHandler, Request, build_opener
 import pytest
 
 from conftest import FIXTURES, furnished_child
-from nci_si_acceptance import denied_surfaces, environments, live_launcher
-from nci_si_acceptance.client import server_environment
-from nci_si_acceptance.denied_surfaces import DeniedSurfaces
-from nci_si_acceptance.fixture_server import FixtureServer, FixtureSet, Response, load_fixtures
-from nci_si_mcp import cli, http_client
+from nci_sip_acceptance import denied_surfaces, environments, live_launcher
+from nci_sip_acceptance.client import server_environment
+from nci_sip_acceptance.denied_surfaces import DeniedSurfaces
+from nci_sip_acceptance.fixture_server import FixtureServer, FixtureSet, Response, load_fixtures
+from nci_sip_mcp import cli, http_client
 
 FURNISHED_PREFIX = Path(live_launcher.__file__).resolve().parents[3] / ".venv"
 
@@ -47,7 +47,7 @@ def test_real_furnished_child_ignores_ambient_os_proxy(tmp_path):
             "import sys, urllib.request as u; "
             f"u.getproxies=lambda: {{'http': {proxy.url!r}}}; "
             "u.proxy_bypass=lambda host: False; "
-            "from nci_si_acceptance.live_launcher import main; "
+            "from nci_sip_acceptance.live_launcher import main; "
             "sys.argv=['launcher','index-sample','C4817']; raise SystemExit(main())"
         )
         ran = furnished_child([sys.executable, "-I", "-c", script], environment)
@@ -108,9 +108,9 @@ def test_live_environment_requires_both_owned_prerequisites(
     monkeypatch, tmp_path, selected, denied_url
 ):
     for key in list(os.environ):
-        if key.startswith(("NCI_SI_", "PYTHON")) or key.lower().endswith("_proxy"):
+        if key.startswith(("NCI_SIP_", "PYTHON")) or key.lower().endswith("_proxy"):
             monkeypatch.delenv(key)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_ENVIRONMENT", "evs-only")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_ENVIRONMENT", "evs-only")
     environment = environments.selection("live") if selected else None
     with pytest.raises(ValueError) as error:
         server_environment("live", tmp_path, None, environment=environment, denied_url=denied_url)
@@ -228,7 +228,9 @@ def test_launcher_refuses_untrusted_installation_before_cli(
     monkeypatch.setattr(sys, "argv", ["launcher", "serve"])
     monkeypatch.setattr(sys, "prefix", str(FURNISHED_PREFIX))
     if boundary == "module":
-        monkeypatch.setattr(live_launcher.nci_si_acceptance, "__file__", str(tmp_path / "other.py"))
+        monkeypatch.setattr(
+            live_launcher.nci_sip_acceptance, "__file__", str(tmp_path / "other.py")
+        )
     elif boundary == "prefix":
         monkeypatch.setattr(sys, "prefix", str(tmp_path))
     else:
@@ -265,7 +267,7 @@ def test_furnished_child_never_forwards_cross_origin_redirect_or_credentials(
     with DeniedSurfaces() as denied:
         origins = dict.fromkeys(environments.SURFACES)
         origins["evs"] = selected.base_url("evs")
-        credentials = {"NCI_SI_EVS_LICENSE_KEY": credential} if credential else {}
+        credentials = {"NCI_SIP_EVS_LICENSE_KEY": credential} if credential else {}
         environment = server_environment(
             "live",
             tmp_path,
@@ -288,9 +290,9 @@ def callable_launcher(monkeypatch):
     root = Path(__file__).resolve().parents[2]
     assert (
         Path(live_launcher.__file__).resolve()
-        == root / "acceptance/src/nci_si_acceptance/live_launcher.py"
+        == root / "acceptance/src/nci_sip_acceptance/live_launcher.py"
     )
-    assert Path(http_client.__file__).resolve() == root / "src/nci_si_mcp/http_client.py"
+    assert Path(http_client.__file__).resolve() == root / "src/nci_sip_mcp/http_client.py"
     monkeypatch.setattr(sys, "prefix", str(root / ".venv"))
     monkeypatch.setattr(http_client, "_OPENER", http_client._OPENER)
     return live_launcher.main
@@ -328,7 +330,7 @@ def test_imported_launcher_dispatch_and_refusal(
         assert seen == []
     else:
         assert callable_launcher() == expected_exit
-        assert seen == [["nci-si-mcp", *expected]]
+        assert seen == [["nci-sip-mcp", *expected]]
 
 
 def test_imported_launcher_transport_never_proxies_or_forwards_redirects(
@@ -370,8 +372,8 @@ def test_module_entry_propagates_the_cli_exit(monkeypatch, callable_launcher, ex
     monkeypatch.setattr(sys, "argv", ["launcher", "serve"])
     seen = []
     monkeypatch.setattr(cli, "main", lambda: seen.append(sys.argv.copy()) or exit_code)
-    monkeypatch.delitem(sys.modules, "nci_si_acceptance.live_launcher")
+    monkeypatch.delitem(sys.modules, "nci_sip_acceptance.live_launcher")
     with pytest.raises(SystemExit) as outcome:
-        runpy.run_module("nci_si_acceptance.live_launcher", run_name="__main__")
+        runpy.run_module("nci_sip_acceptance.live_launcher", run_name="__main__")
     assert outcome.value.code == exit_code
-    assert seen == [["nci-si-mcp", "serve", "--transport", "stdio"]]
+    assert seen == [["nci-sip-mcp", "serve", "--transport", "stdio"]]

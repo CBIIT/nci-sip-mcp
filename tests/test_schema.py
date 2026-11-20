@@ -9,11 +9,11 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from fakes import release
-from nci_si_mcp.config import BASE_URL_VARIABLES
-from nci_si_mcp.errors import ErrorCode, PlatformError, serialise
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.registry import ToolSpec, invoke
-from nci_si_mcp.validation import PROFILES, RELEASE_CHANNELS, UPSTREAM_MODES
+from nci_sip_mcp.config import BASE_URL_VARIABLES
+from nci_sip_mcp.errors import ErrorCode, PlatformError, serialise
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.registry import ToolSpec, invoke
+from nci_sip_mcp.validation import PROFILES, RELEASE_CHANNELS, UPSTREAM_MODES
 from test_server import ServerFixture, pinned
 
 

@@ -11,8 +11,8 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from nci_si_acceptance import status
-from nci_si_acceptance.status import BEGIN, END, STATUS, current, render, tool_outcomes
+from nci_sip_acceptance import status
+from nci_sip_acceptance.status import BEGIN, END, STATUS, current, render, tool_outcomes
 
 # A gate, and tests of three tools.
 ATTRIBUTION = {
@@ -184,7 +184,7 @@ def test_a_test_of_the_suite_without_expected_outcomes_is_refused(suite_of_two):
 
 def run_status(*options):
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "nci_si_acceptance.status", *options],
+        [sys.executable, "-m", "nci_sip_acceptance.status", *options],
         capture_output=True,
         text=True,
         check=False,
@@ -453,7 +453,7 @@ def test_real_command_renders_stored_evidence_with_network_denied(tmp_path):
     readme.write_text(f"{BEGIN}\n{END}\n")
     script = (
         "import sys, socket; from unittest.mock import patch; "
-        "from nci_si_acceptance.status import main; "
+        "from nci_sip_acceptance.status import main; "
         "patcher = patch.object(socket.socket, 'connect', "
         "side_effect=AssertionError('network forbidden')); patcher.start(); "
         "sys.exit(main(sys.argv[1:]))"

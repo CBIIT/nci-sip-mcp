@@ -49,7 +49,7 @@ RECORDED_WAIT_SOURCE = """class StdioOwner:
             return False
 """
 RECORDED_WAIT_KEY = {
-    "file": "acceptance/src/nci_si_acceptance/request_stdio.py",
+    "file": "acceptance/src/nci_sip_acceptance/request_stdio.py",
     "qualname": "StdioOwner._wait",
     "operator": "return:None",
     "site": "/body/0/handlers/1/body/1",
@@ -64,7 +64,7 @@ RECORDED_REMAINING_SOURCE = """class SupervisedRun:
         return min(seconds, self._deadline.remaining())
 """
 RECORDED_REMAINING_KEY = {
-    "file": "acceptance/src/nci_si_acceptance/request_supervision.py",
+    "file": "acceptance/src/nci_sip_acceptance/request_supervision.py",
     "qualname": "SupervisedRun._remaining",
     "operator": "boolean:drop:1",
     "site": "/body/0/test/0",
@@ -310,7 +310,7 @@ class MutationOperatorsTest(unittest.TestCase):
                     self.assertEqual(mutant.qualname, "outer.inner")
                     self.assertTrue(changed.startswith(b"# \xc3\xa9\ndef outer():"))
 
-    def test_ci_runs_every_pr_to_main_on_the_producers_merge_tree_with_read_only_arguments(self):
+    def test_ci_runs_pr_mutation_on_every_pull_request_to_main(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         self.assertEqual(
             workflow["jobs"]["mutation"],
@@ -1329,7 +1329,7 @@ class MutationExecutionTest(unittest.TestCase):
             result, data = run_domain(scratch, "fixture", [node], 120, baseline=True)
             self.assertEqual(result["outcome"], "SURVIVED", result)
             mapping = coverage_map(data, scratch)
-            source = "src/nci_si_mcp/content.py"
+            source = "src/nci_sip_mcp/content.py"
             line = next(
                 number
                 for number, text in enumerate((scratch / source).read_text().splitlines(), 1)
@@ -1365,7 +1365,7 @@ class MutationExecutionTest(unittest.TestCase):
                 "import json, os\nfrom pathlib import Path\n"
                 "def pytest_addoption(parser):\n    parser.addoption('--report')\n"
                 "def pytest_sessionstart(session):\n"
-                "    if os.environ.get('NCI_SI_ACCEPTANCE_MODE') != 'fixture':\n        return\n"
+                "    if os.environ.get('NCI_SIP_ACCEPTANCE_MODE') != 'fixture':\n        return\n"
                 f"    with Path({str(log)!r}).open('a') as stream:\n"
                 "        stream.write(json.dumps(session.config.getoption('cov_context'))"
                 " + '\\n')\n"
@@ -2024,13 +2024,13 @@ class MutationExecutionTest(unittest.TestCase):
             "    child = subprocess.run([sys.executable, '-c', "
             "'import example; print(example.answer())'], capture_output=True, text=True)\n"
             "    assert child.stdout.strip() == 'True'\n"
-            "    console = subprocess.run(['nci-si-mcp'], capture_output=True, text=True)\n"
+            "    console = subprocess.run(['nci-sip-mcp'], capture_output=True, text=True)\n"
             "    assert console.stdout.strip() == 'True'"
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             project(root, source, unit)
-            package = root / "src/nci_si_mcp"
+            package = root / "src/nci_sip_mcp"
             package.mkdir()
             (package / "__init__.py").write_text("")
             (package / "cli.py").write_text(
@@ -2150,3 +2150,247 @@ class MutationCommandTest(unittest.TestCase):
             self.assertEqual(survivors[0]["after"], "False")
             self.assertEqual(survivors[0]["confirmation"], "unreached")
             self.assertEqual((root / "src/example.py").read_bytes(), before)
+
+
+RENAME_BASE = (
+    "import nci_si_mcp\nimport json\n\n\n"
+    "def keep_a():\n    return 1\n\n\n"
+    "def keep_b():\n    return 2\n"
+)
+
+
+def scope_between(base_files, head_files):
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary).resolve()
+
+        def run(*args):
+            return subprocess.run(  # noqa: S603 - fixed git subcommands, owned temporary repository
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],  # noqa: S607
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+        def write(files):
+            for name, content in files.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_bytes(content.encode())
+
+        run("init", "-q")
+        write(base_files)
+        run("add", ".")
+        run("commit", "-qm", "base")
+        base = run("rev-parse", "HEAD")
+        for name in base_files:
+            (root / name).unlink()
+        write(head_files)
+        run("add", "-A")
+        run("commit", "-qm", "head")
+        return scope(root, [], base, "HEAD")
+
+
+OLD_TABLE_PATH = "src/nci_si_mcp/x.py"
+NEW_TABLE_PATH = "src/nci_sip_mcp/x.py"
+
+
+def scope_after_git_rename(head_text, base_text=RENAME_BASE):
+    return scope_between({OLD_TABLE_PATH: base_text}, {NEW_TABLE_PATH: head_text})
+
+
+class RenameExemptionScopeTest(unittest.TestCase):
+    def test_line_that_differs_only_by_the_sip_rename_is_not_selected(self):
+        head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp")
+        self.assertEqual(scope_after_git_rename(head), {})
+
+    def test_rename_plus_logic_change_is_selected(self):
+        base = RENAME_BASE + "if nci_si_mcp == 1:\n    pass\n"
+        head = RENAME_BASE + "if nci_sip_mcp != 1:\n    pass\n"
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {11}})
+
+    def test_added_line_containing_the_new_name_is_selected(self):
+        head = RENAME_BASE + "import nci_sip_mcp\n"
+        self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: {11}})
+
+    def test_substitution_outside_the_table_is_selected(self):
+        base = RENAME_BASE + "foo_si = 1\n"
+        head = RENAME_BASE + "foo_sip = 1\n"
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {11}})
+
+    def test_mixed_hunk_is_selected_as_a_whole(self):
+        base = "import nci_si_mcp\nVALUE = 1\n" + RENAME_BASE
+        head = "import nci_sip_mcp\nVALUE = 2\n" + RENAME_BASE
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {1, 2}})
+
+    def test_rename_git_cannot_pair_selects_every_line(self):
+        """A rewrite git cannot pair is a delete plus an add, so no hunk can be exempt."""
+        head = "import nci_sip_mcp\nX = 1\nY = 2\nZ = 3\n"
+        self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: {1, 2, 3, 4}})
+
+
+class SpacedFileNameScopeTest(unittest.TestCase):
+    def test_added_line_in_a_file_whose_name_contains_a_space_is_selected(self):
+        base = "A = 1\nB = 2\n"
+        self.assertEqual(
+            scope_between({"src/x y.py": base}, {"src/x y.py": base + "C = 3\n"}),
+            {"src/x y.py": {3}},
+        )
+
+    def test_table_rename_of_a_spaced_name_is_exempt_only_for_table_edits(self):
+        old, new = "src/nci_si_mcp/a b.py", "src/nci_sip_mcp/a b.py"
+        body = "".join(f"V{n} = {n}\n" for n in range(1, 21))
+        base = "import nci_si_mcp\n" + body
+        head = base.replace("nci_si_mcp", "nci_sip_mcp")
+        self.assertEqual(scope_between({old: base}, {new: head}), {})
+        self.assertEqual(scope_between({old: base}, {new: head + "F = 6\n"}), {new: {22}})
+
+
+MODULE = "".join(f"def f{n}():\n    return {n}\n\n\n" for n in range(10))
+
+
+class MovedCodeScopeTest(unittest.TestCase):
+    def test_module_moved_to_an_unrelated_path_is_selected_whole(self):
+        self.assertEqual(
+            scope_between({"src/a.py": MODULE}, {"src/elsewhere/b.py": MODULE}),
+            {"src/elsewhere/b.py": None},
+        )
+
+    def test_module_split_leaves_every_moved_line_selected(self):
+        cut = len(MODULE) * 2 // 5
+        result = scope_between(
+            {"src/a.py": MODULE}, {"src/a.py": MODULE[:cut], "src/b.py": MODULE[cut:]}
+        )
+        self.assertEqual(result, {"src/a.py": set(), "src/b.py": set(range(1, 25))})
+
+    def test_split_that_git_pairs_with_the_larger_part_selects_both_files_whole(self):
+        cut = len(MODULE) * 3 // 5
+        self.assertEqual(
+            scope_between(
+                {"src/a.py": MODULE}, {"src/b.py": MODULE[:cut], "src/c.py": MODULE[cut:]}
+            ),
+            {"src/b.py": None, "src/c.py": set(range(1, len(MODULE[cut:].splitlines()) + 1))},
+        )
+
+    def test_table_rename_with_only_table_edits_is_not_selected(self):
+        head = MODULE.replace("f0", "nci_sip_mcp_f0")
+        base = MODULE.replace("f0", "nci_si_mcp_f0")
+        self.assertEqual(scope_between({OLD_TABLE_PATH: base}, {NEW_TABLE_PATH: head}), {})
+
+    def test_table_rename_with_a_logic_edit_is_selected_by_hunk(self):
+        head = MODULE.replace("return 3", "return 4")
+        self.assertEqual(
+            scope_between({OLD_TABLE_PATH: MODULE}, {NEW_TABLE_PATH: head}),
+            {NEW_TABLE_PATH: {14}},
+        )
+
+
+EXPECTED_PAIRS = (
+    ("nci_si_mcp", "nci_sip_mcp"),
+    ("nci_si_acceptance", "nci_sip_acceptance"),
+    ("nci-si-mcp", "nci-sip-mcp"),
+    ("nci-si-install", "nci-sip-install"),
+    ("nci-si-acceptance", "nci-sip-acceptance"),
+    ("NCI_SI_", "NCI_SIP_"),
+    ("without_nci_si_settings", "without_nci_sip_settings"),
+)
+PAIR_FILES = {
+    "nci_si_mcp": ("src/nci_si_mcp/x.py", "src/nci_sip_mcp/x.py"),
+    "nci_si_acceptance": (
+        "acceptance/src/nci_si_acceptance/x.py",
+        "acceptance/src/nci_sip_acceptance/x.py",
+    ),
+}
+LONG_BODY = "".join(f"V{n} = {n}\n" for n in range(1, 21))
+
+
+class EveryRenamePairScopeTest(unittest.TestCase):
+    def test_each_table_pair_alone_is_not_selected(self):
+        for before, after in EXPECTED_PAIRS:
+            with self.subTest(pair=before):
+                old_path, new_path = PAIR_FILES.get(before, ("src/x.py", "src/x.py"))
+                base = LONG_BODY + f'NAME = "{before}"\n'
+                head = LONG_BODY + f'NAME = "{after}"\n'
+                self.assertEqual(scope_between({old_path: base}, {new_path: head}), {})
+
+
+class MultiLineHunkScopeTest(unittest.TestCase):
+    def test_three_consecutive_table_substitutions_are_not_selected(self):
+        base = LONG_BODY + "".join(f"import nci_si_mcp_{n}\n" for n in range(3)) + "END = 1\n"
+        head = base.replace("nci_si_mcp", "nci_sip_mcp")
+        self.assertEqual(scope_after_git_rename(head, base), {})
+
+    def test_three_removed_lines_with_one_non_table_change_select_the_new_lines(self):
+        base = LONG_BODY + "A = nci_si_mcp\nB = 1\nC = nci_si_mcp\nEND = 1\n"
+        head = LONG_BODY + "A = nci_sip_mcp\nB = 2\nC = nci_sip_mcp\nEND = 1\n"
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {21, 22, 23}})
+
+
+class KeptPathScopeTest(unittest.TestCase):
+    def test_table_substitution_in_a_file_that_keeps_a_path_with_an_old_name_is_exempt(self):
+        path = "src/legacy_nci_si_mcp_shim.py"
+        base = LONG_BODY + "NAME = nci_si_mcp\n"
+        head = LONG_BODY + "NAME = nci_sip_mcp\n"
+        self.assertEqual(scope_between({path: base}, {path: head}), {})
+
+    def test_non_table_change_in_that_kept_file_is_still_selected(self):
+        path = "src/legacy_nci_si_mcp_shim.py"
+        base = LONG_BODY + "NAME = nci_si_mcp\n"
+        self.assertEqual(
+            scope_between({path: base}, {path: LONG_BODY + "NAME = other\n"}), {path: {21}}
+        )
+
+
+class RenameRobustnessScopeTest(unittest.TestCase):
+    def test_move_from_an_eligible_to_an_ineligible_path_is_not_selected(self):
+        self.assertEqual(
+            scope_between({"src/a.py": MODULE}, {"src/tests/a.py": MODULE}),
+            {},
+        )
+
+    def test_table_rename_around_a_no_newline_marker_is_not_selected(self):
+        base = LONG_BODY + "import nci_si_mcp"
+        head = LONG_BODY + "import nci_sip_mcp"
+        self.assertEqual(scope_after_git_rename(head, base), {})
+
+    def test_pure_rename_is_found_even_when_git_config_disables_renames(self):
+        head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp")
+        env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "diff.renames",
+            "GIT_CONFIG_VALUE_0": "false",
+        }
+        with patch.dict(os.environ, env):
+            self.assertEqual(scope_after_git_rename(head), {})
+
+
+class HunkParsingTest(unittest.TestCase):
+    def test_hunk_that_is_equal_before_and_after_is_selected(self):
+        diff = "+++ b/src/example.py\n@@ -2 +2 @@\n-same\n+same\n"
+        self.assertEqual(diff_lines(diff), {"src/example.py": {2}})
+
+    def test_crlf_to_lf_change_in_an_eligible_module_is_selected(self):
+        self.assertEqual(
+            scope_between({"src/m.py": "a = 1\r\n"}, {"src/m.py": "a = 1\n"}),
+            {"src/m.py": {1}},
+        )
+
+    def test_form_feed_in_a_renamed_line_keeps_the_hunk_counts_and_the_next_hunk(self):
+        diff = (
+            "+++ b/src/example.py\n@@ -1 +1 @@\n-import nci_si_mcp\x0cx\n+import nci_sip_mcp\x0cx\n"
+            "@@ -5 +5 @@\n-x\n+y\n"
+        )
+        self.assertEqual(diff_lines(diff), {"src/example.py": {5}})
+
+    def test_non_ascii_path_is_selected(self):
+        self.assertEqual(
+            scope_between({"src/café.py": "a = 1\n"}, {"src/café.py": "a = 2\n"}),
+            {"src/café.py": {1}},
+        )
+
+    def test_hunk_without_a_file_name_raises(self):
+        with self.assertRaisesRegex(ValueError, r"@@ -1 \+1 @@"):
+            diff_lines("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n")
+
+    def test_malformed_hunk_header_raises(self):
+        with self.assertRaisesRegex(ValueError, "@@ -x @@"):
+            diff_lines("+++ b/src/example.py\n@@ -x @@\n")

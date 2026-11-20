@@ -7,7 +7,7 @@ from unittest.mock import patch
 from urllib.parse import urlsplit
 
 from fakes import cde_response, cde_row, data_element, form, vm_response, vm_row
-from nci_si_mcp.cadsr import CDE_MATCH, CaDSRClient
+from nci_sip_mcp.cadsr import CDE_MATCH, CaDSRClient
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
 
@@ -35,7 +35,7 @@ class MetadataFixture(ServerFixture):
 
     def answer(self, body, tool="get_data_element", **arguments):
         with patch(
-            "nci_si_mcp.http_client._open",
+            "nci_sip_mcp.http_client._open",
             side_effect=[FakeResponse(json.dumps(body).encode())],
         ) as opened:
             result = self.session(lambda client: client.call_tool(tool, arguments))

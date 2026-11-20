@@ -9,14 +9,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nci_si_acceptance.expected import (
+from nci_sip_acceptance.expected import (
     ABSENT_FROM_EXPECTED,
     ABSENT_FROM_REPORT,
     EXPECTED,
     differences,
     main,
 )
-from nci_si_acceptance.report import RANK
+from nci_sip_acceptance.report import RANK
 
 BASE_SHA = "a" * 40
 OLD_SHA = "b" * 40

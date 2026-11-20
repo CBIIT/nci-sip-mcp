@@ -4,14 +4,14 @@ This is portable integration support with fixture evidence. Production identity 
 deployment remain **disabled and unvalidated** until the security/hosting owners approve them.
 
 The stock entry point uses one `/mcp` endpoint. Local development defaults to `trusted-local`.
-For a governed deployment set `NCI_SI_HTTP_AUTH_MODE=required` and
-`NCI_SI_HTTP_AUTH_FACTORY=approved_package:integration`, then run
-`nci-si-mcp serve --transport streamable-http`. The factory is trusted, installed Python code:
+For a governed deployment set `NCI_SIP_HTTP_AUTH_MODE=required` and
+`NCI_SIP_HTTP_AUTH_FACTORY=approved_package:integration`, then run
+`nci-sip-mcp serve --transport streamable-http`. The factory is trusted, installed Python code:
 only the operator may configure it. An absent or incomplete integration fails before listening.
 Required HTTP configuration cannot silently launch unrestricted stdio.
 
 The factory receives `Settings` and returns `HTTPAuthIntegration(auth, token_verifier,
-authority_resolver)` from `nci_si_mcp.http_auth`. It supplies:
+authority_resolver)` from `nci_sip_mcp.http_auth`. It supplies:
 
 - SDK `AuthSettings` with the approved issuer, resource-server audience, required transport
   scopes, and `validate_token_resource=True`.

@@ -97,18 +97,18 @@ def normalize_embedding_settings(provider: str, model: str) -> tuple[str, str]:
     if normalized_provider == "hashing":
         if normalized_model not in {"hashing", "hashing-128"}:
             raise ValueError(
-                "NCI_SI_EMBEDDING_MODEL must be 'hashing' when "
-                "NCI_SI_EMBEDDING_PROVIDER is 'hashing'"
+                "NCI_SIP_EMBEDDING_MODEL must be 'hashing' when "
+                "NCI_SIP_EMBEDDING_PROVIDER is 'hashing'"
             )
     elif normalized_provider == "sentence-transformers":
         if not normalized_model or normalized_model == "hashing":
             raise ValueError(
-                "NCI_SI_EMBEDDING_MODEL must name a model when NCI_SI_EMBEDDING_PROVIDER "
+                "NCI_SIP_EMBEDDING_MODEL must name a model when NCI_SIP_EMBEDDING_PROVIDER "
                 "is 'sentence-transformers'"
             )
     else:
         raise ValueError(
-            "NCI_SI_EMBEDDING_PROVIDER must be 'hashing' or 'sentence-transformers', "
+            "NCI_SIP_EMBEDDING_PROVIDER must be 'hashing' or 'sentence-transformers', "
             f"not {provider!r}"
         )
     return normalized_provider, normalized_model

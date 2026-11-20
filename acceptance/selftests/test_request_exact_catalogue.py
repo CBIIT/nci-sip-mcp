@@ -5,14 +5,14 @@ from http_receiver import WireReceiver
 from test_request_release_boundaries import ROW
 from test_request_release_selection import response
 
-from nci_si_acceptance.environments import SURFACES, Environment
-from nci_si_acceptance.request_catalogue import compile_policy
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.evs import LICENSE_KEY_HEADER
-from nci_si_mcp.http_client import HttpClient
-from nci_si_mcp.invocation import call
+from nci_sip_acceptance.environments import SURFACES, Environment
+from nci_sip_acceptance.request_catalogue import compile_policy
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.request_transport import ControlledHttpPolicy
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import LICENSE_KEY_HEADER
+from nci_sip_mcp.http_client import HttpClient
+from nci_sip_mcp.invocation import call
 
 EXPECTED_CONTACTS = 2
 
@@ -53,7 +53,7 @@ def test_exact_catalogue_uses_selected_origin_and_bound_release(
         origins.update({"evs": evs.origin, "evs-fhir": fhir.origin + "/fhir/r4"})
         policy = compile_policy(
             Environment(
-                "evs-only", origins, {"NCI_SI_EVS_LICENSE_KEY": "synthetic-owned-key"}, "e" * 64
+                "evs-only", origins, {"NCI_SIP_EVS_LICENSE_KEY": "synthetic-owned-key"}, "e" * 64
             )
         )
         owner = SupervisedRun.create(policy.authorization, tmp_path)

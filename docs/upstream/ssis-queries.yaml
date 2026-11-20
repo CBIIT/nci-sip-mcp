@@ -4,7 +4,7 @@ transport:
   path: /sparql
   accept: application/sparql-results+json
   form: query
-owner: NCI SI MCP project coordinator
+owner: NCI SIP MCP project coordinator
 fallback: upstream_unavailable, timeout or bound_exceeded; graph comparison may return release_not_available or release_mismatch
 weekly: Acceptance (live), anonymous structural check for every family
 queries:

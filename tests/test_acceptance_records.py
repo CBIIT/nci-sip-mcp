@@ -10,7 +10,7 @@ from pathlib import Path
 from scripts.evidence_acceptance import project_acceptance
 from scripts.evidence_envelope import EvidenceError
 
-from nci_si_acceptance import report as report_module
+from nci_sip_acceptance import report as report_module
 from test_evidence_acceptance import bundle, encoded, project, report
 from test_evidence_envelope import envelope
 
@@ -189,7 +189,7 @@ class BlockScripts(importlib.abc.MetaPathFinder):
         if fullname == 'scripts' or fullname.startswith('scripts.'):
             raise ImportError('acceptance must run independently of scripts')
 sys.meta_path.insert(0, BlockScripts())
-from nci_si_acceptance.report import Collector
+from nci_sip_acceptance.report import Collector
 assert Collector().report('fixture')['tests'] == {}
 """
         result = subprocess.run(  # noqa: S603 -- fixed interpreter and inline independence check

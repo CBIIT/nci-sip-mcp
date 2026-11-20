@@ -1,4 +1,4 @@
-# Implementation history: the shared NCI Semantic Infrastructure MCP platform
+# Implementation history: the shared NCI Semantic Infrastructure Program MCP platform
 
 **Status:** record of delivered work (Phases 0 to 6 are merged; Phase 7 is recorded in [portal-plan.md](portal-plan.md); open work is on the GitHub milestones) · **Written:** 1 October 2026 · **Last updated to the code:** 2 October 2026, `main` after `v0.2.0`; later sections carry their own dates · **Furnished commit:** tagged when the owner cuts it (§1.2, §11)
 

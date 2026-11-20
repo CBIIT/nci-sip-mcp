@@ -9,23 +9,23 @@ from pathlib import Path
 import pytest
 from test_request_release_boundaries import ROOT, ROW, scenario
 
-import nci_si_acceptance
-import nci_si_mcp
-from nci_si_acceptance.owned_process import stop_child
-from nci_si_acceptance.request_budget import ControlledRun
-from nci_si_mcp.http_client import RequestPolicyError
+import nci_sip_acceptance
+import nci_sip_mcp
+from nci_sip_acceptance.owned_process import stop_child
+from nci_sip_acceptance.request_budget import ControlledRun
+from nci_sip_mcp.http_client import RequestPolicyError
 
 CHILD = """
 import sys,json
 from pathlib import Path
 sys.path[:0]=sys.argv[1:3]
-import nci_si_acceptance,nci_si_mcp
-from nci_si_acceptance.environments import Environment,SURFACES
-from nci_si_acceptance.request_catalogue import compile_policy
-from nci_si_acceptance.request_authorization import RunDescriptor
-from nci_si_acceptance.request_budget import ControlledRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.http_client import HttpClient,RequestPolicyError
+import nci_sip_acceptance,nci_sip_mcp
+from nci_sip_acceptance.environments import Environment,SURFACES
+from nci_sip_acceptance.request_catalogue import compile_policy
+from nci_sip_acceptance.request_authorization import RunDescriptor
+from nci_sip_acceptance.request_budget import ControlledRun
+from nci_sip_acceptance.request_transport import ControlledHttpPolicy
+from nci_sip_mcp.http_client import HttpClient,RequestPolicyError
 if sys.stdin.buffer.read(1)!=b'x': sys.exit(2)
 descriptor,origin,mode=sys.argv[3:]
 environment=Environment('evs-only',{s:origin if s=='evs' else None for s in SURFACES},{},'e'*64)
@@ -40,7 +40,7 @@ try:
             request_policy=ControlledHttpPolicy(run))
         result=client.get_json('/api/v1/concept/ncit_26.09e',{'list':'C4817','include':'summary'})
 except RequestPolicyError as error: result={'reason':error.reason}
-print(json.dumps(dict(result=result,imports=[nci_si_acceptance.__file__,nci_si_mcp.__file__,
+print(json.dumps(dict(result=result,imports=[nci_sip_acceptance.__file__,nci_sip_mcp.__file__,
     ControlledRun.logical.__wrapped__.__code__.co_filename])))
 """
 
@@ -52,7 +52,7 @@ def test_attached_child_cannot_select_but_can_read_committed_release(tmp_path, m
         descriptor = tmp_path / "descriptor.json"
         descriptor.write_text(json.dumps(owner.run.descriptor.to_record()))
         roots = [
-            str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)
+            str(Path(package.__file__).parents[1]) for package in (nci_sip_acceptance, nci_sip_mcp)
         ]
         expected = pytest.raises(RequestPolicyError) if mode == "select" else nullcontext()
         with expected, owner:
@@ -84,8 +84,8 @@ def test_attached_child_cannot_select_but_can_read_committed_release(tmp_path, m
             report = json.loads(output)
             assert child.returncode == 0 and errors == b""
             assert report["imports"] == [
-                nci_si_acceptance.__file__,
-                nci_si_mcp.__file__,
+                nci_sip_acceptance.__file__,
+                nci_sip_mcp.__file__,
                 ControlledRun.logical.__wrapped__.__code__.co_filename,
             ]
             assert report["result"] == (

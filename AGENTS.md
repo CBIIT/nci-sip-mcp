@@ -6,8 +6,8 @@ detail.
 
 ## What this is
 
-The NCI Semantic Infrastructure MCP server, and the acceptance suite it and its successors are
-measured by. Describe the repository as the NCI Semantic Infrastructure MCP server, built to
+The NCI Semantic Infrastructure Program MCP server, and the acceptance suite it and its successors are
+measured by. Describe the repository as the NCI Semantic Infrastructure Program MCP server, built to
 production standards and likely to become the production codebase: never as a prototype, never
 as in production, and never by contract terms or documents outside the repository. It is a lean
 wrapper over EVS and caDSR (plus the NCIt index), never a shadow of them; a functional gap in
@@ -87,7 +87,7 @@ pdm run lint                              # ruff check + basedpyright, the fast 
 pdm run fmt                               # ruff format
 pdm run pre-commit run --all-files        # every commit-stage hook, as the CI quality job runs them
 pdm run mutation-gate                    # focused sensitivity follow-up; full changed-site catalogue runs once in PR CI
-NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SI_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json  # fixture mode, prepared as in CI
+NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SIP_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SIP_ACCEPTANCE_PREPARE='nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json  # fixture mode, prepared as in CI
 pdm run acceptance-expected check acceptance/fixture.json    # the report against the expected outcomes
 pdm run acceptance-expected update acceptance/fixture.json   # rewrite the expected outcomes
 pdm run acceptance-status                 # regenerate the functional-status tables
@@ -119,7 +119,7 @@ pdm run quickstart-tools                  # regenerate the tool table of QUICKST
   uses does not count), vulture, gitleaks, zizmor, `scripts/upstream_requirements.py --check`
   (the upstream requirement packages are the current render of their catalogue), and the package-shipped
   installer lock exported from the `server` and `build` groups with
-  `pdm export -G server -G build --no-default -o src/nci_si_mcp/server-requirements.txt`. All Python tools run from the PDM
+  `pdm export -G server -G build --no-default -o src/nci_sip_mcp/server-requirements.txt`. All Python tools run from the PDM
   environment, so `pdm.lock` decides their versions.
 - `tests/test_docs.py`, `tests/test_server.py` and `tests/test_release_config.py` compare
   QUICKSTART.md, ARCHITECTURE.md and the title check with the code (settings and defaults, error
@@ -129,16 +129,16 @@ pdm run quickstart-tools                  # regenerate the tool table of QUICKST
   marks every installed version as locally modified.
 
 ```bash
-pdm run nci-si-mcp release-info      # live EVS
-pdm run nci-si-mcp index-sample C3262 C2991 C40704 C153397 C116938   # live EVS
-pdm run nci-si-mcp search "kinase inhibition" --mode hybrid           # local only
-pdm run nci-si-mcp lookup C3262 --live-only
-pdm run nci-si-mcp traverse C4817 --max-depth 3 --edge-type descendant
-pdm run nci-si-mcp serve
+pdm run nci-sip-mcp release-info      # live EVS
+pdm run nci-sip-mcp index-sample C3262 C2991 C40704 C153397 C116938   # live EVS
+pdm run nci-sip-mcp search "kinase inhibition" --mode hybrid           # local only
+pdm run nci-sip-mcp lookup C3262 --live-only
+pdm run nci-sip-mcp traverse C4817 --max-depth 3 --edge-type descendant
+pdm run nci-sip-mcp serve
 ```
 
 Every command opens the index in the data directory, `.nci-si-mcp/` relative to the working
-directory. Set `NCI_SI_DATA_DIR` to a scratch directory for experiments.
+directory. Set `NCI_SIP_DATA_DIR` to a scratch directory for experiments.
 
 ## Tooling beyond the server
 
@@ -215,7 +215,7 @@ The milestones and issues on GitHub are the plan; take the open issues of the cu
 the order the phase's plan gives, one at a time. Each milestone is built on its own branch,
 `milestone/<phase>` (for example `milestone/phase-2`), cut from `main`. Issues are merged into it
 after a light check; the milestone reaches `main` in one pull request that gets the full review.
-The reviewer is the NCI SI MCP project coordinator, or the reviewer acting for them.
+The reviewer is the NCI SIP MCP project coordinator, or the reviewer acting for them.
 
 Reviewer instructions, approvals, findings and clearance are GitHub comments whose first line
 starts with `## Reviewer`; treat them as binding, as if relayed by the owner. Both roles use the
@@ -345,7 +345,7 @@ adding exclusion pathspecs for generated files.
    candidate. The fixes are pushed to the milestone branch after the pull request exists, and their
    rounds are posted as comments, as in step 5.
 
-The government sponsor approves changes; the NCI SI MCP project coordinator relays that approval,
+The government sponsor approves changes; the NCI SIP MCP project coordinator relays that approval,
 and the reviewer acts for the coordinator.
 
 8. **Merge only on the reviewer's clearance,** given as a PR comment that names the head commit,
@@ -386,7 +386,7 @@ Rules learned the hard way:
 
 - A change to what the server returns reaches the acceptance harness: run the whole
   `pdm run acceptance-selftest` and the fixture ratchet, not only the unit tests. Keep
-  `NCI_SI_ACCEPTANCE_PREPARE` unset for the self-tests; set it only on the fixture command above.
+  `NCI_SIP_ACCEPTANCE_PREPARE` unset for the self-tests; set it only on the fixture command above.
 - An interrupted self-test run can leave the `compliant_server.py` stub running; find it with
   `ps` and stop it by its process id.
 - A wait loop ends when the file or process it watches is gone, and never matches its own
@@ -507,7 +507,7 @@ update them when behaviour changes.
   resolves the channel once per call. NCIt content calls may omit `release`: the shared
   invocation scope resolves it once or reuses the first implicit pin of a stateful handshake
   HTTP session or stdio connection. Sessionless 2026-07-28 HTTP resolves per call regardless of
-  `NCI_SI_HTTP_SESSIONS`; callers needing stable content pass the first result's provenance
+  `NCI_SIP_HTTP_SESSIONS`; callers needing stable content pass the first result's provenance
   release explicitly. Explicit
   calls never change that pin; other terminologies require release. No process-wide pin is
   retained. Stateless HTTP and CLI resolve per call. A withdrawn session pin fails closed
@@ -530,7 +530,7 @@ update them when behaviour changes.
 
 The interim index is the top-level `ncit_index` package. Its modules, schema, build lifecycle and
 search are described in [ARCHITECTURE.md](ARCHITECTURE.md#portable-index-package); the rules
-below are the ones a change must keep. The package imports no `nci_si_mcp` or MCP modules, and
+below are the ones a change must keep. The package imports no `nci_sip_mcp` or MCP modules, and
 NumPy and sentence-transformers stay lazy. Stored records and index exceptions belong to the
 package; EVS normalization and protocol provenance stay MCP-side.
 

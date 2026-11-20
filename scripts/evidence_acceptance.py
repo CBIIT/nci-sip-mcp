@@ -9,7 +9,7 @@ from typing import Any
 from scripts.evidence_envelope import EvidenceError, decode_json, validate_envelope
 from scripts.inventory_records import digest, read_snapshots
 
-from nci_si_acceptance.report import (
+from nci_sip_acceptance.report import (
     CANNOT_RUN,
     FAILED,
     UNRUN,

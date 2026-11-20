@@ -12,10 +12,10 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator
 
-from nci_si_acceptance.client import CREDENTIAL_VARIABLES
-from nci_si_acceptance.craft import LICENCE_FIELD
-from nci_si_acceptance.fixture_server import FORM_TYPE
-from nci_si_acceptance.results import (
+from nci_sip_acceptance.client import CREDENTIAL_VARIABLES
+from nci_sip_acceptance.craft import LICENCE_FIELD
+from nci_sip_acceptance.fixture_server import FORM_TYPE
+from nci_sip_acceptance.results import (
     CARRIED,
     UNPINNED_REGISTRY,
     error_code,
@@ -28,7 +28,7 @@ from nci_si_acceptance.results import (
     wrong_fields,
     wrong_origin,
 )
-from nci_si_acceptance.spec import (
+from nci_sip_acceptance.spec import (
     TOOLS,
     alternatives,
     defaults,
@@ -393,7 +393,7 @@ def test_the_cadsr_credential_reaches_the_platform_and_nothing_the_server_return
     tools, upstream, pinned, name
 ):
     settings = upstream.fixtures.settings_of(("cadsr/credentialed",))
-    credential = settings["NCI_SI_CADSR_CREDENTIAL"]
+    credential = settings["NCI_SIP_CADSR_CREDENTIAL"]
 
     granted = _call(tools, pinned, name)
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from nci_si_mcp import validation
+from nci_sip_mcp import validation
 
 ROOT = Path(__file__).resolve().parents[1]
 FORMS = {

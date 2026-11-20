@@ -60,7 +60,7 @@ class HTTPBenchmarkCommandTest(unittest.TestCase):
                     "unused.json",
                 ],
             ),
-            patch.dict("os.environ", {"NCI_SI_BENCHMARK_AUTHORIZATION": "Bearer private"}),
+            patch.dict("os.environ", {"NCI_SIP_BENCHMARK_AUTHORIZATION": "Bearer private"}),
             patch.object(benchmark_http_cli, "run_http", side_effect=measured),
         ):
             self.assertEqual(benchmark_http_cli.main(), 1)
@@ -116,7 +116,7 @@ class HTTPBenchmarkCommandTest(unittest.TestCase):
             text=True,
             check=False,
             timeout=60,
-            env={**os.environ, "NCI_SI_BENCHMARK_AUTHORIZATION": "Bearer PRIVATE-CANARY"},
+            env={**os.environ, "NCI_SIP_BENCHMARK_AUTHORIZATION": "Bearer PRIVATE-CANARY"},
         )
         written = output.read_text() if output.exists() else ""
         return result, "PRIVATE-CANARY" in result.stdout + result.stderr + written
@@ -134,7 +134,7 @@ class HTTPBenchmarkCommandTest(unittest.TestCase):
 
     def test_the_leak_check_sees_a_stand_in_worker_that_writes_the_header(self):
         # Negative control: the same harness must notice a worker that leaks the header.
-        stand_in = "import os, sys; sys.stderr.write(os.environ['NCI_SI_BENCHMARK_AUTHORIZATION'])"
+        stand_in = "import os, sys; sys.stderr.write(os.environ['NCI_SIP_BENCHMARK_AUTHORIZATION'])"
         with TemporaryDirectory() as directory:
             _, leaked = self.remote_run([sys.executable, "-c", stand_in], directory)
             self.assertTrue(leaked)

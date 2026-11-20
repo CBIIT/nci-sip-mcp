@@ -17,11 +17,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import nci_si_acceptance
-import nci_si_acceptance.request_budget as request_budget_module
-import nci_si_mcp
+import nci_sip_acceptance
+import nci_sip_acceptance.request_budget as request_budget_module
+import nci_sip_mcp
 from conftest import FIXTURES
-from nci_si_acceptance.fixture_server import (
+from nci_sip_acceptance.fixture_server import (
     Fixture,
     FixtureServer,
     FixtureSet,
@@ -29,7 +29,7 @@ from nci_si_acceptance.fixture_server import (
     load_fixtures,
     request_key,
 )
-from nci_si_acceptance.request_authorization import (
+from nci_sip_acceptance.request_authorization import (
     DEFAULT_SECONDS,
     MAX_COUNTER,
     Authorization,
@@ -37,27 +37,27 @@ from nci_si_acceptance.request_authorization import (
     RequestGrant,
     RunDescriptor,
 )
-from nci_si_acceptance.request_budget import AttemptLease, ControlledRun, LedgerSnapshot
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_sip_acceptance.request_budget import AttemptLease, ControlledRun, LedgerSnapshot
+from nci_sip_mcp.http_client import RequestPolicyError
 
 # This explicit local consumer exercises shared accounting through the real HttpClient.
 ACTOR = """import json, sys, tempfile
-import nci_si_acceptance
-import nci_si_mcp
-from nci_si_mcp import http_client
+import nci_sip_acceptance
+import nci_sip_mcp
+from nci_sip_mcp import http_client
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, build_opener
-from nci_si_mcp.http_client import HttpClient, RequestPolicyError
-from nci_si_mcp.bounds import CallDeadlineError, deadline_scope
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.request_policy import Exchange
+from nci_sip_mcp.http_client import HttpClient, RequestPolicyError
+from nci_sip_mcp.bounds import CallDeadlineError, deadline_scope
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.request_policy import Exchange
 
 http_client._OPENER = build_opener(ProxyHandler({}), http_client._SameOriginRedirects())
 settings = json.loads(Path(sys.argv[1]).read_text())
 sys.stdin.readline()  # The parent authorizes the participant before releasing its child.
-import nci_si_acceptance.request_budget as module
+import nci_sip_acceptance.request_budget as module
 
 class ActorPolicy:
     def __init__(self, run, grant):
@@ -130,7 +130,7 @@ for round_number in range(settings.get("rounds", 2)):
         sys.stdin.readline()
 print(json.dumps({
     "accepted": accepted, "refused": refused, "interpreter": sys.executable,
-    "package": nci_si_acceptance.__file__, "core": nci_si_mcp.__file__,
+    "package": nci_sip_acceptance.__file__, "core": nci_sip_mcp.__file__,
     "tempdir": tempfile.gettempdir(),
 }))
 """
@@ -176,7 +176,9 @@ def launch_actor(actor, directory, number, settings, run):
         "import runpy, sys; sys.path[:0] = sys.argv[1:3]; "
         "sys.argv = sys.argv[3:]; runpy.run_path(sys.argv[0], run_name='__main__')"
     )
-    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
+    roots = [
+        str(Path(package.__file__).parents[1]) for package in (nci_sip_acceptance, nci_sip_mcp)
+    ]
     child = subprocess.Popen(  # noqa: S603 - this test wrote the actor and uses its own interpreter.
         [sys.executable, "-I", "-c", bootstrap, *roots, str(actor), str(config)],
         stdin=subprocess.PIPE,
@@ -257,9 +259,11 @@ def test_real_children_share_the_logical_request_ceiling(tmp_path):
         Path(sys.executable).resolve()
     }
     assert {Path(row["package"]).resolve() for row in results} == {
-        Path(nci_si_acceptance.__file__).resolve()
+        Path(nci_sip_acceptance.__file__).resolve()
     }
-    assert {Path(row["core"]).resolve() for row in results} == {Path(nci_si_mcp.__file__).resolve()}
+    assert {Path(row["core"]).resolve() for row in results} == {
+        Path(nci_sip_mcp.__file__).resolve()
+    }
     assert {Path(row["tempdir"]).resolve() for row in results} == {
         Path(tempfile.gettempdir()).resolve()
     }
@@ -311,10 +315,10 @@ CONTENTION_RESPONSE_SECONDS = 2
 HELD_ACTOR = """import json, sys
 from pathlib import Path
 from urllib.request import ProxyHandler, build_opener
-from nci_si_acceptance.request_budget import (
+from nci_sip_acceptance.request_budget import (
     Authorization, ControlledRun, Limits, RequestGrant, RunDescriptor,
 )
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_sip_mcp.http_client import RequestPolicyError
 
 settings = json.loads(Path(sys.argv[1]).read_text())
 sys.stdin.readline()
@@ -782,7 +786,7 @@ def test_invalid_monotonic_clock_is_terminal(tmp_path, monkeypatch, operation, c
 
         with monkeypatch.context() as patch:
             patch.setattr(
-                "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: clock)
+                "nci_sip_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: clock)
             )
             observed = refusal(invoke)
         assert observed == (RequestPolicyError, "Controlled upstream request refused.", None)
@@ -795,7 +799,7 @@ def test_unrepresentable_run_deadline_is_terminal(tmp_path, monkeypatch):
         )
         with monkeypatch.context() as patch:
             patch.setattr(
-                "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: 1e308)
+                "nci_sip_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: 1e308)
             )
             observed = refusal(lambda: ControlledRun.create(authority, tmp_path / "overflow-clock"))
         assert observed == (RequestPolicyError, "Controlled upstream request refused.", None)
@@ -805,7 +809,7 @@ def test_unrepresentable_run_deadline_is_terminal(tmp_path, monkeypatch):
 def test_finite_monotonic_origins_are_supported(tmp_path, monkeypatch, clock):
     with retirement_run(tmp_path) as (parent, _), monkeypatch.context() as patch:
         patch.setattr(
-            "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: clock)
+            "nci_sip_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: clock)
         )
         run = ControlledRun.create(parent.authorization, tmp_path / "finite-clock")
         try:
@@ -881,7 +885,7 @@ def test_known_read_survives_later_refusal(tmp_path, monkeypatch, clock, failure
                         run.close()
                     else:
                         patch.setattr(
-                            "nci_si_acceptance.request_budget.time",
+                            "nci_sip_acceptance.request_budget.time",
                             SimpleNamespace(monotonic=monotonic),
                         )
                     return b"known"[:maximum]
@@ -1450,7 +1454,7 @@ def test_reaped_child_does_not_reclaim_unknown_progress(tmp_path):
 def test_wait_boundary(tmp_path, monkeypatch, delay, reason):
     with retirement_run(tmp_path) as (run, _), monkeypatch.context() as patch:
         patch.setattr(
-            "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: run.started)
+            "nci_sip_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: run.started)
         )
         if delay == "deadline":
             delay = run.authorization.limits.seconds
@@ -1585,7 +1589,7 @@ def test_storage_boundaries_close_real_connections(
 
     try:
         with monkeypatch.context() as patch:
-            patch.setattr("nci_si_acceptance.request_budget.sqlite3.connect", connect)
+            patch.setattr("nci_sip_acceptance.request_budget.sqlite3.connect", connect)
             if read_only:
                 assert refusal(invoke_boundary) == (
                     RequestPolicyError,
@@ -1813,7 +1817,7 @@ def test_terminal_admission_refuses_new_work(tmp_path, monkeypatch, operation, b
                 assert initial.value.reason == "authorization"
             else:
                 monkeypatch.setattr(
-                    "nci_si_acceptance.request_budget.time",
+                    "nci_sip_acceptance.request_budget.time",
                     SimpleNamespace(
                         monotonic=lambda: run.started + run.authorization.limits.seconds
                     ),
@@ -1855,7 +1859,7 @@ def test_terminal_admission_refuses_new_work(tmp_path, monkeypatch, operation, b
 def test_expired_created_run_refuses_open(tmp_path, monkeypatch):
     with retirement_run(tmp_path, opened=False) as (run, _):
         monkeypatch.setattr(
-            "nci_si_acceptance.request_budget.time",
+            "nci_sip_acceptance.request_budget.time",
             SimpleNamespace(monotonic=lambda: run.started + run.authorization.limits.seconds),
         )
         with pytest.raises(RequestPolicyError) as refused:
@@ -1994,7 +1998,7 @@ def test_failed_creator_cannot_reopen_when_the_clock_also_fails(tmp_path, monkey
         assert initial.value.reason == "authorization"
         with monkeypatch.context() as patch:
             patch.setattr(
-                "nci_si_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: None)
+                "nci_sip_acceptance.request_budget.time", SimpleNamespace(monotonic=lambda: None)
             )
             with pytest.raises(RequestPolicyError) as rejected:
                 run.open()

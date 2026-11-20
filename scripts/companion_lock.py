@@ -28,7 +28,7 @@ ENVIRONMENT = {key: str(value) for key, value in default_environment().items()} 
 
 
 def _selected(row: dict[str, Any]) -> bool:
-    if row["name"] == "nci-si-acceptance" or not GROUPS.intersection(row.get("groups", [])):
+    if row["name"] == "nci-sip-acceptance" or not GROUPS.intersection(row.get("groups", [])):
         return False
     return not row.get("marker") or Marker(row["marker"]).evaluate(ENVIRONMENT)
 

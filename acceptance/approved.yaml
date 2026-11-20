@@ -1,5 +1,5 @@
 # The approved releases of the suite: the only source of the digests that make a report an
-# acceptance report (src/nci_si_acceptance/suite_identity.py). A report whose suite digest is
+# acceptance report (src/nci_sip_acceptance/suite_identity.py). A report whose suite digest is
 # not listed here reads MODIFIED. Empty until the furnished tag, which is the first entry.
 # Each entry:
 #

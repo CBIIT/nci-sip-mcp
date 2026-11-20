@@ -6,7 +6,7 @@ from math import ceil, isfinite
 from statistics import median
 from typing import Any
 
-from nci_si_mcp.registry import SPECS
+from nci_sip_mcp.registry import SPECS
 
 
 def validate_plan(task: dict[str, Any], proposed: Any) -> list[dict[str, Any]]:

@@ -56,7 +56,7 @@ class CompanionContextTest(unittest.TestCase):
                 prepare_context(root, output)
             manifest = json.loads((output / "admin/bundle/operator-source.json").read_text())
             self.assertEqual(manifest["commit"], commit)
-            self.assertTrue((output / "admin/app/src/nci_si_mcp/cli.py").is_file())
+            self.assertTrue((output / "admin/app/src/nci_sip_mcp/cli.py").is_file())
             self.assertFalse((output / "admin/app/.git").exists())
             self.assertFalse((output / "admin/app/tmp").exists())
             self.assertEqual(

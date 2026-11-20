@@ -17,8 +17,8 @@ from scripts.portal import _parser, _remote, main
 from scripts.portal_http import create_server
 from scripts.portal_store import EvidenceStore
 
-from nci_si_mcp.config import Settings
-from nci_si_mcp.config_snapshot import capture
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.config_snapshot import capture
 from test_portal_store import run_bundle
 
 
@@ -39,7 +39,7 @@ class PortalCLITest(unittest.TestCase):
         args = parser.parse_args(
             ["serve", "--allow-remote", "--remote-target", "https://approved.example/mcp"]
         )
-        with patch.dict("os.environ", {"NCI_SI_BENCHMARK_AUTHORIZATION": "Bearer PRIVATE-CANARY"}):
+        with patch.dict("os.environ", {"NCI_SIP_BENCHMARK_AUTHORIZATION": "Bearer PRIVATE-CANARY"}):
             probe = _remote(parser, args)
         self.assertEqual(probe.target, "https://approved.example/mcp")
         self.assertEqual(probe.authorization, "Bearer PRIVATE-CANARY")
@@ -111,7 +111,7 @@ class PortalCLITest(unittest.TestCase):
                     ],
                 ),
                 patch.object(HTTPServer, "serve_forever", inspect),
-                patch.dict("os.environ", {"NCI_SI_TIMEOUT_SECONDS": "91"}),
+                patch.dict("os.environ", {"NCI_SIP_TIMEOUT_SECONDS": "91"}),
                 redirect_stdout(io.StringIO()),
             ):
                 main()

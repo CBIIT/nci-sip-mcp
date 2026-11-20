@@ -23,10 +23,10 @@ from typing import Any
 import yaml
 from scripts.processes import exit_on_sigterm, print_server_log_tail, stop
 
-from nci_si_acceptance.client import OwnedServer, server_environment, without_nci_si_settings
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
-from nci_si_acceptance.report import load_report
-from nci_si_acceptance.suite import index_set, unmatched_requests
+from nci_sip_acceptance.client import OwnedServer, server_environment, without_nci_sip_settings
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_sip_acceptance.report import load_report
+from nci_sip_acceptance.suite import index_set, unmatched_requests
 
 ROOT = Path(__file__).resolve().parents[1]
 ACCEPTANCE = ROOT / "acceptance"
@@ -64,7 +64,7 @@ def state(socket_path: str) -> None:
     settings = {
         name: value
         for name, value in os.environ.items()
-        if name.startswith("NCI_SI_") and not name.startswith("NCI_SI_ACCEPTANCE_")
+        if name.startswith("NCI_SIP_") and not name.startswith("NCI_SIP_ACCEPTANCE_")
     }
     with socket.socket(socket.AF_UNIX) as connection:
         connection.settimeout(30)
@@ -82,11 +82,11 @@ def state(socket_path: str) -> None:
 def prepare(directory: Path, *, environment: dict[str, str] | None = None) -> None:
     manifest = yaml.safe_load((FIXTURES / "manifest.yaml").read_text())
     with FixtureServer(load_fixtures(FIXTURES)) as upstream:
-        command = [sys.executable, "-m", "nci_si_mcp.cli", "index-sample", *index_set(manifest)]
+        command = [sys.executable, "-m", "nci_sip_mcp.cli", "index-sample", *index_set(manifest)]
         settings = server_environment("fixture", directory / "index", upstream.url)
         if environment is not None:
             settings = environment | {
-                key: value for key, value in settings.items() if key.startswith("NCI_SI_")
+                key: value for key, value in settings.items() if key.startswith("NCI_SIP_")
             }
         subprocess.run(  # noqa: S603 - fixture preparation with the project interpreter
             command,
@@ -140,16 +140,16 @@ def run_suite(
     command = shlex.join(
         [sys.executable, "-m", "scripts.acceptance_http", "state", str(socket_path)]
     )
-    base = without_nci_si_settings(os.environ if environment is None else environment)
+    base = without_nci_sip_settings(os.environ if environment is None else environment)
     environment = base | {
-        "NCI_SI_ACCEPTANCE_URL": f"http://127.0.0.1:{port}/mcp",
-        "NCI_SI_ACCEPTANCE_MODE": "fixture",
-        "NCI_SI_ACCEPTANCE_PREPARED": "1",
-        "NCI_SI_ACCEPTANCE_REGISTRY_RELEASE": "required",
-        "NCI_SI_ACCEPTANCE_SECURITY_SERVER": shlex.join(
+        "NCI_SIP_ACCEPTANCE_URL": f"http://127.0.0.1:{port}/mcp",
+        "NCI_SIP_ACCEPTANCE_MODE": "fixture",
+        "NCI_SIP_ACCEPTANCE_PREPARED": "1",
+        "NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE": "required",
+        "NCI_SIP_ACCEPTANCE_SECURITY_SERVER": shlex.join(
             [sys.executable, str(ROOT / "scripts/permissions_fixture.py")]
         ),
-        "NCI_SI_ACCEPTANCE_STATE_HOOK": command,
+        "NCI_SIP_ACCEPTANCE_STATE_HOOK": command,
         # The hook runs `-m scripts.acceptance_http` from the suite's directory.
         "PYTHONPATH": os.pathsep.join(filter(None, [str(ROOT), base.get("PYTHONPATH")])),
     }

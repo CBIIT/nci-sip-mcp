@@ -7,10 +7,10 @@ from contextlib import contextmanager
 
 from test_request_supervision import authorization, failure_leaves
 
-from nci_si_acceptance import request_children, request_supervision
-from nci_si_acceptance.request_stdio import _PortalCall
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_mcp.errors import RequestPolicyError
+from nci_sip_acceptance import request_children, request_supervision
+from nci_sip_acceptance.request_stdio import _PortalCall
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_mcp.errors import RequestPolicyError
 
 
 @contextmanager

@@ -24,7 +24,7 @@ if os.environ.get("GH_FAIL"):
     sys.stderr.write("PRIVATE-CREDENTIAL-CANARY")
     sys.exit(7)
 if args[1] == "list":
-    print(json.dumps([{"name": "NCI_SI_CADSR_CREDENTIAL"}] if args[0] == "secret" else []))
+    print(json.dumps([{"name": "NCI_SIP_CADSR_CREDENTIAL"}] if args[0] == "secret" else []))
 """
 
 
@@ -62,18 +62,18 @@ class GitHubSetupTest(unittest.TestCase):
                 [["secret", "list", "--repo", "CBIIT/nci-sip-mcp", "--json", "name"], ""],
                 [["variable", "list", "--repo", "CBIIT/nci-sip-mcp", "--json", "name"], ""],
                 [
-                    ["secret", "set", "NCI_SI_EVS_LICENSE_KEY", "--repo", "CBIIT/nci-sip-mcp"],
+                    ["secret", "set", "NCI_SIP_EVS_LICENSE_KEY", "--repo", "CBIIT/nci-sip-mcp"],
                     module.PLACEHOLDER,
                 ],
             ],
         )
         self.assertEqual(
             result.stdout,
-            "Existing secret: NCI_SI_CADSR_CREDENTIAL (unchanged; value not inspected)\n"
-            "Created secret: NCI_SI_EVS_LICENSE_KEY (placeholder)\n"
-            "Maintainer: run gh secret set NCI_SI_CADSR_CREDENTIAL --repo CBIIT/nci-sip-mcp "
+            "Existing secret: NCI_SIP_CADSR_CREDENTIAL (unchanged; value not inspected)\n"
+            "Created secret: NCI_SIP_EVS_LICENSE_KEY (placeholder)\n"
+            "Maintainer: run gh secret set NCI_SIP_CADSR_CREDENTIAL --repo CBIIT/nci-sip-mcp "
             "in your own terminal; it prompts for the value.\n"
-            "Maintainer: run gh secret set NCI_SI_EVS_LICENSE_KEY --repo CBIIT/nci-sip-mcp "
+            "Maintainer: run gh secret set NCI_SIP_EVS_LICENSE_KEY --repo CBIIT/nci-sip-mcp "
             "in your own terminal; it prompts for the value.\n",
         )
 

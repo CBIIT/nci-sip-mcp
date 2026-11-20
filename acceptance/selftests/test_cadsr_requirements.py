@@ -19,7 +19,7 @@ def cadsr(compliant, monkeypatch):
     """The compliant server of the unified profile, asking caDSR for a data element, with
     the two recordings that answer that request."""
 
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PROFILE", "unified")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PROFILE", "unified")
     monkeypatch.setenv("COMPLIANT_SERVER_PROFILE", "unified")
     monkeypatch.setenv("COMPLIANT_SERVER_CADSR", "1")
     for suffix in ("", "-html"):

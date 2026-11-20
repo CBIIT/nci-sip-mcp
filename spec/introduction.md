@@ -11,7 +11,7 @@ citing the requirements it enforces by id.
 
 ## What the server must do
 
-The NCI Semantic Infrastructure MCP server gives AI assistants and applications access to NCI
+The NCI Semantic Infrastructure Program MCP server gives AI assistants and applications access to NCI
 terminology and metadata through the Model Context Protocol. The sections below hold the
 requirements; this is what they add up to.
 

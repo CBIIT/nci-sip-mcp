@@ -37,8 +37,8 @@ class DeveloperEnvironmentTest(unittest.TestCase):
         # as a developer's may; the fixture must remove every such variable, not just one
         environment = {
             **os.environ,
-            "NCI_SI_UPSTREAM_MODE": "fixture",
-            "NCI_SI_EVS_LICENSE_KEY": "k",
+            "NCI_SIP_UPSTREAM_MODE": "fixture",
+            "NCI_SIP_EVS_LICENSE_KEY": "k",
         }
         # When one unit test that builds its settings from the environment runs in a child
         run = subprocess.run(  # noqa: S603 - fixed executable and a repository test id

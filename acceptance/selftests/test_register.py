@@ -6,8 +6,8 @@ import shutil
 import pytest
 import yaml
 
-from nci_si_acceptance.record import FIXTURES
-from nci_si_acceptance.register import REGISTER, main, render
+from nci_sip_acceptance.record import FIXTURES
+from nci_sip_acceptance.register import REGISTER, main, render
 
 MANIFEST = yaml.safe_load((FIXTURES / "manifest.yaml").read_text(encoding="utf-8"))
 VIEWS = render()

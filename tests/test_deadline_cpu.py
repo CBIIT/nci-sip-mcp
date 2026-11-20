@@ -5,9 +5,9 @@ import unittest
 from unittest.mock import patch
 
 from fakes import FakeEVS, concept, release
-from nci_si_mcp.bounds import Budget, deadline_scope
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.traversal import _Walk, traverse_ncit
+from nci_sip_mcp.bounds import Budget, deadline_scope
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.traversal import _Walk, traverse_ncit
 from test_deadline_http import Clock
 
 
@@ -75,7 +75,7 @@ class CostlyRelation:
 class DeadlineCpuTest(unittest.TestCase):
     def setUp(self):
         self.clock = Clock()
-        self.enterContext(patch("nci_si_mcp.bounds.monotonic", self.clock.monotonic))
+        self.enterContext(patch("nci_sip_mcp.bounds.monotonic", self.clock.monotonic))
 
     def walk(self, evs, kinds, **limits):
         with correlated(), deadline_scope(50):
@@ -165,7 +165,7 @@ class DeadlineCpuTest(unittest.TestCase):
                 concept("C3"),
             ]
         )
-        with patch("nci_si_mcp.traversal.json.dumps", side_effect=processing.encode_identity):
+        with patch("nci_sip_mcp.traversal.json.dumps", side_effect=processing.encode_identity):
             graph = self.walk(evs, ["role", "association"], depth=2, per_kind=1)
         self.assert_graph(
             graph,

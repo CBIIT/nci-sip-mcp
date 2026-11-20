@@ -1969,4 +1969,4 @@ record:
 # The fixtures craft.py makes are built in memory when the set loads; this is the digest
 # of what it makes now. `pdm run acceptance-craft` writes it, `--out DIR` writes the
 # fixtures to read (fixtures/README.md).
-crafted: sha256:ef9791db993339d7c4a09b4a6a30bcc139f6cef5ac829880caa7ab1b0eed4a61
+crafted: sha256:04b4adac500ef216b49618c9c3d863245279646e2df0040d3285c8839fdcd87c

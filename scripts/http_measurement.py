@@ -9,7 +9,7 @@ from mcp import types
 from scripts.benchmark_records import Sample
 from scripts.vocabulary import HttpStop, RunStop
 
-from nci_si_mcp.errors import ErrorCode
+from nci_sip_mcp.errors import ErrorCode
 
 
 class MeasurementError(ValueError):

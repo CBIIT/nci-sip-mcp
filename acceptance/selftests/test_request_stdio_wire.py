@@ -15,9 +15,9 @@ from test_request_stdio_terminal import (
 )
 from test_request_supervision import authorization
 
-from nci_si_acceptance.client import open_session
-from nci_si_acceptance.request_stdio import StdioOwner
-from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.client import open_session
+from nci_sip_acceptance.request_stdio import StdioOwner
+from nci_sip_acceptance.request_supervision import SupervisedRun
 
 
 def test_actual_pipes_preserve_utf8_framing_and_deliver_parse_error_as_value(tmp_path):

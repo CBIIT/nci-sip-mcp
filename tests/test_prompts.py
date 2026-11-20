@@ -22,7 +22,7 @@ class PromptTest(ServerFixture):
                 self.assertEqual(result.prompts, [])
 
     def test_packaged_templates_equal_the_specification(self):
-        packaged = json.loads(files("nci_si_mcp").joinpath("data/prompts.json").read_text())
+        packaged = json.loads(files("nci_sip_mcp").joinpath("data/prompts.json").read_text())
         self.assertEqual(packaged, PROMPTS)
 
     def test_unified_prompts_preserve_arguments_and_exact_substituted_text(self):

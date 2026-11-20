@@ -336,7 +336,7 @@ def fetch_json(url: str) -> dict[str, Any]:
     if not url.startswith("https://"):
         raise ValueError("Registry metadata URL must use HTTPS")
     request = urllib.request.Request(  # noqa: S310 - HTTPS is required immediately above.
-        url, headers={"User-Agent": "nci-si-mcp-dependency-age"}
+        url, headers={"User-Agent": "nci-sip-mcp-dependency-age"}
     )
     with urllib.request.urlopen(  # noqa: S310 - the Request contains the checked HTTPS URL.
         request, timeout=30

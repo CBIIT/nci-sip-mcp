@@ -32,7 +32,7 @@ from scripts.vocabulary import (
     TerminalJobState,
 )
 
-from nci_si_mcp.audit import emit
+from nci_sip_mcp.audit import emit
 
 Profile = Literal["acceptance-http-fixture", "benchmark-http-fixture", "benchmark-http-remote"]
 PROFILES = get_args(Profile)

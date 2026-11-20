@@ -5,7 +5,7 @@
 groups = ["default", "acceptance", "audit", "build", "docs", "embeddings", "index", "lint", "release", "server", "test"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.1"
-content_hash = "sha256:d627be0d912c18d22650ed182f3b6ec2878c8e2a6cb7c0a6d1be84a1433de09a"
+content_hash = "sha256:65e26d202b841800773f5db167bb294ceb0a335a3668e25125dbb72b2ea1a9e2"
 
 [[metadata.targets]]
 requires_python = ">=3.14"
@@ -1300,12 +1300,12 @@ files = [
 ]
 
 [[package]]
-name = "nci-si-acceptance"
-version = "0.1.0"
-requires_python = ">=3.13"
+name = "nci-sip-acceptance"
+version = "0.39.3.dev1"
+requires_python = ">=3.14"
 editable = true
 path = "./acceptance"
-summary = "Behavioural acceptance suite and upstream fixture server for the NCI SI MCP tools"
+summary = "Behavioural acceptance suite and upstream fixture server for the NCI SIP MCP tools"
 groups = ["acceptance"]
 dependencies = [
     "httpx2>=2.5",

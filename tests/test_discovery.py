@@ -4,10 +4,10 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from fakes import terminology_row
-from nci_si_mcp import cli
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp import cli
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.registry import invoke
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
 
@@ -121,7 +121,7 @@ class DiscoveryTest(ServerFixture):
     def test_empty_authoritative_listing_reports_actual_status_and_retry_count(self):
         self.context.evs = EVSClient("https://example.invalid", retry_backoff_seconds=0)
         responses = [http_error(503), FakeResponse(b"[]")]
-        with patch("nci_si_mcp.http_client._open", side_effect=responses):
+        with patch("nci_sip_mcp.http_client._open", side_effect=responses):
             failed, result = self.call("list_terminologies")
         self.assertTrue(failed)
         self.assertEqual(result["error"]["code"], "upstream_unavailable")

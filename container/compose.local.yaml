@@ -51,7 +51,7 @@ services:
       timeout: 5s
   mcp:
     profiles: [mcp]
-    image: nci-si-mcp:verified
+    image: nci-sip-mcp:verified
     platform: linux/amd64
     ports: ["127.0.0.1:8000:8000"]
     networks: [serving]
@@ -63,17 +63,17 @@ services:
     mem_limit: 8g
     cpus: 4
     environment:
-      NCI_SI_EMBEDDING_MODEL: /model
-      NCI_SI_HTTP_AUTH_MODE: trusted-local
+      NCI_SIP_EMBEDDING_MODEL: /model
+      NCI_SIP_HTTP_AUTH_MODE: trusted-local
     healthcheck:
-      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.getenv('NCI_SI_HTTP_PORT', '8000') + '/ready', timeout=3).close()"]
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.getenv('NCI_SIP_HTTP_PORT', '8000') + '/ready', timeout=3).close()"]
       interval: 30s
       timeout: 5s
       start_period: 180s
       retries: 3
     volumes:
-      - "${NCI_SI_LOCAL_INDEX:-../tmp/serving-index}:/data"
-      - "${NCI_SI_LOCAL_MODEL:-../tmp/serving-model}:/model:ro"
+      - "${NCI_SIP_LOCAL_INDEX:-../tmp/serving-index}:/data"
+      - "${NCI_SIP_LOCAL_MODEL:-../tmp/serving-model}:/model:ro"
     tmpfs: ["/tmp:rw,noexec,nosuid,size=256m,mode=1777", "/model-cache:rw,noexec,nosuid,size=16m,mode=1777"]
 networks:
   documentation: {}

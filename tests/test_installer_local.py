@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, call, patch
 
-from nci_si_mcp import installer, installer_state
+from nci_sip_mcp import installer, installer_state
 
 
 class LocalInstallerTest(unittest.TestCase):
@@ -46,10 +46,10 @@ class LocalInstallerTest(unittest.TestCase):
         commit="a" * 40,
     ):
         site = self.data_dir / "venv" / "lib" / "python3.14" / "site-packages"
-        dist = site / "nci_si_mcp-0.21.0.dist-info"
+        dist = site / "nci_sip_mcp-0.21.0.dist-info"
         dist.mkdir(parents=True, exist_ok=True)
         (dist / "METADATA").write_text(
-            f"Metadata-Version: 2.4\nName: nci-si-mcp\nVersion: {version}\n",
+            f"Metadata-Version: 2.4\nName: nci-sip-mcp\nVersion: {version}\n",
             encoding="utf-8",
         )
         (dist / "direct_url.json").write_text(
@@ -151,7 +151,7 @@ class LocalInstallerTest(unittest.TestCase):
                     "--no-build-isolation",
                     "--no-index",
                     "--no-cache-dir",
-                    f"nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@{commit}",
+                    f"nci-sip-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@{commit}",
                 ],
             ],
         )
@@ -162,7 +162,7 @@ class LocalInstallerTest(unittest.TestCase):
         for child in ("venv", "server-data", "runtime"):
             self.assertTrue((self.data_dir / child / ".installer-owned").is_file())
         verify = next(kwargs for argv, kwargs in calls if argv[:2] == [str(venv_python), "-c"])
-        self.assertEqual(verify["env"]["NCI_SI_DATA_DIR"], str(self.data_dir / "server-data"))
+        self.assertEqual(verify["env"]["NCI_SIP_DATA_DIR"], str(self.data_dir / "server-data"))
 
     def test_unsupported_bootstrap_identity_blocks_before_any_installation_change(self):
         with (
@@ -551,18 +551,18 @@ class LocalInstallerTest(unittest.TestCase):
     def test_configuration_preserves_profile_and_keeps_each_transport_local(self):
         cases = {
             "stdio": {
-                "NCI_SI_DATA_DIR": str(self.data_dir / "server-data"),
-                "NCI_SI_PROFILE": "cadsr",
-                "NCI_SI_TRANSPORT": "stdio",
+                "NCI_SIP_DATA_DIR": str(self.data_dir / "server-data"),
+                "NCI_SIP_PROFILE": "cadsr",
+                "NCI_SIP_TRANSPORT": "stdio",
             },
             "http": {
-                "NCI_SI_DATA_DIR": str(self.data_dir / "server-data"),
-                "NCI_SI_PROFILE": "cadsr",
-                "NCI_SI_TRANSPORT": "streamable-http",
-                "NCI_SI_HTTP_HOST": "127.0.0.1",
-                "NCI_SI_HTTP_PORT": "8000",
-                "NCI_SI_HTTP_AUTH_MODE": "trusted-local",
-                "NCI_SI_HTTP_REQUIRE_INDEX": "0",
+                "NCI_SIP_DATA_DIR": str(self.data_dir / "server-data"),
+                "NCI_SIP_PROFILE": "cadsr",
+                "NCI_SIP_TRANSPORT": "streamable-http",
+                "NCI_SIP_HTTP_HOST": "127.0.0.1",
+                "NCI_SIP_HTTP_PORT": "8000",
+                "NCI_SIP_HTTP_AUTH_MODE": "trusted-local",
+                "NCI_SIP_HTTP_REQUIRE_INDEX": "0",
             },
         }
         for transport, expected in cases.items():
@@ -652,12 +652,12 @@ class LocalInstallerTest(unittest.TestCase):
         self.assertEqual(
             json.loads(output),
             {
-                "command": str(self.data_dir / "venv" / "bin" / "nci-si-mcp"),
+                "command": str(self.data_dir / "venv" / "bin" / "nci-sip-mcp"),
                 "args": ["serve"],
                 "env": {
-                    "NCI_SI_DATA_DIR": str(self.data_dir / "server-data"),
-                    "NCI_SI_PROFILE": "cadsr",
-                    "NCI_SI_TRANSPORT": "stdio",
+                    "NCI_SIP_DATA_DIR": str(self.data_dir / "server-data"),
+                    "NCI_SIP_PROFILE": "cadsr",
+                    "NCI_SIP_TRANSPORT": "stdio",
                 },
             },
         )
@@ -753,11 +753,11 @@ class LocalInstallerTest(unittest.TestCase):
         shutil.rmtree(self.data_dir / "venv")
 
         self.write_distribution()
-        record = self.data_dir / "venv/lib/python3.14/site-packages/nci_si_mcp-0.21.0.dist-info"
-        (record / "METADATA").write_text("Metadata-Version: 2.4\nName: nci-si-mcp\n")
+        record = self.data_dir / "venv/lib/python3.14/site-packages/nci_sip_mcp-0.21.0.dist-info"
+        (record / "METADATA").write_text("Metadata-Version: 2.4\nName: nci-sip-mcp\n")
         self.assertIsNone(installer._installed_release(self.data_dir / "venv"))
         (record / "METADATA").write_text(
-            "Metadata-Version: 2.4\nName: nci-si-mcp\nVersion: 0.21.0\n"
+            "Metadata-Version: 2.4\nName: nci-sip-mcp\nVersion: 0.21.0\n"
         )
         (record / "direct_url.json").write_text('{"vcs_info":{"commit_id":1}}')
         self.assertIsNone(installer._installed_release(self.data_dir / "venv"))
@@ -778,9 +778,9 @@ class LocalInstallerTest(unittest.TestCase):
         shutil.rmtree(self.data_dir / "venv")
 
         self.write_distribution()
-        original = self.data_dir / "venv/lib/python3.14/site-packages/nci_si_mcp-0.21.0.dist-info"
+        original = self.data_dir / "venv/lib/python3.14/site-packages/nci_sip_mcp-0.21.0.dist-info"
         duplicate = (
-            self.data_dir / "venv/lib/python3.14/site-packages/nci_si_mcp-duplicate.dist-info"
+            self.data_dir / "venv/lib/python3.14/site-packages/nci_sip_mcp-duplicate.dist-info"
         )
         duplicate.mkdir()
         for name in ("METADATA", "direct_url.json"):
@@ -797,7 +797,7 @@ class LocalInstallerTest(unittest.TestCase):
         self.assertIsNone(installer._configuration(self.data_dir))
 
     def test_stdio_verification_honors_results_environment_and_process_options(self):
-        environment = {"NCI_SI_PROFILE": "cadsr"}
+        environment = {"NCI_SIP_PROFILE": "cadsr"}
         for status in (0, 1):
             with (
                 self.subTest(status=status),
@@ -837,9 +837,9 @@ class LocalInstallerTest(unittest.TestCase):
 
     def test_stdio_verifier_initializes_real_server_through_real_sdk(self):
         environment = {
-            "NCI_SI_DATA_DIR": str(self.data_dir / "server-data"),
-            "NCI_SI_PROFILE": "unified",
-            "NCI_SI_TRANSPORT": "stdio",
+            "NCI_SIP_DATA_DIR": str(self.data_dir / "server-data"),
+            "NCI_SIP_PROFILE": "unified",
+            "NCI_SIP_TRANSPORT": "stdio",
         }
         runtime = self.data_dir / "runtime"
         runtime.mkdir()
@@ -848,9 +848,9 @@ class LocalInstallerTest(unittest.TestCase):
 
     def test_stdio_verifier_passes_configured_environment_to_real_server(self):
         environment = {
-            "NCI_SI_DATA_DIR": str(self.data_dir / "server-data"),
-            "NCI_SI_PROFILE": "invalid-profile",
-            "NCI_SI_TRANSPORT": "stdio",
+            "NCI_SIP_DATA_DIR": str(self.data_dir / "server-data"),
+            "NCI_SIP_PROFILE": "invalid-profile",
+            "NCI_SIP_TRANSPORT": "stdio",
         }
         runtime = self.data_dir / "runtime"
         runtime.mkdir()
@@ -861,9 +861,9 @@ class LocalInstallerTest(unittest.TestCase):
         data_path = self.data_dir / "not-a-directory"
         data_path.write_text("occupied", encoding="utf-8")
         environment = {
-            "NCI_SI_DATA_DIR": str(data_path),
-            "NCI_SI_PROFILE": "unified",
-            "NCI_SI_TRANSPORT": "stdio",
+            "NCI_SIP_DATA_DIR": str(data_path),
+            "NCI_SIP_PROFILE": "unified",
+            "NCI_SIP_TRANSPORT": "stdio",
         }
         runtime = self.data_dir / "runtime"
         runtime.mkdir()
@@ -875,14 +875,14 @@ class LocalInstallerTest(unittest.TestCase):
         runtime = self.data_dir / "runtime"
         runtime.mkdir()
         environment = {
-            "NCI_SI_DATA_DIR": str(self.data_dir / "server-data"),
-            "NCI_SI_PROFILE": "invalid-profile",
-            "NCI_SI_TRANSPORT": "stdio",
+            "NCI_SIP_DATA_DIR": str(self.data_dir / "server-data"),
+            "NCI_SIP_PROFILE": "invalid-profile",
+            "NCI_SIP_TRANSPORT": "stdio",
         }
         with self.assertRaisesRegex(installer.InstallerStateError, "server.log"):
             installer._verify_stdio(Path(sys.executable), runtime, environment)
         log = (runtime / "server.log").read_text()
-        self.assertIn("NCI_SI_PROFILE", log)
+        self.assertIn("NCI_SIP_PROFILE", log)
 
     def test_stdio_verifier_appends_real_child_error_to_owned_log(self):
         runtime = self.data_dir / "runtime"
@@ -890,15 +890,15 @@ class LocalInstallerTest(unittest.TestCase):
         log = runtime / "server.log"
         log.write_text("earlier HTTP diagnostic\n", encoding="utf-8")
         environment = {
-            "NCI_SI_DATA_DIR": str(self.data_dir / "server-data"),
-            "NCI_SI_PROFILE": "invalid-profile",
-            "NCI_SI_TRANSPORT": "stdio",
+            "NCI_SIP_DATA_DIR": str(self.data_dir / "server-data"),
+            "NCI_SIP_PROFILE": "invalid-profile",
+            "NCI_SIP_TRANSPORT": "stdio",
         }
         with self.assertRaisesRegex(installer.InstallerStateError, "server.log"):
             installer._verify_stdio(Path(sys.executable), runtime, environment)
         contents = log.read_text(encoding="utf-8")
         self.assertTrue(contents.startswith("earlier HTTP diagnostic\n"))
-        self.assertIn("NCI_SI_PROFILE", contents)
+        self.assertIn("NCI_SIP_PROFILE", contents)
 
     def test_stdio_execution_failures_report_the_owned_log_without_a_traceback(self):
         self.write_distribution()
@@ -1231,7 +1231,7 @@ class LocalInstallerTest(unittest.TestCase):
 
         self.assertEqual(json.loads(started[1]), {"status": "started", "pid": 4321})
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
-        self.assertEqual(popen.call_args.kwargs["env"]["NCI_SI_HTTP_PORT"], "8000")
+        self.assertEqual(popen.call_args.kwargs["env"]["NCI_SIP_HTTP_PORT"], "8000")
         self.assertEqual(popen.call_args.kwargs["env"]["PATH"], "/bin")
         self.assertEqual(
             Path(popen.call_args.kwargs["stderr"].name), self.data_dir / "runtime/server.log"
@@ -1465,7 +1465,7 @@ class LocalInstallerTest(unittest.TestCase):
         self.assertEqual(log.read_text(), "before\n")
         self.assertEqual(Path(popen.call_args.kwargs["stderr"].name), log)
         self.assertEqual(popen.call_args.kwargs["env"]["PATH"], "/bin")
-        self.assertEqual(popen.call_args.kwargs["env"]["NCI_SI_HTTP_PORT"], "8000")
+        self.assertEqual(popen.call_args.kwargs["env"]["NCI_SIP_HTTP_PORT"], "8000")
 
     def test_http_verification_pins_port_8000_despite_the_callers_environment(self):
         self.write_distribution()
@@ -1476,7 +1476,7 @@ class LocalInstallerTest(unittest.TestCase):
         response = MagicMock(status=200)
         response.__enter__.return_value = response
         with (
-            patch.dict(installer.os.environ, {"NCI_SI_HTTP_PORT": "9000"}),
+            patch.dict(installer.os.environ, {"NCI_SIP_HTTP_PORT": "9000"}),
             patch.object(installer, "_port_available", return_value=True) as available,
             patch.object(installer.subprocess, "Popen", return_value=process) as start,
             patch.object(installer, "urlopen", return_value=response) as opened,
@@ -1484,7 +1484,7 @@ class LocalInstallerTest(unittest.TestCase):
             self.assertTrue(actions.verify("verify"))
 
         available.assert_called_with(8000)
-        self.assertEqual(start.call_args.kwargs["env"]["NCI_SI_HTTP_PORT"], "8000")
+        self.assertEqual(start.call_args.kwargs["env"]["NCI_SIP_HTTP_PORT"], "8000")
         opened.assert_called_with("http://127.0.0.1:8000/ready", timeout=5)
 
     def test_port_probe_matches_a_reusable_listener_after_server_side_close(self):

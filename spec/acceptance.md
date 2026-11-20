@@ -26,24 +26,24 @@ a digest over the suite (its tests, fixtures, request forms, harness code and co
 
 ### Settings the suite gives a server
 
-The suite starts each server under test with these settings, and with no other `NCI_SI_*`
+The suite starts each server under test with these settings, and with no other `NCI_SIP_*`
 setting of the operator's environment. A server is configured by them: in fixture mode every
 upstream base URL names the fixture server, and a scenario that needs a credential, a short
 timeout or a log level sets it.
 
 | Setting | When the suite sets it | Format |
 |---|---|---|
-| `NCI_SI_UPSTREAM_MODE` | Always | `fixture` or `live` |
-| `NCI_SI_DATA_DIR` | Always | A directory of the server's own, fresh for each server; a copy of the prepare command's where one is given |
-| `NCI_SI_EVS_BASE_URL`, `NCI_SI_EVS_FHIR_BASE_URL`, `NCI_SI_CADSR_BASE_URL`, `NCI_SI_CADSR_FTP_URL`, `NCI_SI_SSIS_SPARQL_URL` | Always | Fixture bases or selected live origins; blocked live surfaces use an owned refusal URL. A base URL, to which the server adds the platform's own paths as it does to the production one (`…/evs` + `/api/v1/…`; `…/cadsr` + `/NCIAPI/1.0/api/…`; `…/ssis-sparql` + `/sparql`) |
-| `NCI_SI_EVS_LICENSE_KEY` | Live mode, from the operator; the `license/restricted` and `license/attributed` scenarios | The key, sent as the `X-EVSRESTAPI-License-Key` header on EVS requests |
-| `NCI_SI_CADSR_CREDENTIAL` | Fixture `cadsr/credentialed` and `cadsr/match-timeout` scenarios only; refused live | `user:password`, sent as HTTP Basic authentication (`Authorization: Basic` and its base64), as every caDSR contract declares |
-| `NCI_SI_TIMEOUT_SECONDS` | The `upstream/unavailable` scenario | Seconds an upstream request may take |
-| `NCI_SI_MATCH_TIMEOUT_SECONDS` | The `cadsr/match-timeout` scenario | Seconds a caDSR match request may take |
-| `NCI_SI_LOG_LEVEL` | The `license/restricted` scenario | `DEBUG`, so that a secret logged as a detail shows |
-| `NCI_SI_ACCEPTANCE_INDEX_CODES` | The prepare command only | A file of the concept codes to index, one per line |
-| `NCI_SI_TEST_HTTP_PORT` | The secured fixture adapter only | The loopback port the adapter listens on, chosen by the suite |
-| `NCI_SI_TEST_AUTHORITY_FILE` | The secured fixture adapter only | The path of the JSON file of generated test tokens and each actor's policy, which the adapter rereads on every request |
+| `NCI_SIP_UPSTREAM_MODE` | Always | `fixture` or `live` |
+| `NCI_SIP_DATA_DIR` | Always | A directory of the server's own, fresh for each server; a copy of the prepare command's where one is given |
+| `NCI_SIP_EVS_BASE_URL`, `NCI_SIP_EVS_FHIR_BASE_URL`, `NCI_SIP_CADSR_BASE_URL`, `NCI_SIP_CADSR_FTP_URL`, `NCI_SIP_SSIS_SPARQL_URL` | Always | Fixture bases or selected live origins; blocked live surfaces use an owned refusal URL. A base URL, to which the server adds the platform's own paths as it does to the production one (`…/evs` + `/api/v1/…`; `…/cadsr` + `/NCIAPI/1.0/api/…`; `…/ssis-sparql` + `/sparql`) |
+| `NCI_SIP_EVS_LICENSE_KEY` | Live mode, from the operator; the `license/restricted` and `license/attributed` scenarios | The key, sent as the `X-EVSRESTAPI-License-Key` header on EVS requests |
+| `NCI_SIP_CADSR_CREDENTIAL` | Fixture `cadsr/credentialed` and `cadsr/match-timeout` scenarios only; refused live | `user:password`, sent as HTTP Basic authentication (`Authorization: Basic` and its base64), as every caDSR contract declares |
+| `NCI_SIP_TIMEOUT_SECONDS` | The `upstream/unavailable` scenario | Seconds an upstream request may take |
+| `NCI_SIP_MATCH_TIMEOUT_SECONDS` | The `cadsr/match-timeout` scenario | Seconds a caDSR match request may take |
+| `NCI_SIP_LOG_LEVEL` | The `license/restricted` scenario | `DEBUG`, so that a secret logged as a detail shows |
+| `NCI_SIP_ACCEPTANCE_INDEX_CODES` | The prepare command only | A file of the concept codes to index, one per line |
+| `NCI_SIP_TEST_HTTP_PORT` | The secured fixture adapter only | The loopback port the adapter listens on, chosen by the suite |
+| `NCI_SIP_TEST_AUTHORITY_FILE` | The secured fixture adapter only | The path of the JSON file of generated test tokens and each actor's policy, which the adapter rereads on every request |
 
 ### Settings of a run
 
@@ -53,20 +53,20 @@ given all of them but the credential, besides the fixture settings and a scenari
 
 | Setting | Format |
 |---|---|
-| `NCI_SI_ACCEPTANCE_MODE` | `fixture` (default) or local managed `live` |
-| `NCI_SI_ACCEPTANCE_ENVIRONMENT` | Required live: `evs-only`; incompatible with fixture/remote mode. Policy and provenance: [managed live environments](../acceptance/README.md#managed-live-environments) |
-| `NCI_SI_ACCEPTANCE_REGISTRY_RELEASE` | `optional` (default) or `required`; other values are rejected |
-| `NCI_SI_ACCEPTANCE_SERVER` | Fixture command; live accepts only `nci-si-mcp serve` and uses the furnished isolated launcher |
-| `NCI_SI_ACCEPTANCE_PROFILE` | Fixture: `evs`, `cadsr` or `unified` (default); live: `unified` only |
-| `NCI_SI_ACCEPTANCE_PREPARE` | Fixture shell command; live only `nci-si-mcp index-sample`, with harness-owned validated argv |
-| `NCI_SI_ACCEPTANCE_URL` | The streamable-HTTP endpoint of a remote server, in place of `NCI_SI_ACCEPTANCE_SERVER`; naming both is a usage error |
-| `NCI_SI_ACCEPTANCE_AUTHORIZATION` | The `Authorization` header sent on every request to a remote server: a credential, in no output of the harness |
-| `NCI_SI_ACCEPTANCE_FIXTURE_BIND` | `HOST` or `HOST:PORT` the fixture server listens on (default `127.0.0.1`, any port) |
-| `NCI_SI_ACCEPTANCE_FIXTURE_URL` | The base URL a remote server reaches the fixture server by |
-| `NCI_SI_ACCEPTANCE_STATE_HOOK` | The operator's command that changes the state of a remote server: it applies the settings in its environment and forgets every upstream answer cached so far |
-| `NCI_SI_ACCEPTANCE_STATE_HOOK_TIMEOUT` | Seconds the hook may take to return, and again the endpoint to answer after it (default 60) |
-| `NCI_SI_ACCEPTANCE_PREPARED` | `1`: the operator has prepared the index of a remote server |
-| `NCI_SI_ACCEPTANCE_SECURITY_SERVER` | The command that starts the secured fixture adapter, a loopback HTTP server, for the X-25 to X-28 cases; without it they report NOT RUN |
+| `NCI_SIP_ACCEPTANCE_MODE` | `fixture` (default) or local managed `live` |
+| `NCI_SIP_ACCEPTANCE_ENVIRONMENT` | Required live: `evs-only`; incompatible with fixture/remote mode. Policy and provenance: [managed live environments](../acceptance/README.md#managed-live-environments) |
+| `NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE` | `optional` (default) or `required`; other values are rejected |
+| `NCI_SIP_ACCEPTANCE_SERVER` | Fixture command; live accepts only `nci-sip-mcp serve` and uses the furnished isolated launcher |
+| `NCI_SIP_ACCEPTANCE_PROFILE` | Fixture: `evs`, `cadsr` or `unified` (default); live: `unified` only |
+| `NCI_SIP_ACCEPTANCE_PREPARE` | Fixture shell command; live only `nci-sip-mcp index-sample`, with harness-owned validated argv |
+| `NCI_SIP_ACCEPTANCE_URL` | The streamable-HTTP endpoint of a remote server, in place of `NCI_SIP_ACCEPTANCE_SERVER`; naming both is a usage error |
+| `NCI_SIP_ACCEPTANCE_AUTHORIZATION` | The `Authorization` header sent on every request to a remote server: a credential, in no output of the harness |
+| `NCI_SIP_ACCEPTANCE_FIXTURE_BIND` | `HOST` or `HOST:PORT` the fixture server listens on (default `127.0.0.1`, any port) |
+| `NCI_SIP_ACCEPTANCE_FIXTURE_URL` | The base URL a remote server reaches the fixture server by |
+| `NCI_SIP_ACCEPTANCE_STATE_HOOK` | The operator's command that changes the state of a remote server: it applies the settings in its environment and forgets every upstream answer cached so far |
+| `NCI_SIP_ACCEPTANCE_STATE_HOOK_TIMEOUT` | Seconds the hook may take to return, and again the endpoint to answer after it (default 60) |
+| `NCI_SIP_ACCEPTANCE_PREPARED` | `1`: the operator has prepared the index of a remote server |
+| `NCI_SIP_ACCEPTANCE_SECURITY_SERVER` | The command that starts the secured fixture adapter, a loopback HTTP server, for the X-25 to X-28 cases; without it they report NOT RUN |
 
 ### Interim registry-release selection
 
@@ -75,7 +75,7 @@ The sponsor's decision on `registryRelease`, `resolve_registry_release` and
 `optional` suspends exactly five retained checks in `test_cadsr.py`: export-date discovery,
 published-release discovery, published-pin transport/attribution, and the two registry cursor
 binding cases. Each is an ordinary skip, never `not_live` or a pass, with this reason:
-`registry-release requirement suspended pending sponsor decision (NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=optional)`.
+`registry-release requirement suspended pending sponsor decision (NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=optional)`.
 `required` runs their existing assertions. Both modes are exercised by deterministic harness
 self-tests in the existing CI selftest jobs; required detects an unpinned response to a pin.
 
@@ -110,11 +110,11 @@ needs that day's export. See [the caDSR package](../docs/upstream/cadsr.md#cadsr
 
 A remote server is tested over streamable HTTP, and the report records the transport of each run
 (`stdio` or `streamable-http`). The harness cannot set a remote server's environment: the
-operator sets the fixture server's base URLs and `NCI_SI_UPSTREAM_MODE`, which the harness prints
+operator sets the fixture server's base URLs and `NCI_SIP_UPSTREAM_MODE`, which the harness prints
 at the start of a fixture-mode run. Before the first test the harness requires that the server
 answers and, against fixtures, that its `resolve_release` call reaches the fixture server;
 otherwise every dependent test fails with the probe's reason. For a profile without `resolve_release` (caDSR) the probe only calls
-`tools/list`. The state-change hook is called with the name of a scenario set (in `NCI_SI_ACCEPTANCE_SCENARIOS`,
+`tools/list`. The state-change hook is called with the name of a scenario set (in `NCI_SIP_ACCEPTANCE_SCENARIOS`,
 the scenarios separated by commas, empty for none) and its settings, and its contract is: apply these settings and forget every upstream answer cached so far. A
 restart is the simplest implementation and satisfies it; an operator whose server can flush its
 cache and reread its settings may do that instead. It is called once for each distinct scenario
@@ -133,17 +133,17 @@ reach the fixture server" when the fixture server's log shows no request, as it 
 that answers from a cache filled before the run (change its state first, or give the hook, which
 then runs before the probe; what the server asks while the hook runs counts); in live mode it stops
 with "the server under test does not answer". When the fixture server listens on `0.0.0.0` and
-`NCI_SI_ACCEPTANCE_FIXTURE_URL` is not set, the harness warns that the URLs it announces may not
-reach it from where the server runs. Set `NCI_SI_ACCEPTANCE_FIXTURE_BIND` on a fixed port so that
+`NCI_SIP_ACCEPTANCE_FIXTURE_URL` is not set, the harness warns that the URLs it announces may not
+reach it from where the server runs. Set `NCI_SIP_ACCEPTANCE_FIXTURE_BIND` on a fixed port so that
 the URLs it prints, which the operator sets on the server, do not change between runs. The hook runs with the harness's environment less the
-credential and less every `NCI_SI_*` setting that is not an `NCI_SI_ACCEPTANCE_*` one, plus the
-fixture settings, `NCI_SI_ACCEPTANCE_SCENARIOS` and the set's settings (none for an `own_server`
+credential and less every `NCI_SIP_*` setting that is not an `NCI_SIP_ACCEPTANCE_*` one, plus the
+fixture settings, `NCI_SIP_ACCEPTANCE_SCENARIOS` and the set's settings (none for an `own_server`
 test). The tests on the server as the operator started it run first, then the `own_server` tests,
 then each scenario set's. Without the hook the tests that need a server of their own are skipped as
-"needs a server of its own (NCI_SI_ACCEPTANCE_STATE_HOOK)"; they count as not run, so a tool whose
+"needs a server of its own (NCI_SIP_ACCEPTANCE_STATE_HOOK)"; they count as not run, so a tool whose
 scenario tests did not run is never PASS: it is NOT RUN, or INCOMPLETE where its other tests
 passed. Tests marked `prepared` are NOT RUN until the operator declares the index with
-`NCI_SI_ACCEPTANCE_PREPARED=1`; naming `NCI_SI_ACCEPTANCE_PREPARE` against a remote server is a
+`NCI_SIP_ACCEPTANCE_PREPARED=1`; naming `NCI_SIP_ACCEPTANCE_PREPARE` against a remote server is a
 usage error. The hook must return once the old state is gone (for a restart: once the
 old instance has stopped), with the output of any process it leaves running redirected; the harness
 then waits for the endpoint, up to the timeout, and stops at once on an HTTP 401 or 403. The

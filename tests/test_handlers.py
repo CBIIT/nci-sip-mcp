@@ -6,16 +6,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fakes import FakeEVS, concept, release, terminology_row
-from nci_si_mcp import invocation as invocation_module
-from nci_si_mcp.bounds import RequestBudgetError
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.errors import (
+from nci_sip_mcp import invocation as invocation_module
+from nci_sip_mcp.bounds import RequestBudgetError
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.errors import (
     InputValidationError,
     PlatformError,
     is_error_record,
 )
-from nci_si_mcp.evs import (
+from nci_sip_mcp.evs import (
     LICENSE_KEY_HEADER,
     LOOKUP_INCLUDE,
     EVSClient,
@@ -25,16 +25,16 @@ from nci_si_mcp.evs import (
     EVSReleaseNotFoundError,
     EVSResponseError,
 )
-from nci_si_mcp.http_client import (
+from nci_sip_mcp.http_client import (
     UpstreamError,
     UpstreamRejectedError,
     UpstreamTimeoutError,
     UpstreamTooLargeError,
     UpstreamUnavailableError,
 )
-from nci_si_mcp.index_adapter import LocalIndexAdapter, index_event
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.release import RegistryMetadataError
+from nci_sip_mcp.index_adapter import LocalIndexAdapter, index_event
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.release import RegistryMetadataError
 from ncit_index.embeddings import HashingEmbeddingProvider
 from ncit_index.errors import (
     IndexBuildError,
@@ -133,7 +133,7 @@ class LookupTest(HandlerTestCase):
         for method in ("get_concept", "get_terminologies"):
             with self.subTest(failing=method):
                 self.evs.errors = {method: UpstreamUnavailableError("connection refused")}
-                with self.assertLogs("nci_si_mcp", level="WARNING") as logs:
+                with self.assertLogs("nci_sip_mcp", level="WARNING") as logs:
                     result = invoke(self.context, "lookup", "C3262")
 
                 self.assertEqual(
@@ -556,7 +556,7 @@ class StatusTest(HandlerTestCase):
     def test_release_info_embeds_an_error_without_logging_a_failed_call(self):
         self.evs.errors = {"get_api_version": UpstreamUnavailableError("down")}
 
-        with self.assertNoLogs("nci_si_mcp.invocation", level="WARNING"):
+        with self.assertNoLogs("nci_sip_mcp.invocation", level="WARNING"):
             result = invoke(self.context, "release_info")
 
         self.assert_error(result["evs_api"], "upstream_unavailable")
@@ -676,7 +676,7 @@ class FailureHandlingTest(HandlerTestCase):
             return candidate
 
         with (
-            patch("nci_si_mcp.indexing.open_index", return_value=self.local_index),
+            patch("nci_sip_mcp.indexing.open_index", return_value=self.local_index),
             patch.object(self.local_index, "_build_stream", side_effect=activate_after_build),
         ):
             result = invoke(self.context, "index_codes", ["C3262"])
@@ -699,7 +699,7 @@ class FailureHandlingTest(HandlerTestCase):
         }
         for operation, call in calls.items():
             with self.subTest(operation):
-                with self.assertLogs("nci_si_mcp", level="WARNING"):
+                with self.assertLogs("nci_sip_mcp", level="WARNING"):
                     result = call()
                 self.assert_error(result, "internal_error")
                 self.assertIn(str(database), result["error"]["message"])
@@ -757,7 +757,7 @@ class ErrorModelTest(HandlerTestCase):
             (
                 EVSResponseError("not a list", surface="evs", status=403),
                 "upstream_unavailable",
-                "NCI_SI_EVS_BASE_URL",
+                "NCI_SIP_EVS_BASE_URL",
                 {"surface": "evs", "status": 403},
             ),
             (
@@ -769,7 +769,7 @@ class ErrorModelTest(HandlerTestCase):
             (
                 UpstreamTimeoutError("slow", surface="evs", seconds=30.0, attempts=3),
                 "timeout",
-                "NCI_SI_TIMEOUT_SECONDS",
+                "NCI_SIP_TIMEOUT_SECONDS",
                 {"surface": "evs", "seconds": 30.0, "attempts": 3},
             ),
             (
@@ -870,7 +870,7 @@ class ErrorModelTest(HandlerTestCase):
         self.assertEqual(
             error["message"],
             "EVS lists 2 releases as latest, not exactly one. "
-            "Retry later, or set NCI_SI_RELEASE_CHANNEL to the other channel (monthly or weekly)",
+            "Retry later, or set NCI_SIP_RELEASE_CHANNEL to the other channel (monthly or weekly)",
         )
 
 
@@ -889,7 +889,7 @@ class OperatorErrorRemedyTest(ServerFixture):
         ):
             with (
                 self.subTest(error=error),
-                patch("nci_si_mcp.indexing.open_index", return_value=self.local_index),
+                patch("nci_sip_mcp.indexing.open_index", return_value=self.local_index),
                 patch.object(self.local_index, "activate", side_effect=error("Rejected build.")),
             ):
                 result = invoke(self.context, "index_activate", "a" * 32)

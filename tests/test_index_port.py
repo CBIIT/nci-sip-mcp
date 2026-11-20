@@ -7,11 +7,11 @@ import unittest
 from dataclasses import replace
 
 from fakes import FakeIndex
-from nci_si_mcp.errors import InputValidationError
-from nci_si_mcp.evs import normalize_concept
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.models import IndexManifest, SearchHit
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.errors import InputValidationError
+from nci_sip_mcp.evs import normalize_concept
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.models import IndexManifest, SearchHit
+from nci_sip_mcp.registry import invoke
 from test_server import NEOPLASM, ServerFixture
 
 
@@ -138,7 +138,7 @@ import importlib, importlib.abc, json, pkgutil, sys, tempfile
 from pathlib import Path
 class BlockImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'nci_si_mcp', 'mcp', 'numpy', 'sentence_transformers'}:
+        if fullname.split('.')[0] in {'nci_sip_mcp', 'mcp', 'numpy', 'sentence_transformers'}:
             raise RuntimeError('forbidden import: ' + fullname)
 sys.meta_path.insert(0, BlockImports())
 import ncit_index

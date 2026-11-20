@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LIMITS = {
-    "src/nci_si_mcp": (478, 11, 1, 0),
+    "src/nci_sip_mcp": (478, 11, 1, 0),
     "src/ncit_index": (10, 0, 2, 0),
     "scripts": (196, 14, 0, 0),
     "acceptance/src": (177, 0, 0, 0),

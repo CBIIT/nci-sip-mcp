@@ -4,7 +4,7 @@ from urllib.parse import unquote
 
 import pytest
 
-from nci_si_acceptance.results import sparql_rows
+from nci_sip_acceptance.results import sparql_rows
 
 FIND = "find_data_elements_for_concept"
 GROUND = "ground_value"

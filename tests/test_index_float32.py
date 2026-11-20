@@ -10,8 +10,8 @@ from unittest.mock import patch
 import numpy as np
 
 from fakes import concept
-from nci_si_mcp.evs import normalize_concept
-from nci_si_mcp.models import IndexManifest
+from nci_sip_mcp.evs import normalize_concept
+from nci_sip_mcp.models import IndexManifest
 from ncit_index.embeddings import HashingEmbeddingProvider, SentenceTransformersProvider
 from ncit_index.errors import IndexCompatibilityError, IndexStorageError
 from ncit_index.index import LocalIndex

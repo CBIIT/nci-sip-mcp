@@ -7,11 +7,11 @@ from json.scanner import py_make_scanner
 from unittest.mock import patch
 
 from fakes import concept, release
-from nci_si_mcp.cadsr import CaDSRClient
-from nci_si_mcp.config import Settings
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.invocation import call
+from nci_sip_mcp.cadsr import CaDSRClient
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.invocation import call
 from ncit_index.embeddings import EmbeddingProvider
 from test_http_client import BufferedPolicy, Reply, ServerTestCase
 from test_index import IndexTestCase

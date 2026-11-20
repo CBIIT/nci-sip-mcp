@@ -5,10 +5,10 @@ import subprocess
 import sys
 
 REPOSITORY = "CBIIT/nci-sip-mcp"
-PLACEHOLDER = "NCI_SI_CONFIGURE_ME"
+PLACEHOLDER = "NCI_SIP_CONFIGURE_ME"
 SECRETS = {
-    "NCI_SI_CADSR_CREDENTIAL": "Issued caDSR user:password for protected live checks",
-    "NCI_SI_EVS_LICENSE_KEY": "Issued EVS licence key for restricted live checks",
+    "NCI_SIP_CADSR_CREDENTIAL": "Issued caDSR user:password for protected live checks",
+    "NCI_SIP_EVS_LICENSE_KEY": "Issued EVS licence key for restricted live checks",
 }
 VARIABLES: dict[str, str] = {}
 

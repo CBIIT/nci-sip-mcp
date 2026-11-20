@@ -16,7 +16,7 @@ from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from fakes import cde_response, data_element
-from nci_si_mcp.cadsr import CaDSRClient
+from nci_sip_mcp.cadsr import CaDSRClient
 from test_cadsr_client import reply
 from test_http_client import ServerTestCase
 from test_release_selection import initialize_http
@@ -118,11 +118,11 @@ class InputBoundaryTest(ServerFixture, ServerTestCase):
         async def stdio(log):
             server = StdioServerParameters(
                 command=sys.executable,
-                args=["-c", "from nci_si_mcp.cli import main; raise SystemExit(main())", "serve"],
+                args=["-c", "from nci_sip_mcp.cli import main; raise SystemExit(main())", "serve"],
                 env={
-                    "NCI_SI_DATA_DIR": str(self.settings.data_dir),
-                    "NCI_SI_CADSR_BASE_URL": self.settings.cadsr_base_url,
-                    "NCI_SI_CADSR_FTP_URL": self.settings.cadsr_ftp_url,
+                    "NCI_SIP_DATA_DIR": str(self.settings.data_dir),
+                    "NCI_SIP_CADSR_BASE_URL": self.settings.cadsr_base_url,
+                    "NCI_SIP_CADSR_FTP_URL": self.settings.cadsr_ftp_url,
                 },
             )
             async with Client(stdio_client(server, errlog=log)) as client:
@@ -146,8 +146,8 @@ class InputBoundaryTest(ServerFixture, ServerTestCase):
                 return answers, [json.loads(line) for line in log if line.startswith("{")]
         logging.disable(logging.NOTSET)
         with (
-            patch("nci_si_mcp.server.configure_logging"),
-            self.assertLogs("nci_si_mcp.audit", level="INFO") as captured,
+            patch("nci_sip_mcp.server.configure_logging"),
+            self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured,
         ):
             answers = asyncio.run(http())
         return answers, [record.structured for record in captured.records]
