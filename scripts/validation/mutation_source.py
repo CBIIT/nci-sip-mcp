@@ -44,19 +44,15 @@ def digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def fingerprint_dump(node: ast.AST) -> str:
-    return _fingerprint_ast_node(node)
-
-
 def _fingerprint_value(value: object) -> str:
     if isinstance(value, ast.AST):
-        return _fingerprint_ast_node(value)
+        return fingerprint_dump(value)
     if isinstance(value, list):
         return f"[{', '.join(_fingerprint_value(item) for item in value)}]"
     return repr(value)
 
 
-def _fingerprint_ast_node(node: ast.AST) -> str:
+def fingerprint_dump(node: ast.AST) -> str:
     fields = []
     for name in node._fields:
         try:
