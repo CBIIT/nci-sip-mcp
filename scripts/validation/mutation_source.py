@@ -7,6 +7,7 @@ import hashlib
 import re
 import subprocess
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
@@ -38,6 +39,20 @@ SYMBOLS = {
     ast.In: "in",
     ast.NotIn: "not in",
 }
+
+
+# The #509 rename changed these names across the whole tree, so every touched line would
+# otherwise enter the mutation scope. A hunk whose base lines equal its head lines after
+# these substitutions is a pure rename. A follow-up issue removes this table once #509 lands.
+RENAMES = (
+    ("nci_si_mcp", "nci_sip_mcp"),
+    ("nci_si_acceptance", "nci_sip_acceptance"),
+    ("nci-si-mcp", "nci-sip-mcp"),
+    ("nci-si-install", "nci-sip-install"),
+    ("nci-si-acceptance", "nci-sip-acceptance"),
+    ("NCI_SI_", "NCI_SIP_"),
+    ("without_nci_si_settings", "without_nci_sip_settings"),
+)
 
 
 def digest(text: str) -> str:
@@ -131,23 +146,53 @@ def scope(root: Path, paths: list[str], base: str, head: str) -> dict[str, set[i
             result[name] = None
         return result
     merge_base = git(root, "merge-base", base, head).strip()
-    diff = git(
-        root, "diff", "--no-ext-diff", "--unified=0", "--no-renames", merge_base, head, "--", *ROOTS
-    )
+    diff = git(root, "diff", "--no-ext-diff", "--unified=0", "-M", merge_base, head, "--", *ROOTS)
     return diff_lines(diff)
+
+
+def renamed_only(old: list[str], new: list[str]) -> bool:
+    renamed = old
+    for before, after in RENAMES:
+        renamed = [line.replace(before, after) for line in renamed]
+    return bool(old) and renamed == new
+
+
+def hunk_body(lines: Iterator[str], count: int) -> list[str]:
+    body: list[str] = []
+    while len(body) < count and (line := next(lines, None)) is not None:
+        if not line.startswith("\\"):
+            body.append(line)
+    return body
+
+
+def hunk_header(line: str) -> tuple[int, int, int] | None:
+    match = re.match(r"@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+    return (int(match[1] or 1), int(match[2]), int(match[3] or 1)) if match else None
+
+
+def file_name(line: str, name: str) -> str:
+    if line.startswith("diff --git"):
+        return ""
+    return line[6:] if line.startswith("+++ b/") else name
+
+
+def hunks(diff: str) -> Iterator[tuple[str, tuple[int, int], list[str], list[str]]]:
+    name = ""
+    lines = iter(diff.splitlines())
+    for line in lines:
+        name = file_name(line, name)
+        if header := hunk_header(line):
+            body = hunk_body(lines, header[0] + header[2])
+            old = [item[1:] for item in body if item[0] == "-"]
+            new = [item[1:] for item in body if item[0] == "+"]
+            yield name, (header[1], header[2]), old, new
 
 
 def diff_lines(diff: str) -> dict[str, set[int] | None]:
     result: dict[str, set[int] | None] = {}
-    name = ""
-    for line in diff.splitlines():
-        if line.startswith("+++ b/"):
-            name = line[6:]
-        match = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
-        if match and eligible(name):
-            start, count = int(match[1]), int(match[2] or 1)
-            result.setdefault(name, set())
-            lines = result[name]
+    for name, (start, count), old, new in hunks(diff):
+        if eligible(name) and not renamed_only(old, new):
+            lines = result.setdefault(name, set())
             if lines is not None:
                 lines.update(range(start, start + count))
     return result
