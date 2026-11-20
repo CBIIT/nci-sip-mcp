@@ -2223,6 +2223,7 @@ class RenameExemptionScopeTest(unittest.TestCase):
         self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {1, 2}})
 
     def test_rename_git_cannot_pair_selects_every_line(self):
+        """A rewrite git cannot pair is a delete plus an add, so no hunk can be exempt."""
         head = "import nci_sip_mcp\nX = 1\nY = 2\nZ = 3\n"
         self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: {1, 2, 3, 4}})
 
