@@ -212,7 +212,8 @@ def file_name(line: str, name: str) -> str:
         return ""
     if line.startswith("+++ /dev/null"):
         return "/dev/null"
-    return line[6:] if line.startswith("+++ b/") else name
+    # git appends a tab to the name when the path contains a space
+    return line[6:].removesuffix("\t") if line.startswith("+++ b/") else name
 
 
 def hunks(diff: str) -> Iterator[Hunk]:
