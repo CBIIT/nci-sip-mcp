@@ -2313,6 +2313,18 @@ class EveryRenamePairScopeTest(unittest.TestCase):
                 self.assertEqual(scope_between({old_path: base}, {new_path: head}), {})
 
 
+class MultiLineHunkScopeTest(unittest.TestCase):
+    def test_three_consecutive_table_substitutions_are_not_selected(self):
+        base = LONG_BODY + "".join(f"import nci_si_mcp_{n}\n" for n in range(3)) + "END = 1\n"
+        head = base.replace("nci_si_mcp", "nci_sip_mcp")
+        self.assertEqual(scope_after_git_rename(head, base), {})
+
+    def test_three_removed_lines_with_one_non_table_change_select_the_new_lines(self):
+        base = LONG_BODY + "A = nci_si_mcp\nB = 1\nC = nci_si_mcp\nEND = 1\n"
+        head = LONG_BODY + "A = nci_sip_mcp\nB = 2\nC = nci_sip_mcp\nEND = 1\n"
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {21, 22, 23}})
+
+
 class RenameRobustnessScopeTest(unittest.TestCase):
     def test_move_from_an_eligible_to_an_ineligible_path_is_not_selected(self):
         self.assertEqual(
