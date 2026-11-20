@@ -188,8 +188,8 @@ class Hunk:
     removed: tuple[str, ...]
     added: tuple[str, ...]
 
-    def is_table_rename(self, old_file: str) -> bool:
-        return apply_renames(old_file) == self.file and renamed_only(self.removed, self.added)
+    def is_table_rename(self) -> bool:
+        return renamed_only(self.removed, self.added)
 
 
 def hunk_body(lines: Iterator[str], count: int) -> list[str]:
@@ -249,7 +249,7 @@ def diff_lines(diff: str) -> dict[str, set[int] | None]:
     moves = rename_pairs(diff)
     result = moved_files(moves)
     for item in hunks(diff):
-        if eligible(item.file) and not item.is_table_rename(moves.get(item.file, item.file)):
+        if eligible(item.file) and not item.is_table_rename():
             lines = result.setdefault(item.file, set())
             if lines is not None:
                 lines.update(range(item.start, item.start + item.count))
