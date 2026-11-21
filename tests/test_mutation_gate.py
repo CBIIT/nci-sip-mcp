@@ -2198,34 +2198,10 @@ def scope_after_git_rename(head_text, base_text=RENAME_BASE):
     return scope_between({OLD_TABLE_PATH: base_text}, {NEW_TABLE_PATH: head_text})
 
 
-class RenameExemptionScopeTest(unittest.TestCase):
-    def test_line_that_differs_only_by_the_sip_rename_is_not_selected(self):
-        head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp")
+class RenamedFileScopeTest(unittest.TestCase):
+    def test_renamed_file_is_selected_whole_whatever_changed_in_it(self):
+        head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp").replace("return 2", "return 3")
         self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: set(range(1, 11))})
-
-    def test_rename_plus_logic_change_is_selected(self):
-        base = RENAME_BASE + "if nci_si_mcp == 1:\n    pass\n"
-        head = RENAME_BASE + "if nci_sip_mcp != 1:\n    pass\n"
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 13))})
-
-    def test_added_line_containing_the_new_name_is_selected(self):
-        head = RENAME_BASE + "import nci_sip_mcp\n"
-        self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: set(range(1, 12))})
-
-    def test_substitution_outside_the_table_is_selected(self):
-        base = RENAME_BASE + "foo_si = 1\n"
-        head = RENAME_BASE + "foo_sip = 1\n"
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 12))})
-
-    def test_mixed_hunk_is_selected_as_a_whole(self):
-        base = "import nci_si_mcp\nVALUE = 1\n" + RENAME_BASE
-        head = "import nci_sip_mcp\nVALUE = 2\n" + RENAME_BASE
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 13))})
-
-    def test_rename_git_cannot_pair_selects_every_line(self):
-        """A rewrite git cannot pair is a delete plus an add, so no hunk can be exempt."""
-        head = "import nci_sip_mcp\nX = 1\nY = 2\nZ = 3\n"
-        self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: {1, 2, 3, 4}})
 
 
 class SpacedFileNameScopeTest(unittest.TestCase):
@@ -2236,7 +2212,7 @@ class SpacedFileNameScopeTest(unittest.TestCase):
             {"src/x y.py": {3}},
         )
 
-    def test_table_rename_of_a_spaced_name_is_exempt_only_for_table_edits(self):
+    def test_renamed_file_with_a_space_in_its_name_is_selected_whole(self):
         old, new = "src/nci_si_mcp/a b.py", "src/nci_sip_mcp/a b.py"
         body = "".join(f"V{n} = {n}\n" for n in range(1, 21))
         base = "import nci_si_mcp\n" + body
@@ -2273,77 +2249,6 @@ class MovedCodeScopeTest(unittest.TestCase):
             {"src/b.py": set(range(1, 25)), "src/c.py": set(range(1, 17))},
         )
 
-    def test_table_rename_with_only_table_edits_is_not_selected(self):
-        head = MODULE.replace("f0", "nci_sip_mcp_f0")
-        base = MODULE.replace("f0", "nci_si_mcp_f0")
-        self.assertEqual(
-            scope_between({OLD_TABLE_PATH: base}, {NEW_TABLE_PATH: head}),
-            {NEW_TABLE_PATH: set(range(1, 41))},
-        )
-
-    def test_table_rename_with_a_logic_edit_is_selected_by_hunk(self):
-        head = MODULE.replace("return 3", "return 4")
-        self.assertEqual(
-            scope_between({OLD_TABLE_PATH: MODULE}, {NEW_TABLE_PATH: head}),
-            {NEW_TABLE_PATH: set(range(1, 41))},
-        )
-
-
-EXPECTED_PAIRS = (
-    ("nci_si_mcp", "nci_sip_mcp"),
-    ("nci_si_acceptance", "nci_sip_acceptance"),
-    ("nci-si-mcp", "nci-sip-mcp"),
-    ("nci-si-install", "nci-sip-install"),
-    ("nci-si-acceptance", "nci-sip-acceptance"),
-    ("NCI_SI_", "NCI_SIP_"),
-    ("without_nci_si_settings", "without_nci_sip_settings"),
-)
-PAIR_FILES = {
-    "nci_si_mcp": ("src/nci_si_mcp/x.py", "src/nci_sip_mcp/x.py"),
-    "nci_si_acceptance": (
-        "acceptance/src/nci_si_acceptance/x.py",
-        "acceptance/src/nci_sip_acceptance/x.py",
-    ),
-}
-LONG_BODY = "".join(f"V{n} = {n}\n" for n in range(1, 21))
-
-
-class EveryRenamePairScopeTest(unittest.TestCase):
-    def test_each_table_pair_alone_is_not_selected(self):
-        for before, after in EXPECTED_PAIRS:
-            with self.subTest(pair=before):
-                old_path, new_path = PAIR_FILES.get(before, ("src/x.py", "src/x.py"))
-                base = LONG_BODY + f'NAME = "{before}"\n'
-                head = LONG_BODY + f'NAME = "{after}"\n'
-                self.assertEqual(scope_between({old_path: base}, {new_path: head}), {})
-
-
-class MultiLineHunkScopeTest(unittest.TestCase):
-    def test_three_consecutive_table_substitutions_are_not_selected(self):
-        base = LONG_BODY + "".join(f"import nci_si_mcp_{n}\n" for n in range(3)) + "END = 1\n"
-        head = base.replace("nci_si_mcp", "nci_sip_mcp")
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 25))})
-
-    def test_three_removed_lines_with_one_non_table_change_select_the_new_lines(self):
-        base = LONG_BODY + "A = nci_si_mcp\nB = 1\nC = nci_si_mcp\nEND = 1\n"
-        head = LONG_BODY + "A = nci_sip_mcp\nB = 2\nC = nci_sip_mcp\nEND = 1\n"
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 25))})
-
-
-class KeptPathScopeTest(unittest.TestCase):
-    def test_table_substitution_in_a_file_that_keeps_a_path_with_an_old_name_is_exempt(self):
-        path = "src/legacy_nci_si_mcp_shim.py"
-        base = LONG_BODY + "NAME = nci_si_mcp\n"
-        head = LONG_BODY + "NAME = nci_sip_mcp\n"
-        self.assertEqual(scope_between({path: base}, {path: head}), {})
-
-    def test_non_table_change_in_that_kept_file_is_still_selected(self):
-        path = "src/legacy_nci_si_mcp_shim.py"
-        base = LONG_BODY + "NAME = nci_si_mcp\n"
-        self.assertEqual(
-            scope_between({path: base}, {path: LONG_BODY + "NAME = other\n"}), {path: {21}}
-        )
-
 
 class RenameRobustnessScopeTest(unittest.TestCase):
     def test_move_from_an_eligible_to_an_ineligible_path_is_not_selected(self):
@@ -2351,21 +2256,6 @@ class RenameRobustnessScopeTest(unittest.TestCase):
             scope_between({"src/a.py": MODULE}, {"src/tests/a.py": MODULE}),
             {},
         )
-
-    def test_table_rename_around_a_no_newline_marker_is_not_selected(self):
-        base = LONG_BODY + "import nci_si_mcp"
-        head = LONG_BODY + "import nci_sip_mcp"
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 22))})
-
-    def test_pure_rename_is_found_even_when_git_config_disables_renames(self):
-        head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp")
-        env = {
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": "diff.renames",
-            "GIT_CONFIG_VALUE_0": "false",
-        }
-        with patch.dict(os.environ, env):
-            self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: set(range(1, 11))})
 
 
 class HunkParsingTest(unittest.TestCase):
@@ -2379,7 +2269,7 @@ class HunkParsingTest(unittest.TestCase):
             {"src/m.py": {1}},
         )
 
-    def test_form_feed_in_a_renamed_line_keeps_the_hunk_counts_and_the_next_hunk(self):
+    def test_form_feed_in_a_changed_line_keeps_the_hunk_counts_and_the_next_hunk(self):
         diff = (
             "+++ b/src/example.py\n@@ -1 +1 @@\n-import nci_si_mcp\x0cx\n+import nci_sip_mcp\x0cx\n"
             "@@ -5 +5 @@\n-x\n+y\n"
