@@ -250,6 +250,17 @@ def candidate_run(root, routes, source="value = 2\n", span=(1, 1)):
 
 
 class ImportKillAndSourceChecksTest(unittest.TestCase):
+    def test_an_import_time_kill_in_a_child_route_candidate_stays_killed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            routes = child_routes(root, "import example\n" + INSTALLED_CHILD_TEST)
+            result = candidate_run(root, routes, "value = 1 / 0\n")
+        self.assertEqual(
+            (result["outcome"], result.get("kind"), result.get("phase"), result.get("node")),
+            ("KILLED", "import", "collection", f"{TEST_PATH}"),
+            result,
+        )
+
     def test_a_child_that_installs_other_bytes_than_the_mutation_is_infra(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
