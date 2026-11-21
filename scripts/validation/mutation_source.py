@@ -7,7 +7,7 @@ import hashlib
 import re
 import subprocess
 from collections import Counter
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
@@ -39,22 +39,6 @@ SYMBOLS = {
     ast.In: "in",
     ast.NotIn: "not in",
 }
-
-
-# The #509 rename changed these names across the whole tree, so every touched line would
-# otherwise enter the mutation scope. `git diff -M` pairs old and new files so that a hunk whose
-# removed lines equal its added lines after these substitutions can be recognised as a pure
-# rename; this applies only where the old path maps to the new path through this table, and
-# every other rename, move or split selects the whole new file. Remove in #519 once #509 has merged.
-RENAMES = (
-    ("nci_si_mcp", "nci_sip_mcp"),
-    ("nci_si_acceptance", "nci_sip_acceptance"),
-    ("nci-si-mcp", "nci-sip-mcp"),
-    ("nci-si-install", "nci-sip-install"),
-    ("nci-si-acceptance", "nci-sip-acceptance"),
-    ("NCI_SI_", "NCI_SIP_"),
-    ("without_nci_si_settings", "without_nci_sip_settings"),
-)
 
 
 def digest(text: str) -> str:
@@ -155,27 +139,13 @@ def scope(root: Path, paths: list[str], base: str, head: str) -> dict[str, set[i
         "diff",
         "--no-ext-diff",
         "--unified=0",
-        "-M",
+        "--no-renames",
         merge_base,
         head,
         "--",
         *ROOTS,
     )
     return diff_lines(diff)
-
-
-def apply_renames(text: str) -> str:
-    for before, after in RENAMES:
-        text = text.replace(before, after)
-    return text
-
-
-def renamed_only(old: Sequence[str], new: Sequence[str]) -> bool:
-    """True when the removed lines differ from the added lines only by the RENAMES table.
-
-    Equal lines are not a rename: a line-ending or end-of-file change must stay selected.
-    """
-    return old != new and tuple(apply_renames(line) for line in old) == tuple(new)
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,9 +157,6 @@ class Hunk:
     count: int
     removed: tuple[str, ...]
     added: tuple[str, ...]
-
-    def is_table_rename(self) -> bool:
-        return renamed_only(self.removed, self.added)
 
 
 def hunk_body(lines: Iterator[str], count: int) -> list[str]:
@@ -235,21 +202,10 @@ def read_hunk(line: str, name: str, lines: Iterator[str]) -> Hunk:
     return Hunk(name, start, count, removed, added)
 
 
-def rename_pairs(diff: str) -> dict[str, str]:
-    """Map each new path git paired with an old path to that old path."""
-    pairs = re.findall(r"^rename from (.+)\nrename to (.+)$", diff, re.MULTILINE)
-    return {new: old for old, new in pairs}
-
-
-def moved_files(moves: dict[str, str]) -> dict[str, set[int] | None]:
-    return {new: None for new, old in moves.items() if eligible(new) and apply_renames(old) != new}
-
-
 def diff_lines(diff: str) -> dict[str, set[int] | None]:
-    moves = rename_pairs(diff)
-    result = moved_files(moves)
+    result: dict[str, set[int] | None] = {}
     for item in hunks(diff):
-        if eligible(item.file) and not item.is_table_rename():
+        if eligible(item.file):
             lines = result.setdefault(item.file, set())
             if lines is not None:
                 lines.update(range(item.start, item.start + item.count))
