@@ -16,7 +16,7 @@ import tempfile
 import threading
 import unittest
 import venv
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from threading import Event, Thread
 from types import FunctionType, SimpleNamespace
@@ -30,6 +30,7 @@ from scripts.processes import stop, wait_until
 from scripts.validation import mutation_child_trace as child_trace
 from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
+from scripts.validation.mutation_coverage import parse_fragment_children
 from scripts.validation.mutation_gate import execute_job
 from scripts.validation.mutation_probe import child_context
 from scripts.validation.mutation_run import coverage_map, program, run_domain, selection, snapshot
@@ -1401,6 +1402,76 @@ class MutationExecutionTest(unittest.TestCase):
                 ValueError, "Installed child trace belongs to another producer or route"
             ):
                 child_trace.read_traces(data_file)
+
+    def test_imported_fragment_rejects_a_child_from_another_shard(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            producer, _ = child_trace.read_traces(data_file)
+            fragment = {
+                "producer": json.loads(
+                    (child_trace.trace_directory(data_file) / "producer.json").read_text()
+                ),
+                "children": [json.loads(result.read_text())],
+            }
+            self.assertEqual(producer.shard, "1/1")
+            _, children = parse_fragment_children(fragment)
+            self.assertEqual([child.shard for child in children], ["1/1"])
+            fragment["children"][0]["shard"] = "2/2"
+            with self.assertRaisesRegex(
+                ValueError, "Installed child trace belongs to another producer or route"
+            ):
+                parse_fragment_children(fragment)
+
+    def test_read_traces_rejects_non_hexadecimal_digests_of_the_right_length(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            original = result.read_text()
+            for field, value in (
+                ("source_digest", "g" * 64),
+                ("bytecode_digest", "A" * 64),
+            ):
+                with self.subTest(field=field):
+                    result.write_text(json.dumps({**json.loads(original), field: value}))
+                    with self.assertRaisesRegex(
+                        ValueError, "Installed child trace belongs to another producer or route"
+                    ):
+                        child_trace.read_traces(data_file)
+
+    def test_child_selection_owns_only_the_lines_its_trace_reached(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, *_ = child_trace_fixture(root)
+            _, (trace,) = child_trace.read_traces(data_file)
+            (root / "src").mkdir()
+            (root / "src/example.py").write_text("a = 1\nb = 2\nc = 3\n")
+            digest = hashlib.sha256((root / "src/example.py").read_bytes()).hexdigest()
+            trace = replace(trace, phase="producer", source_digest=digest, lines=(2, 3))
+            evidence = SimpleNamespace(root=root, children=[trace])
+            spans = {(1, 1): [], (4, 5): [], (1, 2): [trace], (3, 9): [trace]}
+            for (line, end_line), expected in spans.items():
+                with self.subTest(span=(line, end_line)):
+                    self.assertEqual(
+                        runner.child_selection(evidence, "src/example.py", line, end_line),
+                        expected,
+                    )
+
+    def test_prepare_run_accepts_an_existing_empty_directory_and_refuses_a_used_one(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file = root / ".coverage"
+            directory = child_trace.trace_directory(data_file)
+            directory.mkdir()
+            environment = child_trace.prepare_run(
+                data_file, root / "hook", "unit", "candidate", "1/1"
+            )
+            self.assertEqual(environment["MUTATION_CHILD_TRACE_DIR"], str(directory))
+            self.assertEqual([path.name for path in directory.iterdir()], ["producer.json"])
+            with self.assertRaisesRegex(ValueError, "Child trace directory is not empty"):
+                child_trace.prepare_run(data_file, root / "hook", "unit", "candidate", "1/1")
 
     def test_read_traces_binds_each_child_identity_field_to_its_request(self):
         foreign = {
