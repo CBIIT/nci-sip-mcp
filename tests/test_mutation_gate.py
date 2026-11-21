@@ -320,7 +320,7 @@ class MutationOperatorsTest(unittest.TestCase):
                 "permissions": {"contents": "read"},
                 "runs-on": "ubuntu-24.04",
                 "timeout-minutes": 300,
-                "strategy": {"fail-fast": False, "matrix": {"shard": [1, 2, 3]}},
+                "strategy": {"fail-fast": False, "matrix": {"shard": [1, 2, 3, 4, 5, 6]}},
                 "needs": ["test", "unit-coverage", "selftest", "coverage", "acceptance"],
                 "steps": [
                     {
@@ -345,7 +345,7 @@ class MutationOperatorsTest(unittest.TestCase):
                         "env": {
                             "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
                             "HEAD_SHA": "${{ github.sha }}",
-                            "SHARD": "${{ matrix.shard }}/3",
+                            "SHARD": "${{ matrix.shard }}/6",
                         },
                         "run": (
                             'pdm run mutation-gate --base "$BASE_SHA" --head "$HEAD_SHA" '
