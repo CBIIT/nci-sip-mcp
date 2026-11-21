@@ -2276,6 +2276,33 @@ class HunkParsingTest(unittest.TestCase):
         )
         self.assertEqual(diff_lines(diff), {"src/example.py": {1, 5}})
 
+    def test_added_line_that_looks_like_a_file_header_does_not_rename_the_file(self):
+        base = "".join(f"V{n} = {n}\n" for n in range(1, 13))
+        head = base.replace("V1 = 1\nV2 = 2\nV3 = 3\n", "x = 1\ny = 2\n++ b/src/other.py\n")
+        head = head.replace("V10 = 10", "V10 = 0")
+        self.assertEqual(
+            scope_between({"src/m.py": base}, {"src/m.py": head}),
+            {"src/m.py": {1, 2, 3, 10}},
+        )
+
+    def test_added_line_that_looks_like_a_file_header_after_a_no_newline_marker(self):
+        diff = (
+            "+++ b/src/example.py\n@@ -1,2 +1,2 @@\n-a\n-b\n"
+            "\\ No newline at end of file\n+x\n+++ b/src/other.py\n"
+            "\\ No newline at end of file\n@@ -9 +9 @@\n-p\n+q\n"
+        )
+        self.assertEqual(diff_lines(diff), {"src/example.py": {1, 2, 9}})
+
+    def test_in_place_edit_of_a_file_without_a_trailing_newline_is_selected(self):
+        self.assertEqual(
+            scope_between({"src/m.py": "a = 1\nb = 2"}, {"src/m.py": "a = 1\nb = 3"}),
+            {"src/m.py": {2}},
+        )
+
+    def test_line_separator_inside_a_changed_line_does_not_start_a_hunk(self):
+        diff = "+++ b/src/example.py\n@@ -1 +1 @@\n-a\n+b\x0c@@ -9 +9 @@\n"
+        self.assertEqual(diff_lines(diff), {"src/example.py": {1}})
+
     def test_non_ascii_path_is_selected(self):
         self.assertEqual(
             scope_between({"src/café.py": "a = 1\n"}, {"src/café.py": "a = 2\n"}),
