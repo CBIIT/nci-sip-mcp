@@ -658,11 +658,13 @@ class _ChildTracer:
             if event == "line" and self.matches(frame):
                 self.lines.add(frame.f_lineno)
         except Exception as error:  # noqa: BLE001 - the tracer must never alter the traced code
-            self.fail(f"Tracer callback failed: {error}")
+            self.fail(f"{type(error).__name__}: {error}")
         return self.trace
 
     def fail(self, detail: str) -> None:
         self.module_seen = True
+        if self.outcome == "invalid":
+            return
         self.outcome = "invalid"
         self.detail = detail
 
