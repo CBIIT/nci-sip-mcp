@@ -2201,26 +2201,26 @@ def scope_after_git_rename(head_text, base_text=RENAME_BASE):
 class RenameExemptionScopeTest(unittest.TestCase):
     def test_line_that_differs_only_by_the_sip_rename_is_not_selected(self):
         head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp")
-        self.assertEqual(scope_after_git_rename(head), {})
+        self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: set(range(1, 11))})
 
     def test_rename_plus_logic_change_is_selected(self):
         base = RENAME_BASE + "if nci_si_mcp == 1:\n    pass\n"
         head = RENAME_BASE + "if nci_sip_mcp != 1:\n    pass\n"
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {11}})
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 13))})
 
     def test_added_line_containing_the_new_name_is_selected(self):
         head = RENAME_BASE + "import nci_sip_mcp\n"
-        self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: {11}})
+        self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: set(range(1, 12))})
 
     def test_substitution_outside_the_table_is_selected(self):
         base = RENAME_BASE + "foo_si = 1\n"
         head = RENAME_BASE + "foo_sip = 1\n"
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {11}})
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 12))})
 
     def test_mixed_hunk_is_selected_as_a_whole(self):
         base = "import nci_si_mcp\nVALUE = 1\n" + RENAME_BASE
         head = "import nci_sip_mcp\nVALUE = 2\n" + RENAME_BASE
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {1, 2}})
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 13))})
 
     def test_rename_git_cannot_pair_selects_every_line(self):
         """A rewrite git cannot pair is a delete plus an add, so no hunk can be exempt."""
@@ -2241,8 +2241,10 @@ class SpacedFileNameScopeTest(unittest.TestCase):
         body = "".join(f"V{n} = {n}\n" for n in range(1, 21))
         base = "import nci_si_mcp\n" + body
         head = base.replace("nci_si_mcp", "nci_sip_mcp")
-        self.assertEqual(scope_between({old: base}, {new: head}), {})
-        self.assertEqual(scope_between({old: base}, {new: head + "F = 6\n"}), {new: {22}})
+        self.assertEqual(scope_between({old: base}, {new: head}), {new: set(range(1, 22))})
+        self.assertEqual(
+            scope_between({old: base}, {new: head + "F = 6\n"}), {new: set(range(1, 23))}
+        )
 
 
 MODULE = "".join(f"def f{n}():\n    return {n}\n\n\n" for n in range(10))
@@ -2252,7 +2254,7 @@ class MovedCodeScopeTest(unittest.TestCase):
     def test_module_moved_to_an_unrelated_path_is_selected_whole(self):
         self.assertEqual(
             scope_between({"src/a.py": MODULE}, {"src/elsewhere/b.py": MODULE}),
-            {"src/elsewhere/b.py": None},
+            {"src/elsewhere/b.py": set(range(1, 41))},
         )
 
     def test_module_split_leaves_every_moved_line_selected(self):
@@ -2268,19 +2270,22 @@ class MovedCodeScopeTest(unittest.TestCase):
             scope_between(
                 {"src/a.py": MODULE}, {"src/b.py": MODULE[:cut], "src/c.py": MODULE[cut:]}
             ),
-            {"src/b.py": None, "src/c.py": set(range(1, len(MODULE[cut:].splitlines()) + 1))},
+            {"src/b.py": set(range(1, 25)), "src/c.py": set(range(1, 17))},
         )
 
     def test_table_rename_with_only_table_edits_is_not_selected(self):
         head = MODULE.replace("f0", "nci_sip_mcp_f0")
         base = MODULE.replace("f0", "nci_si_mcp_f0")
-        self.assertEqual(scope_between({OLD_TABLE_PATH: base}, {NEW_TABLE_PATH: head}), {})
+        self.assertEqual(
+            scope_between({OLD_TABLE_PATH: base}, {NEW_TABLE_PATH: head}),
+            {NEW_TABLE_PATH: set(range(1, 41))},
+        )
 
     def test_table_rename_with_a_logic_edit_is_selected_by_hunk(self):
         head = MODULE.replace("return 3", "return 4")
         self.assertEqual(
             scope_between({OLD_TABLE_PATH: MODULE}, {NEW_TABLE_PATH: head}),
-            {NEW_TABLE_PATH: {14}},
+            {NEW_TABLE_PATH: set(range(1, 41))},
         )
 
 
@@ -2317,12 +2322,12 @@ class MultiLineHunkScopeTest(unittest.TestCase):
     def test_three_consecutive_table_substitutions_are_not_selected(self):
         base = LONG_BODY + "".join(f"import nci_si_mcp_{n}\n" for n in range(3)) + "END = 1\n"
         head = base.replace("nci_si_mcp", "nci_sip_mcp")
-        self.assertEqual(scope_after_git_rename(head, base), {})
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 25))})
 
     def test_three_removed_lines_with_one_non_table_change_select_the_new_lines(self):
         base = LONG_BODY + "A = nci_si_mcp\nB = 1\nC = nci_si_mcp\nEND = 1\n"
         head = LONG_BODY + "A = nci_sip_mcp\nB = 2\nC = nci_sip_mcp\nEND = 1\n"
-        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: {21, 22, 23}})
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 25))})
 
 
 class KeptPathScopeTest(unittest.TestCase):
@@ -2350,7 +2355,7 @@ class RenameRobustnessScopeTest(unittest.TestCase):
     def test_table_rename_around_a_no_newline_marker_is_not_selected(self):
         base = LONG_BODY + "import nci_si_mcp"
         head = LONG_BODY + "import nci_sip_mcp"
-        self.assertEqual(scope_after_git_rename(head, base), {})
+        self.assertEqual(scope_after_git_rename(head, base), {NEW_TABLE_PATH: set(range(1, 22))})
 
     def test_pure_rename_is_found_even_when_git_config_disables_renames(self):
         head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp")
@@ -2360,7 +2365,7 @@ class RenameRobustnessScopeTest(unittest.TestCase):
             "GIT_CONFIG_VALUE_0": "false",
         }
         with patch.dict(os.environ, env):
-            self.assertEqual(scope_after_git_rename(head), {})
+            self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: set(range(1, 11))})
 
 
 class HunkParsingTest(unittest.TestCase):
@@ -2379,13 +2384,17 @@ class HunkParsingTest(unittest.TestCase):
             "+++ b/src/example.py\n@@ -1 +1 @@\n-import nci_si_mcp\x0cx\n+import nci_sip_mcp\x0cx\n"
             "@@ -5 +5 @@\n-x\n+y\n"
         )
-        self.assertEqual(diff_lines(diff), {"src/example.py": {5}})
+        self.assertEqual(diff_lines(diff), {"src/example.py": {1, 5}})
 
     def test_non_ascii_path_is_selected(self):
         self.assertEqual(
             scope_between({"src/café.py": "a = 1\n"}, {"src/café.py": "a = 2\n"}),
             {"src/café.py": {1}},
         )
+
+    def test_renamed_file_whose_name_git_quotes_raises(self):
+        with self.assertRaisesRegex(ValueError, "Hunk without a file name"):
+            scope_between({"src/a\tb.py": MODULE}, {"src/c\td.py": MODULE})
 
     def test_hunk_without_a_file_name_raises(self):
         with self.assertRaisesRegex(ValueError, r"@@ -1 \+1 @@"):
