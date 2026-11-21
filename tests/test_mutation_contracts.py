@@ -532,16 +532,22 @@ class MutationCliContractsTest(unittest.TestCase):
             root = Path(directory)
             project(root, "def broken(:\n")
             (root / "src/folder.py").mkdir()
-            for path, message in (
-                ("tests/test_example.py", "Not an eligible Python module: tests/test_example.py"),
-                ("src/example.py", "invalid syntax (<unknown>, line 1)"),
-                ("src/missing.py", "Not an eligible Python module: src/missing.py"),
-                ("src/folder.py", "Not an eligible Python module: src/folder.py"),
+            invalid = {"type": "ValueError"}
+            syntax = {"type": "SyntaxError", "filename": "<unknown>"}
+            for path, message, extra in (
+                (
+                    "tests/test_example.py",
+                    "Not an eligible Python module: tests/test_example.py",
+                    invalid,
+                ),
+                ("src/example.py", "invalid syntax (<unknown>, line 1)", syntax),
+                ("src/missing.py", "Not an eligible Python module: src/missing.py", invalid),
+                ("src/folder.py", "Not an eligible Python module: src/folder.py", invalid),
             ):
                 with self.subTest(path=path):
                     self.assertEqual(
                         command(root, "--paths", path),
-                        (2, [{"outcome": "INFRA", "message": message}]),
+                        (2, [{"outcome": "INFRA", "message": message, **extra}]),
                     )
 
     def test_scheduler_crash_raises_instead_of_returning_partial_results(self):
@@ -756,6 +762,7 @@ class MutationSourceContractsTest(unittest.TestCase):
                                 {
                                     "outcome": "INFRA",
                                     "message": f"Not an eligible Python module: {name}",
+                                    "type": "ValueError",
                                 }
                             ],
                         ),
@@ -1107,7 +1114,7 @@ class MutationSourceContractsTest(unittest.TestCase):
                     (root / "allow.yaml").write_text(content)
                     self.assertEqual(
                         command(root, "--paths", "src/example.py", "--allowlist", "allow.yaml"),
-                        (2, [{"outcome": "INFRA", "message": message}]),
+                        (2, [{"outcome": "INFRA", "message": message, "type": "ValueError"}]),
                     )
 
     def test_changed_sites_use_merge_base_and_include_multiline_intersections_only(self):
