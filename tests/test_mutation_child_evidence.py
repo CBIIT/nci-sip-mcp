@@ -17,7 +17,7 @@ from scripts.validation.mutation_run import (
 )
 from scripts.validation.mutation_source import candidates
 
-from test_mutation_gate import INSTALLED_CHILD_TEST, project
+from fakes import INSTALLED_CHILD_TEST, project
 
 TEST_PATH = "tests/test_installed_child.py"
 NODE = f"{TEST_PATH}::test_value"

@@ -11,7 +11,8 @@ from pathlib import Path
 
 from scripts.processes import stop
 
-from test_mutation_gate import ROOT, project
+from fakes import project
+from test_mutation_gate import ROOT
 
 CHILD = """
 import sys

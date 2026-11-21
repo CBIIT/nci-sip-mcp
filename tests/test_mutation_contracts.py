@@ -29,7 +29,8 @@ from scripts.validation import mutation_run as runner
 from scripts.validation import mutation_source as source
 from scripts.validation.mutation_run import CoverageEvidence
 
-from test_mutation_gate import cli, command, project
+from fakes import project
+from test_mutation_gate import cli, command
 
 
 def git(root, *args):

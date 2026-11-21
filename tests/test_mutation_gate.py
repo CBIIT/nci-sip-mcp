@@ -50,6 +50,8 @@ from scripts.validation.mutation_source import (
     scope,
 )
 
+from fakes import INSTALLED_CHILD_TEST, project
+
 ROOT = Path(__file__).resolve().parents[1]
 NO_COVERAGE = CoverageEvidence(ROOT, {}, ())
 RECORDED_WAIT_SOURCE = """class StdioOwner:
@@ -112,53 +114,6 @@ def return_none_key(source: str) -> dict[str, str]:
         for mutant in mutants
         if mutant.operator == "return:None" and mutant.site == "/body/1"
     )
-
-
-def project(root, source, unit="assert example.answer() is True", contract="assert 1 == 1"):
-    files = {
-        "src/example.py": source,
-        "tests/test_example.py": f"import example\ndef test_value():\n    {unit}\n",
-        "acceptance/selftests/test_harness.py": "def test_harness():\n    assert 2 == 2\n",
-        "acceptance/tests/test_contract.py": (
-            f"import example\ndef test_contract():\n    {contract}\n"
-        ),
-        "acceptance/conftest.py": (
-            "def pytest_addoption(parser):\n    parser.addoption('--report')\n"
-        ),
-        "pyproject.toml": '[tool.pytest.ini_options]\npythonpath = ["src"]\n',
-    }
-    for name, value in files.items():
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(value)
-
-
-INSTALLED_CHILD_TEST = (
-    "import subprocess, venv\n"
-    "from pathlib import Path\n"
-    "from scripts.validation.mutation_child_trace import ChildRoute, child_environment\n"
-    "def test_value():\n"
-    "    root = Path(__file__).resolve().parents[1]\n"
-    "    environment = root / 'owned-child'\n"
-    "    venv.EnvBuilder(with_pip=False).create(environment)\n"
-    "    interpreter = environment / 'bin/python'\n"
-    "    site = subprocess.run(\n"
-    "        [str(interpreter), '-c', "
-    "\"import sysconfig; print(sysconfig.get_paths()['purelib'])\"],\n"
-    "        capture_output=True, text=True, check=True,\n"
-    "    )\n"
-    "    package = Path(site.stdout.strip()) / 'example.py'\n"
-    "    package.write_bytes((root / 'src/example.py').read_bytes())\n"
-    "    route = ChildRoute('src/example.py', 'example', environment)\n"
-    "    child_env = child_environment(route)\n"
-    "    child = subprocess.run(\n"
-    "        [str(interpreter), '-c', "
-    "'import example; print(example.__file__)'],\n"
-    "        env=child_env, capture_output=True, text=True, check=True,\n"
-    "    )\n"
-    "    imported = Path(child.stdout.strip()).resolve()\n"
-    "    assert imported.is_relative_to(environment.resolve())\n"
-)
 
 
 WHEEL_CHILD_TEST = """\

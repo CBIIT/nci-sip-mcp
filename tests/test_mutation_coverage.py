@@ -21,12 +21,11 @@ from scripts.validation.mutation_gate import manifest_data, schedule
 from scripts.validation.mutation_run import baseline, environment, run_domain, selection
 from scripts.validation.mutation_source import candidates
 
+from fakes import INSTALLED_CHILD_TEST, project
 from test_mutation_gate import (
-    INSTALLED_CHILD_TEST,
     ROOT,
     cli,
     composed_wheel_child_test,
-    project,
     wheel_project,
 )
 
