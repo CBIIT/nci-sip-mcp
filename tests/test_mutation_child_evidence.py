@@ -74,6 +74,16 @@ TRACER_FAILURE = (
     "    pass\n"
     "print(example.__file__)\n"
 )
+TRACER_FAILS_TWICE = (
+    "import example, types\n"
+    "for name in ('a\\0b', '\\udc80'):\n"
+    "    bad = (lambda: 1).__code__.replace(co_filename=name)\n"
+    "    try:\n"
+    "        types.FunctionType(bad, {'__name__': 'example'})()\n"
+    "    except (ValueError, UnicodeError):\n"
+    "        pass\n"
+    "print(example.__file__)\n"
+)
 COLLAPSED_STATEMENT_CHILD = (
     "import example, pathlib\n"
     "text = pathlib.Path(example.__file__).read_text()\n"
@@ -155,6 +165,17 @@ class ChildTraceFidelityTest(unittest.TestCase):
                 outcome["message"],
                 "Installed child trace is invalid: Tracer callback failed: "
                 "lstat: embedded null character in path",
+            )
+
+    def test_the_first_tracer_failure_is_the_one_recorded(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            outcome, _ = baseline_run(root, installed_child_test(TRACER_FAILS_TWICE))
+            self.assertEqual(outcome["outcome"], "INFRA", outcome)
+            self.assertEqual(
+                outcome["message"],
+                "Installed child trace is invalid: "
+                "ValueError: lstat: embedded null character in path",
             )
 
 
