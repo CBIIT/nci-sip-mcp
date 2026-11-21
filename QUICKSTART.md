@@ -11,7 +11,7 @@ See also: the same instructions and diagrams as a searchable website
 and validation dashboard in [local companion containers](docs/companion-containers.md); the
 [validation guide](docs/local-validation.md) for `pdm run portal serve`, runs, results and
 configuration proposals, including startup-settings snapshots
-(`nci-si-mcp serve --configuration-snapshot PATH`,
+(`nci-sip-mcp serve --configuration-snapshot PATH`,
 [configuration evidence](docs/local-validation.md#configuration-evidence-and-proposals)). The
 [request identification guide](docs/request-identification.md) covers local identity provisioning;
 the utilities do not label requests yet.
@@ -44,16 +44,16 @@ make those requests.
 
 Keep deployment targets, credentials and approved access policy outside code wherever the
 existing interfaces support them; never commit secrets. The [Settings table](#settings) owns
-`NCI_SI_UPSTREAM_MODE` and the five endpoints: `NCI_SI_EVS_BASE_URL`, `NCI_SI_EVS_FHIR_BASE_URL`,
-`NCI_SI_CADSR_BASE_URL`, `NCI_SI_CADSR_FTP_URL` and `NCI_SI_SSIS_SPARQL_URL`.
-It also owns `NCI_SI_CADSR_CREDENTIAL` and `NCI_SI_EVS_LICENSE_KEY`; service credentials are
+`NCI_SIP_UPSTREAM_MODE` and the five endpoints: `NCI_SIP_EVS_BASE_URL`, `NCI_SIP_EVS_FHIR_BASE_URL`,
+`NCI_SIP_CADSR_BASE_URL`, `NCI_SIP_CADSR_FTP_URL` and `NCI_SIP_SSIS_SPARQL_URL`.
+It also owns `NCI_SIP_CADSR_CREDENTIAL` and `NCI_SIP_EVS_LICENSE_KEY`; service credentials are
 origin-bound, not caller authorization. Live mode fills unset endpoints with production defaults.
 Fixture mode requires all five explicit endpoints, preventing silent fallback; it does not
 reject an explicitly supplied prohibited origin.
 
-`NCI_SI_PROFILE` limits the served surface. An opt-in `authority_resolver` supplies
-[caller permissions](docs/caller-permissions.md); governed HTTP uses `NCI_SI_HTTP_AUTH_MODE`
-and `NCI_SI_HTTP_AUTH_FACTORY` for an approved [authentication/policy integration](docs/governed-http.md).
+`NCI_SIP_PROFILE` limits the served surface. An opt-in `authority_resolver` supplies
+[caller permissions](docs/caller-permissions.md); governed HTTP uses `NCI_SIP_HTTP_AUTH_MODE`
+and `NCI_SIP_HTTP_AUTH_FACTORY` for an approved [authentication/policy integration](docs/governed-http.md).
 These inbound/tool controls are not a universal outbound-environment policy. Current settings
 and credentials neither enforce nor lift the operational holds. Named environment isolation
 and pre-send request safeguards are scheduled in [#447](https://github.com/CBIIT/nci-sip-mcp/issues/447)
@@ -111,8 +111,8 @@ environments aligned rather than promising compatibility with older interpreters
 
 ```bash
 pdm install
-pdm run nci-si-mcp release-info
-pdm run nci-si-mcp serve
+pdm run nci-sip-mcp release-info
+pdm run nci-sip-mcp serve
 ```
 
 `pdm install` creates `.venv` from `pdm.lock` and installs the package in editable mode with
@@ -134,8 +134,8 @@ For real embeddings, set both variables:
 
 ```bash
 pdm install -G embeddings
-export NCI_SI_EMBEDDING_PROVIDER=sentence-transformers
-export NCI_SI_EMBEDDING_MODEL=cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+export NCI_SIP_EMBEDDING_PROVIDER=sentence-transformers
+export NCI_SIP_EMBEDDING_MODEL=cambridgeltl/SapBERT-from-PubMedBERT-fulltext
 ```
 
 ## Connect a client
@@ -159,7 +159,7 @@ local stdio, a local HTTP container and the proposed cloud layout.
 For remote clients, run the server over streamable HTTP and connect to `http://127.0.0.1:8000/mcp`:
 
 ```bash
-pdm run nci-si-mcp serve --transport streamable-http
+pdm run nci-sip-mcp serve --transport streamable-http
 ```
 
 See [remote transport](docs/transport.md) for session modes,
@@ -172,9 +172,9 @@ configuration (Claude Desktop, for one), with absolute paths:
 {
   "mcpServers": {
     "nci-si": {
-      "command": "/path/to/nci-si-mcp/.venv/bin/nci-si-mcp",
+      "command": "/path/to/nci-sip-mcp/.venv/bin/nci-sip-mcp",
       "args": ["serve"],
-      "env": {"NCI_SI_DATA_DIR": "/path/to/data"}
+      "env": {"NCI_SIP_DATA_DIR": "/path/to/data"}
     }
   }
 }
@@ -190,44 +190,44 @@ process. An MCP client chooses that directory when it launches the server, so gi
 absolute path:
 
 ```bash
-export NCI_SI_DATA_DIR=/path/to/data
+export NCI_SIP_DATA_DIR=/path/to/data
 ```
 
 A leading `~` is expanded, and an empty value is rejected. The other settings:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `NCI_SI_PROFILE` | `unified` | `evs`, `cadsr` or `unified`. Selects twelve EVS tools, ten caDSR tools, or all 29 tools including cross-domain and workflows. Unified also exposes four furnished prompts: the templates of `spec/prompts.yaml` with the arguments substituted, which make no content calls. Resources follow their group. CLI commands remain available in every profile |
-| `NCI_SI_UPSTREAM_MODE` | `live` | `live` or `fixture`; selects the five base URLs below as a set (next paragraph) |
-| `NCI_SI_EVS_BASE_URL` | `https://api-evsrest.nci.nih.gov` | EVS REST endpoint (`http` or `https`) |
-| `NCI_SI_EVS_FHIR_BASE_URL` | `https://api-evsrest.nci.nih.gov/fhir/r4` | EVS FHIR endpoint; an operator-set URL must be on the platform that issued the EVS licence key, which is sent to both REST and FHIR |
-| `NCI_SI_CADSR_BASE_URL` | `https://cadsrapi.cancer.gov/rad` | caDSR REST endpoint |
-| `NCI_SI_CADSR_FTP_URL` | `https://cadsr.nci.nih.gov/ftp/caDSR_Downloads` | caDSR export (FTP) endpoint |
-| `NCI_SI_SSIS_SPARQL_URL` | `https://shared.semantics.cancer.gov` | Shared Semantic Infrastructure SPARQL endpoint |
-| `NCI_SI_RELEASE_CHANNEL` | `monthly` | The default channel for discovery and CLI diagnostics: `monthly` or `weekly`. The release is the one EVS row that is latest and tagged with the channel; with none or several the call fails with a release-not-available error. MCP content tools use the release the caller supplies |
-| `NCI_SI_EXCLUSION_ROLE_CODES` | `R135,R136,R137,R138,R139,R140,R141,R142` | NCIt exclusion roles, a comma-separated list of codes (`R` and digits); checked against the requested release catalogue on each relationship listing or neighborhood call |
-| `NCI_SI_EVS_LICENSE_KEY` | unset | EVS licence key, sent as the `X-EVSRESTAPI-License-Key` header on EVS REST and FHIR requests, bound to each configured endpoint origin; at least 8 characters, so redaction never matches unrelated text. A credential: never logged, in no error message or string form |
-| `NCI_SI_CADSR_CREDENTIAL` | unset | caDSR credential as `user:password` (the password at least 8 characters); handled like the licence key |
-| `NCI_SI_TIMEOUT_SECONDS` | `30` | Per-request timeout |
-| `NCI_SI_MATCH_TIMEOUT_SECONDS` | `45` | Timeout of a caDSR match request |
-| `NCI_SI_CALL_DEADLINE_SECONDS` | `50` | Shared elapsed-time budget per call, including release discovery, retries and workflow hops; finite and positive, no disable switch. Index operator commands are outside this deadline. DNS resolution and connection setup are bounded only by the per-request timeout: this is not a hard real-time cutoff |
-| `NCI_SI_EVS_MAX_ATTEMPTS` | `3` | Request attempts, 1 to 10. Only a 5xx, a 429 and connection failures other than TLS certificate verification failures are retried; a 429 waits for its `Retry-After` (a platform that asks for more than 60 seconds is not asked again) |
-| `NCI_SI_EVS_RETRY_BACKOFF_SECONDS` | `0.25` | Initial exponential backoff, jittered between half and all of it; a single wait is capped at 60 seconds |
-| `NCI_SI_EVS_MAX_RESPONSE_BYTES` | `10485760` | Maximum accepted EVS REST or FHIR response, up to 1 GiB |
-| `NCI_SI_INDEX_BATCH_SIZE` | `100` | Codes per EVS indexing request |
-| `NCI_SI_LOG_LEVEL` | `INFO` | Stderr diagnostic level; per-call audit records remain enabled at every level |
-| `NCI_SI_TRANSPORT` | `stdio` | Serve over stdio or streamable-http; `serve --transport` overrides this setting |
-| `NCI_SI_HTTP_HOST` | `127.0.0.1` | HTTP bind address; binding all interfaces does not relax the Host allow-list |
-| `NCI_SI_HTTP_PORT` | `8000` | HTTP port, 1–65535; MCP endpoint is /mcp |
-| `NCI_SI_HTTP_SESSIONS` | `stateful` | stateful retains handshake-era sessions' implicit releases and needs process affinity; stateless and sessionless 2026-07-28 HTTP resolve per call without affinity |
-| `NCI_SI_HTTP_AUTH_MODE` | `trusted-local` | The container image presets `required`, refusing HTTP startup without a complete approved integration; cannot serve stdio. Trusted local image use requires an explicit `trusted-local` opt-out and loopback-only publishing; see [container operation](docs/container.md) |
-| `NCI_SI_HTTP_AUTH_FACTORY` | unset | In required mode, an installed `module:factory` returning SDK authentication and caller policy; see [governed HTTP](docs/governed-http.md) |
-| `NCI_SI_HTTP_MAX_REQUEST_BYTES` | `4194304` | Maximum HTTP request body bytes, including chunked bodies; oversized requests return 413 before parsing |
-| `NCI_SI_HTTP_ALLOWED_HOSTS` | `127.0.0.1:*,localhost:*,[::1]:*` | Comma-separated permitted Host authorities, exact or wildcard port; add the public authority when using a proxy |
-| `NCI_SI_HTTP_ALLOWED_ORIGINS` | `http://127.0.0.1:*,http://localhost:*,http://[::1]:*` | Permitted Origin authorities, exact or wildcard port; requests without Origin are allowed |
-| `NCI_SI_HTTP_REQUIRE_INDEX` | `0` | Boolean switch, read as `0` or `1` only (anything else is a configuration error). Set to 1 when deployment supplies an index: readiness requires an active build compatible with the configured embedding model. With 0 an absent index permits live tools; an existing active build is still verified |
+| `NCI_SIP_PROFILE` | `unified` | `evs`, `cadsr` or `unified`. Selects twelve EVS tools, ten caDSR tools, or all 29 tools including cross-domain and workflows. Unified also exposes four furnished prompts: the templates of `spec/prompts.yaml` with the arguments substituted, which make no content calls. Resources follow their group. CLI commands remain available in every profile |
+| `NCI_SIP_UPSTREAM_MODE` | `live` | `live` or `fixture`; selects the five base URLs below as a set (next paragraph) |
+| `NCI_SIP_EVS_BASE_URL` | `https://api-evsrest.nci.nih.gov` | EVS REST endpoint (`http` or `https`) |
+| `NCI_SIP_EVS_FHIR_BASE_URL` | `https://api-evsrest.nci.nih.gov/fhir/r4` | EVS FHIR endpoint; an operator-set URL must be on the platform that issued the EVS licence key, which is sent to both REST and FHIR |
+| `NCI_SIP_CADSR_BASE_URL` | `https://cadsrapi.cancer.gov/rad` | caDSR REST endpoint |
+| `NCI_SIP_CADSR_FTP_URL` | `https://cadsr.nci.nih.gov/ftp/caDSR_Downloads` | caDSR export (FTP) endpoint |
+| `NCI_SIP_SSIS_SPARQL_URL` | `https://shared.semantics.cancer.gov` | Shared Semantic Infrastructure SPARQL endpoint |
+| `NCI_SIP_RELEASE_CHANNEL` | `monthly` | The default channel for discovery and CLI diagnostics: `monthly` or `weekly`. The release is the one EVS row that is latest and tagged with the channel; with none or several the call fails with a release-not-available error. MCP content tools use the release the caller supplies |
+| `NCI_SIP_EXCLUSION_ROLE_CODES` | `R135,R136,R137,R138,R139,R140,R141,R142` | NCIt exclusion roles, a comma-separated list of codes (`R` and digits); checked against the requested release catalogue on each relationship listing or neighborhood call |
+| `NCI_SIP_EVS_LICENSE_KEY` | unset | EVS licence key, sent as the `X-EVSRESTAPI-License-Key` header on EVS REST and FHIR requests, bound to each configured endpoint origin; at least 8 characters, so redaction never matches unrelated text. A credential: never logged, in no error message or string form |
+| `NCI_SIP_CADSR_CREDENTIAL` | unset | caDSR credential as `user:password` (the password at least 8 characters); handled like the licence key |
+| `NCI_SIP_TIMEOUT_SECONDS` | `30` | Per-request timeout |
+| `NCI_SIP_MATCH_TIMEOUT_SECONDS` | `45` | Timeout of a caDSR match request |
+| `NCI_SIP_CALL_DEADLINE_SECONDS` | `50` | Shared elapsed-time budget per call, including release discovery, retries and workflow hops; finite and positive, no disable switch. Index operator commands are outside this deadline. DNS resolution and connection setup are bounded only by the per-request timeout: this is not a hard real-time cutoff |
+| `NCI_SIP_EVS_MAX_ATTEMPTS` | `3` | Request attempts, 1 to 10. Only a 5xx, a 429 and connection failures other than TLS certificate verification failures are retried; a 429 waits for its `Retry-After` (a platform that asks for more than 60 seconds is not asked again) |
+| `NCI_SIP_EVS_RETRY_BACKOFF_SECONDS` | `0.25` | Initial exponential backoff, jittered between half and all of it; a single wait is capped at 60 seconds |
+| `NCI_SIP_EVS_MAX_RESPONSE_BYTES` | `10485760` | Maximum accepted EVS REST or FHIR response, up to 1 GiB |
+| `NCI_SIP_INDEX_BATCH_SIZE` | `100` | Codes per EVS indexing request |
+| `NCI_SIP_LOG_LEVEL` | `INFO` | Stderr diagnostic level; per-call audit records remain enabled at every level |
+| `NCI_SIP_TRANSPORT` | `stdio` | Serve over stdio or streamable-http; `serve --transport` overrides this setting |
+| `NCI_SIP_HTTP_HOST` | `127.0.0.1` | HTTP bind address; binding all interfaces does not relax the Host allow-list |
+| `NCI_SIP_HTTP_PORT` | `8000` | HTTP port, 1–65535; MCP endpoint is /mcp |
+| `NCI_SIP_HTTP_SESSIONS` | `stateful` | stateful retains handshake-era sessions' implicit releases and needs process affinity; stateless and sessionless 2026-07-28 HTTP resolve per call without affinity |
+| `NCI_SIP_HTTP_AUTH_MODE` | `trusted-local` | The container image presets `required`, refusing HTTP startup without a complete approved integration; cannot serve stdio. Trusted local image use requires an explicit `trusted-local` opt-out and loopback-only publishing; see [container operation](docs/container.md) |
+| `NCI_SIP_HTTP_AUTH_FACTORY` | unset | In required mode, an installed `module:factory` returning SDK authentication and caller policy; see [governed HTTP](docs/governed-http.md) |
+| `NCI_SIP_HTTP_MAX_REQUEST_BYTES` | `4194304` | Maximum HTTP request body bytes, including chunked bodies; oversized requests return 413 before parsing |
+| `NCI_SIP_HTTP_ALLOWED_HOSTS` | `127.0.0.1:*,localhost:*,[::1]:*` | Comma-separated permitted Host authorities, exact or wildcard port; add the public authority when using a proxy |
+| `NCI_SIP_HTTP_ALLOWED_ORIGINS` | `http://127.0.0.1:*,http://localhost:*,http://[::1]:*` | Permitted Origin authorities, exact or wildcard port; requests without Origin are allowed |
+| `NCI_SIP_HTTP_REQUIRE_INDEX` | `0` | Boolean switch, read as `0` or `1` only (anything else is a configuration error). Set to 1 when deployment supplies an index: readiness requires an active build compatible with the configured embedding model. With 0 an absent index permits live tools; an existing active build is still verified |
 
-`NCI_SI_INSTALLATION_ID` is read only by the local identity utility, not by server settings or
+`NCI_SIP_INSTALLATION_ID` is read only by the local identity utility, not by server settings or
 request emission. For a persistent installation, generate one value, replace the placeholder
 below with that saved value, and retain it in durable deployment configuration across restarts and
 upgrades. This `export` lasts only in the current shell; do not generate a fresh value on every
@@ -235,10 +235,10 @@ startup. The [request identification guide](docs/request-identification.md) cove
 ephemeral-job configuration.
 
 ```bash
-export NCI_SI_INSTALLATION_ID='<saved-generated-value>'
+export NCI_SIP_INSTALLATION_ID='<saved-generated-value>'
 ```
 
-Choose `NCI_SI_PROFILE` for the **whole session**: use `evs` or `cadsr` only when every
+Choose `NCI_SIP_PROFILE` for the **whole session**: use `evs` or `cadsr` only when every
 needed operation belongs to that domain. Use `unified` for mixed-domain sessions,
 cross-domain lookups or workflow tools. A caller policy can narrow the selected surface
 further; selecting a profile grants no permission. See [response selection](#select-result-sections-and-pages)
@@ -269,7 +269,7 @@ points per scalar, including each nested string. Oversized input is refused with
 
 | Limit | Value | Reason / what to reassess before changing it |
 |---|---|---|
-| Call deadline (`NCI_SI_CALL_DEADLINE_SECONDS`) | 50 s default | Leaves headroom below common 60 s client timeouts; weigh client/gateway timeouts before raising it. One stalled body read can overrun by at most the socket timeout chosen at request open: `min(timeout, remaining)`, with `timeout` set by `NCI_SI_TIMEOUT_SECONDS` or `NCI_SI_MATCH_TIMEOUT_SECONDS` for matching ([A5.2](docs/specification.md#a5-result-bounding-truncation-and-traversal)) |
+| Call deadline (`NCI_SIP_CALL_DEADLINE_SECONDS`) | 50 s default | Leaves headroom below common 60 s client timeouts; weigh client/gateway timeouts before raising it. One stalled body read can overrun by at most the socket timeout chosen at request open: `min(timeout, remaining)`, with `timeout` set by `NCI_SIP_TIMEOUT_SECONDS` or `NCI_SIP_MATCH_TIMEOUT_SECONDS` for matching ([A5.2](docs/specification.md#a5-result-bounding-truncation-and-traversal)) |
 | HTTP shutdown drain | 20 s | Deployment SIGTERM drain policy, not a request timeout; coordinate with the deployment termination grace period ([transport](docs/transport.md#admission-and-readiness)) |
 | `search_concepts.query`, `search_data_elements.query` | 1,000 | Search phrases, with bounded search work; reassess real queries and encoding ([field reasons](spec/tools.yaml)) |
 | `get_data_element.questionText` | 2,000 | July 2026 preferred-question-text maximum was 1,011 (CDE 6148373 v1); snapshot gaps warrant headroom; remeasure broader exports ([hashes and reason](spec/tools.yaml)) |
@@ -288,9 +288,9 @@ The full NCIt concept universe is large. The complete local guide owns the relea
 required-index server sequence. From a checkout, use:
 
 ```bash
-pdm run nci-si-mcp index-sample C3262 C2991 C40704 C153397 C116938
-pdm run nci-si-mcp search "kinase inhibition"
-pdm run nci-si-mcp evaluate
+pdm run nci-sip-mcp index-sample C3262 C2991 C40704 C153397 C116938
+pdm run nci-sip-mcp search "kinase inhibition"
+pdm run nci-sip-mcp evaluate
 ```
 
 `index-sample` adds concepts to the index while the configured channel's release stays the
@@ -376,7 +376,7 @@ No MCP result carries the full EVS `raw` payload, to keep MCP context compact. T
 CLI adds it to `search` and `lookup` with `--include-raw`, for debugging:
 
 ```bash
-pdm run nci-si-mcp lookup C3262 --include-raw
+pdm run nci-sip-mcp lookup C3262 --include-raw
 ```
 
 ### Search the local index
@@ -435,7 +435,7 @@ discovery and keep content stable (X-22, A3.1).
 Traversal can be tested from the terminal before using MCP:
 
 ```bash
-pdm run nci-si-mcp traverse C3262 \
+pdm run nci-sip-mcp traverse C3262 \
   --max-depth 1 \
   --max-edges 100 \
   --edge-type role \
@@ -636,7 +636,7 @@ was cut. Otherwise it holds `bound` (`results`, `depth`, `nodes`, `edges`, `kind
 `reached`, `omitted` (always a number) and `exact` (false where `omitted` is a lower bound). A
 traversal reports the first bound that dropped something; it counts the concepts or edges it
 dropped, not those beyond them, so `exact` is false. `upstream_cap` is a concept whose relations
-or descendants exceeded `NCI_SI_EVS_MAX_RESPONSE_BYTES`: `omitted` counts such concepts, and the
+or descendants exceeded `NCI_SIP_EVS_MAX_RESPONSE_BYTES`: `omitted` counts such concepts, and the
 log names them. CLI search reports `results` when `limit` left scored concepts out; `exact` is true
 where every candidate was scored. MCP search pages with `nextCursor` instead of truncating.
 `kind_budget` counts new nodes omitted by the first exhausted kind. `requests` counts
@@ -943,9 +943,9 @@ EVS wraps in a success status but that is an error envelope, an error
 | `not_found` | The requested release has no concept with that code, or `index-sample` named codes the release does not contain (nothing was indexed); Form-by-ID alone also reads HTTP 200 with `form: null` and `apiResponse.type` E as `not_found`, after the id is validated ([cadsr-forms](docs/upstream/cadsr.md#cadsr-forms)) | `identifiers` |
 | `release_not_available` | EVS did not name exactly one latest NCIt release for the channel (`requested` names the requested channel; optional `found` lists versions when several rows were returned), current NCIt tags are malformed (`requested: ncit`), EVS no longer serves the pinned release, or a release resource names an unserved version or one with absent/ambiguous channel metadata; a caDSR matching pin that is not listed upstream | `requested`, `source`, `found` |
 | `release_mismatch` | The local index holds a different release than the requested one, or EVS served a concept of another release than the one requested | `requested`, `served` (a list of releases), `source` |
-| `upstream_unavailable` | EVS could not be reached or kept failing after the retries, rejected the request, or returned something unusable: a malformed, HTML or masked-error body, or a 404 from any request other than a single-concept lookup (check `NCI_SI_EVS_BASE_URL`); an empty unfiltered terminology listing, with its actual `status` and `attempts`. Call deadline exhaustion uses this code, with `attempts` counting all outbound requests actually started across the call, including retries and release discovery | `surface`, `status`, `attempts`, `retryAfter` (`status` and `retryAfter` where known; deadline `surface` where known) |
-| `timeout` | Every attempt at an upstream request timed out (`NCI_SI_TIMEOUT_SECONDS`; `NCI_SI_MATCH_TIMEOUT_SECONDS` for caDSR matching) before the call deadline; timeouts are errors, never empty results | `surface`, `seconds`, `attempts` |
-| `bound_exceeded` | An EVS response exceeds `NCI_SI_EVS_MAX_RESPONSE_BYTES`, the request budget is exhausted before a graph is available, or hierarchy page replay exhausts its request budget | `bound`, `limit`, `reached` (for response size, the limit plus one when EVS declared no length) |
+| `upstream_unavailable` | EVS could not be reached or kept failing after the retries, rejected the request, or returned something unusable: a malformed, HTML or masked-error body, or a 404 from any request other than a single-concept lookup (check `NCI_SIP_EVS_BASE_URL`); an empty unfiltered terminology listing, with its actual `status` and `attempts`. Call deadline exhaustion uses this code, with `attempts` counting all outbound requests actually started across the call, including retries and release discovery | `surface`, `status`, `attempts`, `retryAfter` (`status` and `retryAfter` where known; deadline `surface` where known) |
+| `timeout` | Every attempt at an upstream request timed out (`NCI_SIP_TIMEOUT_SECONDS`; `NCI_SIP_MATCH_TIMEOUT_SECONDS` for caDSR matching) before the call deadline; timeouts are errors, never empty results | `surface`, `seconds`, `attempts` |
+| `bound_exceeded` | An EVS response exceeds `NCI_SIP_EVS_MAX_RESPONSE_BYTES`, the request budget is exhausted before a graph is available, or hierarchy page replay exhausts its request budget | `bound`, `limit`, `reached` (for response size, the limit plus one when EVS declared no length) |
 | `capability_unavailable` | The requested terminology or operation is not supported yet, or an index resource has no active index; the MCP tool descriptions name the interim limits; a published caDSR registry pin on form lookup, matching or grounding (capability `pinned form lookup`, `pinned matching` or `pinned grounding`), because those APIs have no `registryRelease` field yet ([cadsr-match-parameters](docs/upstream/cadsr.md#cadsr-match-parameters)); no unpinned match is labelled pinned | `capability` |
 | `cursor_expired` | EVS no longer serves a hierarchy or live-search cursor’s release, or the active indexed-search build changed; restart the query. Same-release build replacement also expires a cursor, with equal release identifiers | `cursorRelease`, `currentRelease` |
 | `permission_denied` | Secured caller policy denies the operation, is missing, unavailable or expired; contact the service operator to review access | None; restricted identifiers and required permissions are not disclosed |

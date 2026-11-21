@@ -1,5 +1,6 @@
 """The mutation command measures assertion sensitivity without editing its caller."""
 
+import ast
 import contextlib
 import io
 import json
@@ -14,6 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import patch
 
 import yaml
@@ -22,9 +24,76 @@ from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
 from scripts.validation.mutation_gate import execute_job
 from scripts.validation.mutation_run import coverage_map, program, run_domain, selection, snapshot
-from scripts.validation.mutation_source import allowlist, candidates, diff_lines, scope
+from scripts.validation.mutation_source import (
+    allowlist,
+    candidates,
+    diff_lines,
+    digest,
+    fingerprint_dump,
+    scope,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
+RECORDED_WAIT_SOURCE = """class StdioOwner:
+    async def _wait(self, seconds: float, deadline: CleanupDeadline) -> bool:
+        try:
+            with anyio.fail_after(min(seconds, deadline.remaining())):
+                code = await self._process().wait()
+            if code != 0 and -code not in self._sent_signals:
+                self._initiate(RequestPolicyError("transport"))
+            return code == self._process().returncode
+        except TimeoutError:
+            return False
+        except BaseException as error:
+            self.errors.append(error)
+            return False
+"""
+RECORDED_WAIT_KEY = {
+    "file": "acceptance/src/nci_sip_acceptance/request_stdio.py",
+    "qualname": "StdioOwner._wait",
+    "operator": "return:None",
+    "site": "/body/0/handlers/1/body/1",
+    "context": "4d533410f44b8c205783b80e88589472e0c5775284193ff99180dbbca3c5a881",
+    "original": "dd863ea504e8543d2fb185a820aa7e2cf2d0ceddec9c835185a3510fc2ab463d",
+    "mutated": "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51",
+}
+RECORDED_REMAINING_SOURCE = """class SupervisedRun:
+    def _remaining(self, seconds: float) -> float:
+        if not self._controlled_cleanup or self._deadline is None:
+            return seconds
+        return min(seconds, self._deadline.remaining())
+"""
+RECORDED_REMAINING_KEY = {
+    "file": "acceptance/src/nci_sip_acceptance/request_supervision.py",
+    "qualname": "SupervisedRun._remaining",
+    "operator": "boolean:drop:1",
+    "site": "/body/0/test/0",
+    "context": "f36f6bf2841ccd71d34ad08175fe1d1069198f811ea06b7c05f0633bf4f5e518",
+    "original": "ff105d5e1b393b7d932f3a338ac223fe44a1d825ca05e559507ad33386fa0a2d",
+    "mutated": "ccddcadc719010718fc95f86d8289368500076b3b7547b038cc86a0b34743b7e",
+}
+FINGERPRINT_SOURCE = """def fingerprint(value: str = "ctx=Load()"):
+    assigned = value
+    return "ctx=Load()"
+"""
+FINGERPRINT_RETURN_KEY = {
+    "file": "src/example.py",
+    "qualname": "fingerprint",
+    "operator": "return:None",
+    "site": "/body/1",
+    "context": "3163ffb7b54423f4c5c6140812861d6663e0f0a0d95931c4d0f6885902b63678",
+    "original": "11c13472822fbfa58bea0087abb1f480200f45a41c94cedde76db259ca7c79e6",
+    "mutated": "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51",
+}
+
+
+def return_none_key(source: str) -> dict[str, str]:
+    mutants, _ = candidates("src/example.py", source.encode())
+    return next(
+        mutant.key()
+        for mutant in mutants
+        if mutant.operator == "return:None" and mutant.site == "/body/1"
+    )
 
 
 def project(root, source, unit="assert example.answer() is True", contract="assert 1 == 1"):
@@ -55,6 +124,14 @@ def mutant_rows(rows):
     return [row for row in rows if "site" in row]
 
 
+def isolated_shard(mutants, target):
+    for count in range(len(mutants) + 1, len(mutants) + 100):
+        index = int(digest(json.dumps(target.key(), sort_keys=True)), 16) % count + 1
+        if mutation_gate.partition(mutants, (index, count)) == [target]:
+            return f"{index}/{count}"
+    raise AssertionError("Could not isolate the intended mutation shard")
+
+
 def domain_routes(rows):
     return [[run["domain"] for run in row["domains"]] for row in rows]
 
@@ -75,6 +152,107 @@ def cli(root, *args):
 
 
 class MutationOperatorsTest(unittest.TestCase):
+    def test_recorded_314_allowlist_key_is_portable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / RECORDED_WAIT_KEY["file"]
+            source.parent.mkdir(parents=True)
+            source.write_text(RECORDED_WAIT_SOURCE, encoding="utf-8")
+            path = root / "allowlist.yaml"
+            path.write_text(yaml.safe_dump([{**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}]))
+
+            self.assertEqual(
+                allowlist(root, path),
+                [{**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}],
+            )
+
+    def test_recorded_load_bearing_boolean_key_passes_allowlist_validation(self):
+        entry = {
+            **RECORDED_REMAINING_KEY,
+            "reason": "Recorded 3.14 key with loads in the original and replacement.",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / entry["file"]
+            source.parent.mkdir(parents=True)
+            source.write_text(RECORDED_REMAINING_SOURCE, encoding="utf-8")
+            path = root / "scripts/validation/mutation-allowlist.yaml"
+            path.parent.mkdir(parents=True)
+            path.write_text(yaml.safe_dump([entry]), encoding="utf-8")
+
+            self.assertEqual(allowlist(root, path), [entry])
+
+    def test_fingerprint_preserves_314_defaults_contexts_and_literal_text(self):
+        key = return_none_key(FINGERPRINT_SOURCE)
+        self.assertEqual(key, FINGERPRINT_RETURN_KEY)
+        changed_name = return_none_key(
+            FINGERPRINT_SOURCE.replace("assigned = value", "assigned = other")
+        )
+        changed_literal = return_none_key(
+            FINGERPRINT_SOURCE.replace('return "ctx=Load()"', 'return "ctx=Store()"')
+        )
+        self.assertNotEqual(changed_name["context"], key["context"])
+        self.assertNotEqual(changed_literal["context"], key["context"])
+        self.assertNotEqual(changed_literal["original"], key["original"])
+
+    def test_fingerprint_drops_only_empty_lists_the_node_type_declares(self):
+        call = ast.parse("f(x)", mode="eval").body
+        no_arguments = ast.parse("f()", mode="eval").body
+        self.assertIn("args=[Name(id='x', ctx=Load())]", fingerprint_dump(call))
+        self.assertNotIn("args=", fingerprint_dump(no_arguments))
+
+        class Untyped(ast.AST):
+            _fields = ("a",)
+
+        class Typed(ast.AST):
+            _fields = ("a",)
+            _field_types: ClassVar[dict[str, object]] = {"a": list[int]}
+
+        class Malformed(ast.AST):
+            _fields = ("a",)
+
+        class Scalar(ast.AST):
+            _fields = ("a",)
+            _field_types: ClassVar[dict[str, object]] = {"a": int}
+
+        untyped, typed, falsy, malformed = Untyped(), Typed(), Typed(), Malformed()
+        scalar = Scalar(a=[])
+        Malformed._field_types = None  # ast.AST.__init__ rejects a non-dict, so set it afterwards
+        untyped.a = []
+        typed.a = []
+        falsy.a = ()
+        malformed.a = []
+        self.assertEqual(fingerprint_dump(untyped), "Untyped(a=[])")
+        self.assertEqual(fingerprint_dump(typed), "Typed()")
+        self.assertEqual(fingerprint_dump(falsy), "Typed(a=())")
+        self.assertEqual(fingerprint_dump(malformed), "Malformed(a=[])")
+        self.assertEqual(fingerprint_dump(scalar), "Scalar(a=[])")
+
+    def test_recorded_allowlist_rejects_changed_source_site_and_operator(self):
+        entry = {**RECORDED_WAIT_KEY, "reason": "Recorded 3.14 key."}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / entry["file"]
+            source.parent.mkdir(parents=True)
+            source.write_text(RECORDED_WAIT_SOURCE, encoding="utf-8")
+            path = root / "allowlist.yaml"
+            path.write_text(yaml.safe_dump([entry]))
+            self.assertEqual(allowlist(root, path), [entry])
+
+            source.write_text(RECORDED_WAIT_SOURCE.replace("code != 0", "code == 0"))
+            with self.assertRaisesRegex(ValueError, "Stale, duplicate or ambiguous"):
+                allowlist(root, path)
+            source.write_text(RECORDED_WAIT_SOURCE, encoding="utf-8")
+
+            for field, value in (
+                ("site", "/body/0/handlers/1/body/0"),
+                ("operator", "return:True"),
+            ):
+                with self.subTest(field=field):
+                    path.write_text(yaml.safe_dump([{**entry, field: value}]))
+                    with self.assertRaisesRegex(ValueError, "Stale, duplicate or ambiguous"):
+                        allowlist(root, path)
+
     def test_fixed_function_context_hash_matches_the_ci_interpreter_contract(self):
         mutants, _ = candidates("src/example.py", b"def answer():\n    return True\n")
         self.assertEqual(
@@ -132,7 +310,7 @@ class MutationOperatorsTest(unittest.TestCase):
                     self.assertEqual(mutant.qualname, "outer.inner")
                     self.assertTrue(changed.startswith(b"# \xc3\xa9\ndef outer():"))
 
-    def test_ci_runs_every_pr_to_main_on_the_producers_merge_tree_with_read_only_arguments(self):
+    def test_ci_runs_pr_mutation_on_every_pull_request_to_main(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         self.assertEqual(
             workflow["jobs"]["mutation"],
@@ -142,7 +320,7 @@ class MutationOperatorsTest(unittest.TestCase):
                 "permissions": {"contents": "read"},
                 "runs-on": "ubuntu-24.04",
                 "timeout-minutes": 300,
-                "strategy": {"fail-fast": False, "matrix": {"shard": [1, 2, 3]}},
+                "strategy": {"fail-fast": False, "matrix": {"shard": [1, 2, 3, 4, 5, 6]}},
                 "needs": ["test", "unit-coverage", "selftest", "coverage", "acceptance"],
                 "steps": [
                     {
@@ -167,7 +345,7 @@ class MutationOperatorsTest(unittest.TestCase):
                         "env": {
                             "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
                             "HEAD_SHA": "${{ github.sha }}",
-                            "SHARD": "${{ matrix.shard }}/3",
+                            "SHARD": "${{ matrix.shard }}/6",
                         },
                         "run": (
                             'pdm run mutation-gate --base "$BASE_SHA" --head "$HEAD_SHA" '
@@ -1151,7 +1329,7 @@ class MutationExecutionTest(unittest.TestCase):
             result, data = run_domain(scratch, "fixture", [node], 120, baseline=True)
             self.assertEqual(result["outcome"], "SURVIVED", result)
             mapping = coverage_map(data, scratch)
-            source = "src/nci_si_mcp/content.py"
+            source = "src/nci_sip_mcp/content.py"
             line = next(
                 number
                 for number, text in enumerate((scratch / source).read_text().splitlines(), 1)
@@ -1187,7 +1365,7 @@ class MutationExecutionTest(unittest.TestCase):
                 "import json, os\nfrom pathlib import Path\n"
                 "def pytest_addoption(parser):\n    parser.addoption('--report')\n"
                 "def pytest_sessionstart(session):\n"
-                "    if os.environ.get('NCI_SI_ACCEPTANCE_MODE') != 'fixture':\n        return\n"
+                "    if os.environ.get('NCI_SIP_ACCEPTANCE_MODE') != 'fixture':\n        return\n"
                 f"    with Path({str(log)!r}).open('a') as stream:\n"
                 "        stream.write(json.dumps(session.config.getoption('cov_context'))"
                 " + '\\n')\n"
@@ -1205,6 +1383,93 @@ class MutationExecutionTest(unittest.TestCase):
             # One controller plus its four workers belong to the mandatory baseline.
             self.assertEqual(len(launches), 5, launches)
             self.assertEqual(launches, ["test"] * 5)
+
+    def test_unreached_domains_do_not_hide_survival_or_claim_fixture_confirmation(self):
+        orderings = (
+            ("fixture", "unit"),
+            ("unit", "fixture"),
+        )
+        for ordering in orderings:
+            with self.subTest(ordering=ordering):
+                selected = {domain: ["tests/test_owner.py::test_value"] for domain in ordering}
+                results = [
+                    (
+                        {
+                            "outcome": "NO_TESTS" if domain == "fixture" else "SURVIVED",
+                            "domain": domain,
+                            "elapsed_seconds": 0.01,
+                        },
+                        Path("coverage"),
+                    )
+                    for domain in ordering
+                ]
+                with patch.object(mutation_gate, "run_domain", side_effect=results):
+                    result = mutation_gate.measure(Path("."), selected, 1)
+
+                self.assertEqual(result["outcome"], "SURVIVED", result)
+                self.assertEqual(result["domain"], "unit", result)
+                self.assertEqual(result["confirmation"], "unreached", result)
+                self.assertEqual([row["domain"] for row in result["domains"]], list(ordering))
+
+    def test_fixture_timeout_is_not_reported_as_fixture_confirmation(self):
+        selected = {"fixture": ["tests/test_owner.py::test_value"]}
+        timed_out = {
+            "outcome": "TIMEOUT",
+            "domain": "fixture",
+            "elapsed_seconds": 0.01,
+        }
+        with patch.object(mutation_gate, "run_domain", return_value=(timed_out, Path("coverage"))):
+            result = mutation_gate.measure(Path("."), selected, 1)
+
+        self.assertEqual(result["outcome"], "TIMEOUT", result)
+        self.assertEqual(result["confirmation"], "unreached", result)
+        self.assertNotIn("kind", result)
+        self.assertNotIn("node", result)
+
+    def test_cli_continues_from_unreached_unit_to_independent_fixture_kill(self):
+        source = "def answer():\n    return True\n"
+        unit = (
+            "if example.answer():\n"
+            "        assert example.answer() is True\n"
+            "    else:\n"
+            "        import pytest\n"
+            "        pytest.skip('unit owner does not pass for this mutation')"
+        )
+        contract = "assert example.answer() is True"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, source, unit, contract)
+            source_path = root / "src/example.py"
+            original = source_path.read_bytes()
+            mutants, _ = candidates("src/example.py", original)
+            target = next(
+                mutant
+                for mutant in mutants
+                if (mutant.operator, mutant.before, mutant.after)
+                == ("boolean:literal", "True", "False")
+            )
+            shard = isolated_shard(mutants, target)
+
+            status, rows = command(root, "--paths", "src/example.py", "--shard", shard)
+
+            selected = mutant_rows(rows)
+            self.assertEqual(status, 0, rows)
+            self.assertEqual(len(selected), 1, rows)
+            result = selected[0]
+            self.assertEqual(
+                {key: result[key] for key in target.key()},
+                target.key(),
+            )
+            self.assertEqual(result["outcome"], "KILLED", result)
+            self.assertEqual(result["domain"], "fixture", result)
+            self.assertEqual(result["node"], "tests/test_contract.py::test_contract", result)
+            self.assertEqual(result["confirmation"], "fixture", result)
+            self.assertIs(result["restored"], True)
+            self.assertEqual(
+                [(row["domain"], row["outcome"]) for row in result["domains"]],
+                [("unit", "NO_TESTS"), ("fixture", "KILLED")],
+            )
+            self.assertEqual(source_path.read_bytes(), original)
 
     def test_fixture_only_child_line_selects_its_one_owner_and_kills_without_unit_coverage(self):
         # Given a line reached only in a fixture test's real child program, run
@@ -1759,13 +2024,13 @@ class MutationExecutionTest(unittest.TestCase):
             "    child = subprocess.run([sys.executable, '-c', "
             "'import example; print(example.answer())'], capture_output=True, text=True)\n"
             "    assert child.stdout.strip() == 'True'\n"
-            "    console = subprocess.run(['nci-si-mcp'], capture_output=True, text=True)\n"
+            "    console = subprocess.run(['nci-sip-mcp'], capture_output=True, text=True)\n"
             "    assert console.stdout.strip() == 'True'"
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             project(root, source, unit)
-            package = root / "src/nci_si_mcp"
+            package = root / "src/nci_sip_mcp"
             package.mkdir()
             (package / "__init__.py").write_text("")
             (package / "cli.py").write_text(
@@ -1885,3 +2150,173 @@ class MutationCommandTest(unittest.TestCase):
             self.assertEqual(survivors[0]["after"], "False")
             self.assertEqual(survivors[0]["confirmation"], "unreached")
             self.assertEqual((root / "src/example.py").read_bytes(), before)
+
+
+RENAME_BASE = (
+    "import nci_si_mcp\nimport json\n\n\n"
+    "def keep_a():\n    return 1\n\n\n"
+    "def keep_b():\n    return 2\n"
+)
+
+
+def scope_between(base_files, head_files):
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary).resolve()
+
+        def run(*args):
+            return subprocess.run(  # noqa: S603 - fixed git subcommands, owned temporary repository
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],  # noqa: S607
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+        def write(files):
+            for name, content in files.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_bytes(content.encode())
+
+        run("init", "-q")
+        write(base_files)
+        run("add", ".")
+        run("commit", "-qm", "base")
+        base = run("rev-parse", "HEAD")
+        for name in base_files:
+            (root / name).unlink()
+        write(head_files)
+        run("add", "-A")
+        run("commit", "-qm", "head")
+        return scope(root, [], base, "HEAD")
+
+
+OLD_TABLE_PATH = "src/nci_si_mcp/x.py"
+NEW_TABLE_PATH = "src/nci_sip_mcp/x.py"
+
+
+def scope_after_git_rename(head_text, base_text=RENAME_BASE):
+    return scope_between({OLD_TABLE_PATH: base_text}, {NEW_TABLE_PATH: head_text})
+
+
+class RenamedFileScopeTest(unittest.TestCase):
+    def test_renamed_file_is_selected_whole_whatever_changed_in_it(self):
+        head = RENAME_BASE.replace("nci_si_mcp", "nci_sip_mcp").replace("return 2", "return 3")
+        self.assertEqual(scope_after_git_rename(head), {NEW_TABLE_PATH: set(range(1, 11))})
+
+
+class SpacedFileNameScopeTest(unittest.TestCase):
+    def test_added_line_in_a_file_whose_name_contains_a_space_is_selected(self):
+        base = "A = 1\nB = 2\n"
+        self.assertEqual(
+            scope_between({"src/x y.py": base}, {"src/x y.py": base + "C = 3\n"}),
+            {"src/x y.py": {3}},
+        )
+
+    def test_renamed_file_with_a_space_in_its_name_is_selected_whole(self):
+        old, new = "src/nci_si_mcp/a b.py", "src/nci_sip_mcp/a b.py"
+        body = "".join(f"V{n} = {n}\n" for n in range(1, 21))
+        base = "import nci_si_mcp\n" + body
+        head = base.replace("nci_si_mcp", "nci_sip_mcp")
+        self.assertEqual(scope_between({old: base}, {new: head}), {new: set(range(1, 22))})
+        self.assertEqual(
+            scope_between({old: base}, {new: head + "F = 6\n"}), {new: set(range(1, 23))}
+        )
+
+
+MODULE = "".join(f"def f{n}():\n    return {n}\n\n\n" for n in range(10))
+
+
+class MovedCodeScopeTest(unittest.TestCase):
+    def test_module_moved_to_an_unrelated_path_is_selected_whole(self):
+        self.assertEqual(
+            scope_between({"src/a.py": MODULE}, {"src/elsewhere/b.py": MODULE}),
+            {"src/elsewhere/b.py": set(range(1, 41))},
+        )
+
+    def test_module_split_leaves_every_moved_line_selected(self):
+        cut = len(MODULE) * 2 // 5
+        result = scope_between(
+            {"src/a.py": MODULE}, {"src/a.py": MODULE[:cut], "src/b.py": MODULE[cut:]}
+        )
+        self.assertEqual(result, {"src/a.py": set(), "src/b.py": set(range(1, 25))})
+
+    def test_split_that_git_pairs_with_the_larger_part_selects_both_files_whole(self):
+        cut = len(MODULE) * 3 // 5
+        self.assertEqual(
+            scope_between(
+                {"src/a.py": MODULE}, {"src/b.py": MODULE[:cut], "src/c.py": MODULE[cut:]}
+            ),
+            {"src/b.py": set(range(1, 25)), "src/c.py": set(range(1, 17))},
+        )
+
+
+class RenameRobustnessScopeTest(unittest.TestCase):
+    def test_move_from_an_eligible_to_an_ineligible_path_is_not_selected(self):
+        self.assertEqual(
+            scope_between({"src/a.py": MODULE}, {"src/tests/a.py": MODULE}),
+            {},
+        )
+
+
+class HunkParsingTest(unittest.TestCase):
+    def test_hunk_that_is_equal_before_and_after_is_selected(self):
+        diff = "+++ b/src/example.py\n@@ -2 +2 @@\n-same\n+same\n"
+        self.assertEqual(diff_lines(diff), {"src/example.py": {2}})
+
+    def test_crlf_to_lf_change_in_an_eligible_module_is_selected(self):
+        self.assertEqual(
+            scope_between({"src/m.py": "a = 1\r\n"}, {"src/m.py": "a = 1\n"}),
+            {"src/m.py": {1}},
+        )
+
+    def test_form_feed_in_a_changed_line_keeps_the_hunk_counts_and_the_next_hunk(self):
+        diff = (
+            "+++ b/src/example.py\n@@ -1 +1 @@\n-import nci_si_mcp\x0cx\n+import nci_sip_mcp\x0cx\n"
+            "@@ -5 +5 @@\n-x\n+y\n"
+        )
+        self.assertEqual(diff_lines(diff), {"src/example.py": {1, 5}})
+
+    def test_added_line_that_looks_like_a_file_header_does_not_rename_the_file(self):
+        base = "".join(f"V{n} = {n}\n" for n in range(1, 13))
+        head = base.replace("V1 = 1\nV2 = 2\nV3 = 3\n", "x = 1\ny = 2\n++ b/src/other.py\n")
+        head = head.replace("V10 = 10", "V10 = 0")
+        self.assertEqual(
+            scope_between({"src/m.py": base}, {"src/m.py": head}),
+            {"src/m.py": {1, 2, 3, 10}},
+        )
+
+    def test_added_line_that_looks_like_a_file_header_after_a_no_newline_marker(self):
+        diff = (
+            "+++ b/src/example.py\n@@ -1,2 +1,2 @@\n-a\n-b\n"
+            "\\ No newline at end of file\n+x\n+++ b/src/other.py\n"
+            "\\ No newline at end of file\n@@ -9 +9 @@\n-p\n+q\n"
+        )
+        self.assertEqual(diff_lines(diff), {"src/example.py": {1, 2, 9}})
+
+    def test_in_place_edit_of_a_file_without_a_trailing_newline_is_selected(self):
+        self.assertEqual(
+            scope_between({"src/m.py": "a = 1\nb = 2"}, {"src/m.py": "a = 1\nb = 3"}),
+            {"src/m.py": {2}},
+        )
+
+    def test_line_separator_inside_a_changed_line_does_not_start_a_hunk(self):
+        diff = "+++ b/src/example.py\n@@ -1 +1 @@\n-a\n+b\x0c@@ -9 +9 @@\n"
+        self.assertEqual(diff_lines(diff), {"src/example.py": {1}})
+
+    def test_non_ascii_path_is_selected(self):
+        self.assertEqual(
+            scope_between({"src/café.py": "a = 1\n"}, {"src/café.py": "a = 2\n"}),
+            {"src/café.py": {1}},
+        )
+
+    def test_renamed_file_whose_name_git_quotes_raises(self):
+        with self.assertRaisesRegex(ValueError, "Hunk without a file name"):
+            scope_between({"src/a\tb.py": MODULE}, {"src/c\td.py": MODULE})
+
+    def test_hunk_without_a_file_name_raises(self):
+        with self.assertRaisesRegex(ValueError, r"@@ -1 \+1 @@"):
+            diff_lines("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n")
+
+    def test_malformed_hunk_header_raises(self):
+        with self.assertRaisesRegex(ValueError, "@@ -x @@"):
+            diff_lines("+++ b/src/example.py\n@@ -x @@\n")

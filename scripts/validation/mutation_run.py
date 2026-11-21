@@ -148,10 +148,11 @@ def _terminal_member(row: _Member, owner: _Owner) -> bool:
     # sessions. Darwin zombie SID is unavailable, so the exact anchored PGID
     # binds membership. ps is non-atomic: this proves only that signals may stop,
     # never durable containment or that every descendant has been reaped.
+    # ps appends modifier flags (N niced, + foreground) after the state letter.
     return (
         (row.pgid, row.uid, row.ruid) == (owner.pid, owner.uid, owner.ruid)
         and row.sid in (None, owner.pid)
-        and row.state == "Z"
+        and row.state[:1] == "Z"
     )
 
 
@@ -239,10 +240,12 @@ DOMAINS = {
     "fixture": ("acceptance", "tests"),
 }
 FIXTURE = {
-    "NCI_SI_ACCEPTANCE_MODE": "fixture",
-    "NCI_SI_ACCEPTANCE_REGISTRY_RELEASE": "required",
-    "NCI_SI_ACCEPTANCE_SECURITY_SERVER": "python ../scripts/permissions_fixture.py",
-    "NCI_SI_ACCEPTANCE_PREPARE": 'nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")',
+    "NCI_SIP_ACCEPTANCE_MODE": "fixture",
+    "NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE": "required",
+    "NCI_SIP_ACCEPTANCE_SECURITY_SERVER": "python ../scripts/permissions_fixture.py",
+    "NCI_SIP_ACCEPTANCE_PREPARE": (
+        'nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")'
+    ),
 }
 
 
@@ -278,12 +281,21 @@ def snapshot(root: Path):
 
 
 def environment(scratch: Path, work: Path) -> dict[str, str]:
-    prefixes = ("COVERAGE", "PYTEST", "GIT_", "NCI_SI_", "PDM_", "MUTATION_", "SELFTEST_")
+    prefixes = (
+        "COVERAGE",
+        "PYTEST",
+        "GIT_",
+        "NCI_SI_",
+        "NCI_SIP_",
+        "PDM_",
+        "MUTATION_",
+        "SELFTEST_",
+    )
     env = {key: value for key, value in os.environ.items() if not key.startswith(prefixes)}
     env.update(
         {
             "PYTHONDONTWRITEBYTECODE": "1",
-            "NCI_SI_DATA_DIR": str(work / "data"),
+            "NCI_SIP_DATA_DIR": str(work / "data"),
             # tempfile owns unique child directories; nesting its root under evidence breaks
             # macOS AF_UNIX's 104-byte socket path limit in HTTP integration tests.
             "TMPDIR": tempfile.gettempdir(),

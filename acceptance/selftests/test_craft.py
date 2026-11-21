@@ -13,7 +13,7 @@ import yaml
 from jsonschema import Draft4Validator
 
 from conftest import crafted_digest, without_crafted
-from nci_si_acceptance.craft import (
+from nci_sip_acceptance.craft import (
     EXCLUSION_ROLES,
     LICENCE_FIELD,
     LICENCE_KEY,
@@ -22,9 +22,9 @@ from nci_si_acceptance.craft import (
     main,
     mismatched,
 )
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
-from nci_si_acceptance.record import DISCOVERY, FIXTURES, reported_releases
-from nci_si_acceptance.register import EVS_SURFACES
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_sip_acceptance.record import DISCOVERY, FIXTURES, reported_releases
+from nci_sip_acceptance.register import EVS_SURFACES
 
 CRAFTED = craft(FIXTURES)
 MANIFEST = yaml.safe_load((FIXTURES / "manifest.yaml").read_text(encoding="utf-8"))
@@ -395,7 +395,7 @@ def test_unavailable_closes_then_fails_then_outlasts_the_servers_timeout():
         close, failure, silence = doc["responses"]
         assert (close, failure["status"]) == ({"fault": "close"}, 503)
         assert silence["fault"] == "close"
-        assert silence["delay_seconds"] > int(settings["NCI_SI_TIMEOUT_SECONDS"])
+        assert silence["delay_seconds"] > int(settings["NCI_SIP_TIMEOUT_SECONDS"])
 
 
 def test_rate_limited_asks_to_wait_then_answers_as_recorded():
@@ -452,11 +452,11 @@ def test_the_licence_key_of_the_scenarios_settings_is_what_grants_the_licensed_a
     settings = CRAFTED["scenarios/license/restricted/settings.json"]
     with FixtureServer(load_fixtures(FIXTURES)) as running:
         running.activate("license/restricted")
-        key = {"X-EVSRESTAPI-License-Key": settings["NCI_SI_EVS_LICENSE_KEY"]}
+        key = {"X-EVSRESTAPI-License-Key": settings["NCI_SIP_EVS_LICENSE_KEY"]}
         granted, body = _licensed_answer(running, path, key)
         refused, _ = _licensed_answer(running, path)
 
-    assert settings["NCI_SI_EVS_LICENSE_KEY"] == LICENCE_KEY
+    assert settings["NCI_SIP_EVS_LICENSE_KEY"] == LICENCE_KEY
     assert (granted, refused) == (200, 403)
     assert _codes(body) == codes
 
@@ -536,7 +536,7 @@ def test_a_cadsr_request_gets_json_only_when_it_asks_for_it(upstream):
 
 
 def test_the_cadsr_credential_of_the_settings_is_what_opens_contexts_and_cde_match():
-    credential = CRAFTED["scenarios/cadsr/credentialed/settings.json"]["NCI_SI_CADSR_CREDENTIAL"]
+    credential = CRAFTED["scenarios/cadsr/credentialed/settings.json"]["NCI_SIP_CADSR_CREDENTIAL"]
     basic = {"Authorization": "Basic " + base64.b64encode(credential.encode()).decode()}
     sent = {"Content-Type": "application/json"}
     # Both forms of the body: the contract's apiinput object and the array of 10 September.
@@ -605,7 +605,7 @@ def test_match_timeout_answers_as_recorded_but_later_than_the_setting():
     request = CRAFTED["scenarios/cadsr/match-timeout/vm-match.json"]["request"]
 
     assert request == recorded["request"]
-    assert answer["delay_seconds"] > int(settings["NCI_SI_MATCH_TIMEOUT_SECONDS"])
+    assert answer["delay_seconds"] > int(settings["NCI_SIP_MATCH_TIMEOUT_SECONDS"])
     assert {k: v for k, v in answer.items() if k != "delay_seconds"} == recorded["response"]
 
 

@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from conftest import REVIEWED_ORIGINS
-from nci_si_acceptance import environments
+from nci_sip_acceptance import environments
 
 
 def policy_with_origin(monkeypatch, tmp_path, origin, enabled=True):

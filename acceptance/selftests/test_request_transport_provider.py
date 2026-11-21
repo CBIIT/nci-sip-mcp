@@ -11,24 +11,24 @@ from urllib.request import Request
 import pytest
 from http_receiver import WireReceiver, tls_certificate
 
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_acceptance.request_transport import TransportCleanupError
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.http_client import (
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.request_transport import TransportCleanupError
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.http_client import (
     HttpClient,
     RequestPolicyError,
     UpstreamError,
     UpstreamUnavailableError,
 )
-from nci_si_mcp.invocation import call
+from nci_sip_mcp.invocation import call
 
 TLS_URL = "https://tls.example/owned"
 SANITIZED_TLS_MESSAGE = "Controlled upstream certificate verification failed."
 
 
 def provider(run):
-    name = "nci_si_acceptance.request_transport"
+    name = "nci_sip_acceptance.request_transport"
     assert util.find_spec(name) is not None, "The authorized production HTTP provider must exist"
     return import_module(name).ControlledHttpPolicy(run)
 
@@ -374,7 +374,7 @@ def test_tls_verification_precedes_credential_http(
             )
             records = []
             client.on_request = records.append
-            caplog.set_level("DEBUG", logger="nci_si_mcp")
+            caplog.set_level("DEBUG", logger="nci_sip_mcp")
             if accepted:
                 result = client.get_json("/owned")
             else:

@@ -1,8 +1,8 @@
 import json
 import unittest
 
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.models import (
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.models import (
     NcitConcept,
     SearchHit,
     TraversalEdge,

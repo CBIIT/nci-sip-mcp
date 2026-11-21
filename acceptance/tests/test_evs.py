@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 import pytest
 import yaml
 
-from nci_si_acceptance.results import (
+from nci_sip_acceptance.results import (
     CARRIED,
     error_code,
     is_name,
@@ -24,8 +24,8 @@ from nci_si_acceptance.results import (
     wrong_fields,
     wrong_origin,
 )
-from nci_si_acceptance.spec import RECORDS, TOOLS, items_of
-from nci_si_acceptance.suite import index_set
+from nci_sip_acceptance.spec import RECORDS, TOOLS, items_of
+from nci_sip_acceptance.suite import index_set
 
 # Recorded in full: recorded/evs/concepts/C4817.json.
 CONCEPT = "C4817"

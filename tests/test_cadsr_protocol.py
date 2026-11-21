@@ -16,15 +16,15 @@ import yaml
 from pydantic import TypeAdapter
 
 from fakes import cde_response, cde_row, code_map, data_element, form, vm_response, vm_row
-from nci_si_mcp import results
-from nci_si_mcp.cli import build_parser, main
-from nci_si_mcp.context import Context
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.release import RegistryState, registry_state
+from nci_sip_mcp import results
+from nci_sip_mcp.cli import build_parser, main
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.release import RegistryState, registry_state
 from test_server import ServerFixture
 
 
-@patch("nci_si_mcp.server.configure_logging")
+@patch("nci_sip_mcp.server.configure_logging")
 class CaDSRProtocolTest(ServerFixture):
     def test_code_map_omitted_name_stays_absent_and_explicit_null_stays_null(self, _):
         # Given two upstream rows, MCP must distinguish omission from explicit null.
@@ -422,7 +422,7 @@ class CaDSRAdapterBoundaryTest(ServerFixture):
         super().setUp()
         self.enterContext(
             patch(
-                "nci_si_mcp.http_client._open",
+                "nci_sip_mcp.http_client._open",
                 side_effect=AssertionError("Unexpected HTTP request"),
             )
         )
@@ -443,7 +443,7 @@ class CaDSRAdapterBoundaryTest(ServerFixture):
     def test_injected_cadsr_produces_the_result_without_a_release_selection_audit(self):
         context = self.injected_context()
         logging.disable(logging.NOTSET)
-        with self.assertLogs("nci_si_mcp.audit", level="INFO") as captured:
+        with self.assertLogs("nci_sip_mcp.audit", level="INFO") as captured:
             result = invoke(context, "resolve_registry_release")
         self.assertEqual(result, self.state.to_dict())
         self.assertNotIn("selection", captured.records[-1].structured.get("release", {}))
@@ -453,9 +453,9 @@ class CaDSRAdapterBoundaryTest(ServerFixture):
         context = self.injected_context()
         output = io.StringIO()
         with (
-            patch.object(sys, "argv", ["nci-si-mcp", "resolve-registry-release"]),
-            patch("nci_si_mcp.cli.Context", return_value=context),
-            patch("nci_si_mcp.cli.configure_logging"),
+            patch.object(sys, "argv", ["nci-sip-mcp", "resolve-registry-release"]),
+            patch("nci_sip_mcp.cli.Context", return_value=context),
+            patch("nci_sip_mcp.cli.configure_logging"),
             redirect_stdout(output),
         ):
             status = main()

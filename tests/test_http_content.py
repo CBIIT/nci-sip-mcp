@@ -3,8 +3,8 @@
 import json
 from urllib.parse import parse_qs
 
-from nci_si_mcp.errors import PlatformError, correlated
-from nci_si_mcp.http_client import (
+from nci_sip_mcp.errors import PlatformError, correlated
+from nci_sip_mcp.http_client import (
     UpstreamRejectedError,
     UpstreamTooLargeError,
     UpstreamUnavailableError,

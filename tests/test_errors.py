@@ -2,7 +2,7 @@ import json
 import unittest
 from typing import get_args
 
-from nci_si_mcp.errors import (
+from nci_sip_mcp.errors import (
     ErrorCode,
     InputValidationError,
     PlatformError,
@@ -11,7 +11,7 @@ from nci_si_mcp.errors import (
     serialise,
     with_next_step,
 )
-from nci_si_mcp.server import INSTRUCTIONS
+from nci_sip_mcp.server import INSTRUCTIONS
 
 # The `code` values of the error record in spec/records.yaml.
 SPEC_CODES = {

@@ -1,8 +1,8 @@
 import json
 import unittest
 
-from nci_si_mcp.errors import PlatformError
-from nci_si_mcp.upstream import parse_upstream_json
+from nci_sip_mcp.errors import PlatformError
+from nci_sip_mcp.upstream import parse_upstream_json
 
 OUTCOME = {"resourceType": "OperationOutcome", "issue": [{"severity": "error", "code": "x"}]}
 

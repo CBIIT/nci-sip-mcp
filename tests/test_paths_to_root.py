@@ -4,8 +4,8 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from fakes import concept
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.registry import invoke
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
 
@@ -22,7 +22,7 @@ class PathsToRootTest(ServerFixture):
 
     def paths_result(self, payload, **arguments):
         replies = [FakeResponse(json.dumps(item).encode()) for item in (self.seed, payload)]
-        with patch("nci_si_mcp.http_client._open", side_effect=replies) as opened:
+        with patch("nci_sip_mcp.http_client._open", side_effect=replies) as opened:
             result = invoke(
                 self.context,
                 "get_concept_hierarchy",
@@ -103,7 +103,7 @@ class PathsToRootTest(ServerFixture):
 
     def test_unknown_seed_is_not_found_and_no_paths_request_is_made(self):
         with patch(
-            "nci_si_mcp.http_client._open",
+            "nci_sip_mcp.http_client._open",
             side_effect=http_error(404, b'{"message":"Code not found = C1"}'),
         ) as opened:
             result = invoke(

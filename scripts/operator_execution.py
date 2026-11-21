@@ -23,8 +23,8 @@ from scripts.processes import exit_on_sigterm
 from scripts.vocabulary import JobOutcome
 
 ROOT = Path(__file__).resolve().parents[1]
-REMOTE_TARGET = "NCI_SI_OPERATOR_REMOTE_TARGET"
-AUTHORIZATION = "NCI_SI_BENCHMARK_AUTHORIZATION"
+REMOTE_TARGET = "NCI_SIP_OPERATOR_REMOTE_TARGET"
+AUTHORIZATION = "NCI_SIP_BENCHMARK_AUTHORIZATION"
 
 
 @dataclass(frozen=True)

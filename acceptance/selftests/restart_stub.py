@@ -39,9 +39,9 @@ def main() -> None:
     stop(pid_file)
     if record := os.environ.get("RESTART_RECORD"):
         seen = {
-            "scenarios": os.environ.get("NCI_SI_ACCEPTANCE_SCENARIOS"),
-            "licenceKey": os.environ.get("NCI_SI_EVS_LICENSE_KEY"),
-            "credentialGiven": "NCI_SI_ACCEPTANCE_AUTHORIZATION" in os.environ,
+            "scenarios": os.environ.get("NCI_SIP_ACCEPTANCE_SCENARIOS"),
+            "licenceKey": os.environ.get("NCI_SIP_EVS_LICENSE_KEY"),
+            "credentialGiven": "NCI_SIP_ACCEPTANCE_AUTHORIZATION" in os.environ,
         }
         with Path(record).open("a", encoding="utf-8") as log:
             log.write(json.dumps(seen) + "\n")

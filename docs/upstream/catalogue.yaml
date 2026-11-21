@@ -62,7 +62,7 @@ entries:
     evidence: [acceptance/fixtures/recorded/evs/roles.json]
     source: https://github.com/CBIIT/nci-si-mcp/issues/42
     observation: The catalogue exposes relationship codes and names; the exclusion scenario deliberately gives misleading names. That crafted scenario is a regression probe, not an observed production mislabelling.
-    reproduction: Read the pinned role catalogue (OP-E02); run the traversal/exclusions scenario, crafted in memory by traversal_exclusions in acceptance/src/nci_si_acceptance/craft.py, to distinguish classification by code from name matching.
+    reproduction: Read the pinned role catalogue (OP-E02); run the traversal/exclusions scenario, crafted in memory by traversal_exclusions in acceptance/src/nci_sip_acceptance/craft.py, to distinguish classification by code from name matching.
     expected: Publish a versioned machine-readable exclusion/polarity classification keyed by stable relationship code.
     impact: A name-based inference can include excluded concepts in a cohort.
     workaround: Use the configured exclusion code set; fail closed if the release catalogue lacks a required code.
@@ -152,7 +152,7 @@ entries:
     evidence: [acceptance/fixtures/recorded/cadsr/registry-releases.json, acceptance/fixtures/recorded/cadsr-ftp/cde-xml-listing.json, acceptance/fixtures/recorded/cadsr-ftp/cde-xml-readme.json]
     source: https://github.com/CBIIT/nci-si-mcp/issues/42#issuecomment-6011947240
     observation: The release route is recorded 404. The export folder names 2026-07-01 22:19 without a timezone while its README says daily updates; matching/forms declare no registryRelease transport. C-1 fixtures are requested future behavior.
-    reproduction: Read the release route and the exact releasedCDEsXML-OD.zip folder row; inspect the matching/form contracts and the crafted pinned getCRDCList request/echo of the cadsr/with-registry-release scenario, crafted in memory by cadsr_with_registry_release in acceptance/src/nci_si_acceptance/craft.py.
+    reproduction: Read the release route and the exact releasedCDEsXML-OD.zip folder row; inspect the matching/form contracts and the crafted pinned getCRDCList request/echo of the cadsr/with-registry-release scenario, crafted in memory by cadsr_with_registry_release in acceptance/src/nci_sip_acceptance/craft.py.
     expected: Publish stable registry identifiers and generation dates; specify pin transport and response verification for every content, form and matching operation, including getCRDCList.
     impact: Export dates alone cannot support reproducible registry queries; old registry content cannot be addressed.
     workaround: Preserve the folder's local date unchanged with published=false; unavailable pins fail release_not_available and listed but unaddressable matching/form pins fail capability_unavailable.
@@ -182,7 +182,7 @@ entries:
     evidence: [acceptance/fixtures/recorded/cadsr/data-element-refused.json, docs/evidence/phase-5/benchmark-live.json]
     source: https://github.com/CBIIT/nci-si-mcp/issues/42#issuecomment-5966921102
     observation: Keyword search is requested OP-C03, not a verified served operation; the capped search answer is crafted. The live benchmark returned upstream_unavailable. Context/workflow/registration/value-domain filter parameter names are absent from that requested form.
-    reproduction: Use DataElement/search with keyword and pageSize from the request inventory; compare with public-id lookup. The capped answer crafted/OP-C03/search-over-cap.json is crafted in memory by cadsr_over_cap in acceptance/src/nci_si_acceptance/craft.py. The recorded malformed-id response illustrates the HTTP-200 error convention, not a recording of keyword search.
+    reproduction: Use DataElement/search with keyword and pageSize from the request inventory; compare with public-id lookup. The capped answer crafted/OP-C03/search-over-cap.json is crafted in memory by cadsr_over_cap in acceptance/src/nci_sip_acceptance/craft.py. The recorded malformed-id response illustrates the HTTP-200 error convention, not a recording of keyword search.
     expected: >-
       A keyword endpoint with explicit filter names, registryRelease verification, pagination
       or a machine-readable 1000-result truncation signal. Open question for caDSR: can

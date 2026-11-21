@@ -26,8 +26,8 @@ from scripts.benchmark_records import (
 from scripts.evidence_envelope import EvidenceError, decode_json, timestamp
 from scripts.vocabulary import RUN_STATES, HttpStop, RunState, RunStop, is_run_stop
 
-from nci_si_acceptance.environments import EnvironmentRecord, environment_record
-from nci_si_acceptance.report import Absent
+from nci_sip_acceptance.environments import EnvironmentRecord, environment_record
+from nci_sip_acceptance.report import Absent
 
 MAX_REPETITIONS = 10_000
 

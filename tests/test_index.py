@@ -8,11 +8,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fakes import concept
-from nci_si_mcp.errors import InputValidationError
-from nci_si_mcp.evaluation import evaluate_build
-from nci_si_mcp.evaluation_sets import EvaluationSet, GoldQuery, MetricFloor
-from nci_si_mcp.evs import normalize_concept
-from nci_si_mcp.index_adapter import LocalIndexAdapter, index_event, results_truncation
+from nci_sip_mcp.errors import InputValidationError
+from nci_sip_mcp.evaluation import evaluate_build
+from nci_sip_mcp.evaluation_sets import EvaluationSet, GoldQuery, MetricFloor
+from nci_sip_mcp.evs import normalize_concept
+from nci_sip_mcp.index_adapter import LocalIndexAdapter, index_event, results_truncation
 from ncit_index.embeddings import EmbeddingProvider, HashingEmbeddingProvider
 from ncit_index.errors import (
     IndexBuildError,
@@ -193,7 +193,7 @@ class UpsertTest(IndexTestCase):
     def test_indexing_another_release_replaces_the_previous_one(self):
         index = self.build()
 
-        with self.assertLogs("nci_si_mcp.index", level="INFO"):
+        with self.assertLogs("nci_sip_mcp.index", level="INFO"):
             manifest = index.upsert_concepts(
                 normalized([dict(RAW_CONCEPTS[1], version="26.07d")], "2026-07-27"),
                 "2026-07-27",

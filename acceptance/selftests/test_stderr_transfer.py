@@ -10,12 +10,12 @@ from typing import TextIO
 import pytest
 from test_request_supervision import authorization, failure_leaves
 
-from nci_si_acceptance import request_children
-from nci_si_acceptance.client import open_session
-from nci_si_acceptance.request_children import CleanupDeadline
-from nci_si_acceptance.request_stdio import StderrTransfer
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_mcp.errors import RequestPolicyError
+from nci_sip_acceptance import request_children
+from nci_sip_acceptance.client import open_session
+from nci_sip_acceptance.request_children import CleanupDeadline
+from nci_sip_acceptance.request_stdio import StderrTransfer
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_mcp.errors import RequestPolicyError
 
 
 @pytest.mark.parametrize("boundary", ["closed", "sealed"])

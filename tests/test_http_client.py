@@ -29,15 +29,15 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 
 from fakes import FakeEVS, concept, release, terminology_row
-from nci_si_mcp import errors, http_client, request_policy
-from nci_si_mcp.audit import audited
-from nci_si_mcp.bounds import Budget, budgeted, deadline_scope
-from nci_si_mcp.cadsr import CaDSRClient
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.errors import PlatformError, correlated
-from nci_si_mcp.evs import LICENSE_KEY_HEADER, EVSClient
-from nci_si_mcp.http_client import (
+from nci_sip_mcp import errors, http_client, request_policy
+from nci_sip_mcp.audit import audited
+from nci_sip_mcp.bounds import Budget, budgeted, deadline_scope
+from nci_sip_mcp.cadsr import CaDSRClient
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.errors import PlatformError, correlated
+from nci_sip_mcp.evs import LICENSE_KEY_HEADER, EVSClient
+from nci_sip_mcp.http_client import (
     MAX_RETRY_DELAY_SECONDS,
     HttpClient,
     RequestPolicyError,
@@ -45,9 +45,9 @@ from nci_si_mcp.http_client import (
     UpstreamTooLargeError,
     UpstreamUnavailableError,
 )
-from nci_si_mcp.invocation import call
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.request_policy import Exchange, using_request_policy
+from nci_sip_mcp.invocation import call
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.request_policy import Exchange, using_request_policy
 from ncit_index.embeddings import HashingEmbeddingProvider
 from test_evs_client import FakeResponse
 
@@ -265,7 +265,7 @@ class RetryAfterTest(ServerTestCase):
             ("Wed Nov 16 08:49:37 1994", 16),
             ("Sunday, 06-Nov-94 08:49:37 GMT", 6),
         ):
-            with self.subTest(value=value), patch("nci_si_mcp.http_client.datetime") as clock:
+            with self.subTest(value=value), patch("nci_sip_mcp.http_client.datetime") as clock:
                 clock.now.return_value = datetime(1994, 11, day, 8, 49, 7, tzinfo=UTC)
                 server = self.serve(Reply(429, headers={"Retry-After": value}))
                 self.assertEqual(self.client(server).get_json("/x"), {"ok": True})
@@ -420,7 +420,7 @@ class RequestLogTest(ServerTestCase):
             "connection": ConnectionResetError("reset"),
         }
         for failure, raised in failures.items():
-            with self.subTest(failure), patch("nci_si_mcp.http_client._open", side_effect=raised):
+            with self.subTest(failure), patch("nci_sip_mcp.http_client._open", side_effect=raised):
                 with self.assertRaises(UpstreamUnavailableError):
                     client.get_json("/x")
 
@@ -516,10 +516,10 @@ class MessagesTest(ServerTestCase):
         client.on_request = records.append
 
         with (
-            patch("nci_si_mcp.http_client._OPENER", opener),
+            patch("nci_sip_mcp.http_client._OPENER", opener),
             patch("urllib.request.proxy_bypass", return_value=False),
             correlated("proxy-connect"),
-            self.assertLogs("nci_si_mcp", level="DEBUG") as logs,
+            self.assertLogs("nci_sip_mcp", level="DEBUG") as logs,
         ):
             result = call("release-info", lambda: client.get_json("/x"))
 
@@ -549,7 +549,7 @@ class MessagesTest(ServerTestCase):
         records = []
         client.on_request = records.append
 
-        with correlated("malformed-status"), self.assertLogs("nci_si_mcp", level="DEBUG") as logs:
+        with correlated("malformed-status"), self.assertLogs("nci_sip_mcp", level="DEBUG") as logs:
             result = call("release-info", lambda: client.get_json("/x"))
 
         self.assertEqual(
@@ -581,7 +581,7 @@ class MessagesTest(ServerTestCase):
     def test_a_connection_failure_uses_server_owned_wording(self):
         client = self.client(self.serve(), max_attempts=1)
 
-        with patch("nci_si_mcp.http_client._open", side_effect=ConnectionResetError("reset")):
+        with patch("nci_sip_mcp.http_client._open", side_effect=ConnectionResetError("reset")):
             error = self.failure(client)
 
         self.assertEqual(str(error), "EVS request failed for /x: transport failure")
@@ -637,7 +637,7 @@ class HookTest(ServerTestCase):
         client = self.client(server, credentials={LICENSE_KEY_HEADER: KEY})
         client.on_request = hook
 
-        with self.assertLogs("nci_si_mcp.http_client", level="WARNING") as logs:
+        with self.assertLogs("nci_sip_mcp.http_client", level="WARNING") as logs:
             result = client.get_json("/x")
 
         self.assertEqual(result, {"ok": True})
@@ -659,7 +659,7 @@ class HookTest(ServerTestCase):
         client = self.client(server)
         client.on_request = hook
 
-        with self.assertLogs("nci_si_mcp.http_client", level="WARNING"):
+        with self.assertLogs("nci_sip_mcp.http_client", level="WARNING"):
             error = self.failure(client, UpstreamRejectedError)
 
         self.assertEqual(error.details["status"], 403)
@@ -685,7 +685,7 @@ class CredentialsStayOutTest(ServerTestCase):
                 )
                 records = []
                 client.on_request = records.append
-                with self.assertLogs("nci_si_mcp", level="DEBUG") as logs:
+                with self.assertLogs("nci_sip_mcp", level="DEBUG") as logs:
                     error = self.failure(client)
 
                 self.assertEqual(
@@ -723,7 +723,7 @@ class CredentialsStayOutTest(ServerTestCase):
         return outputs, records
 
     def test_the_key_is_in_no_error_message_or_detail(self):
-        with self.assertLogs("nci_si_mcp", level="DEBUG"):
+        with self.assertLogs("nci_sip_mcp", level="DEBUG"):
             outputs, _ = self.run_all()
 
         self.assertEqual(len(outputs), len(self.ECHOES))
@@ -749,7 +749,7 @@ class CredentialsStayOutTest(ServerTestCase):
         )
 
     def test_the_key_is_in_no_log_line_and_no_hook_record(self):
-        with self.assertLogs("nci_si_mcp", level="DEBUG") as logs:
+        with self.assertLogs("nci_sip_mcp", level="DEBUG") as logs:
             _, records = self.run_all()
 
         self.assertEqual(len(records), len(self.ECHOES))
@@ -762,7 +762,7 @@ class CredentialsStayOutTest(ServerTestCase):
         records = []
         client.on_request = records.append
 
-        with self.assertLogs("nci_si_mcp", level="DEBUG") as logs:
+        with self.assertLogs("nci_sip_mcp", level="DEBUG") as logs:
             error = self.failure(client)
 
         warnings = [
@@ -853,7 +853,7 @@ class CredentialRedactionTest(unittest.TestCase):
         client = EVSClient("https://example.invalid", license_key="key-canary").http
         observed = []
         client.on_request = observed.append
-        with patch("nci_si_mcp.http_client._open", return_value=FakeResponse(b"{}")):
+        with patch("nci_sip_mcp.http_client._open", return_value=FakeResponse(b"{}")):
             result = client.get_json("/key-canary/concept")
         self.assertEqual(result, {})
         self.assertEqual(
@@ -863,7 +863,7 @@ class CredentialRedactionTest(unittest.TestCase):
     def test_rejected_content_reason_redacts_credentials(self):
         client = EVSClient("https://example.invalid", license_key="key-canary").http
         with (
-            patch("nci_si_mcp.http_client._open", return_value=FakeResponse(b"{}")),
+            patch("nci_sip_mcp.http_client._open", return_value=FakeResponse(b"{}")),
             self.assertRaises(UpstreamUnavailableError) as raised,
         ):
             client.get_json("/metadata", reject=lambda payload: "unusable key-canary")
@@ -981,7 +981,7 @@ class CachedPolicyTest(ServerTestCase):
         with (
             patch.object(self.context.evs, "get_terminologies", return_value=[terminology_row()]),
             correlated("policy-test"),
-            self.assertLogs("nci_si_mcp", level="INFO") as logs,
+            self.assertLogs("nci_sip_mcp", level="INFO") as logs,
         ):
             result = invoke(self.context, "lookup", "C3262")
         self.assertEqual(result, DENIED)
@@ -1098,7 +1098,7 @@ class BufferedPolicyTest(ServerTestCase):
         server = self.serve()
         client = self.client(server, request_policy=RepeatedStartPolicy(server.url + "/x"))
         with (
-            self.assertLogs("nci_si_mcp", level="INFO") as logs,
+            self.assertLogs("nci_sip_mcp", level="INFO") as logs,
             audited("read", {}, {}, (), correlation_id="policy-test") as record,
         ):
             result = call("read", lambda: client.get_json("/x"))
@@ -1184,7 +1184,7 @@ class BufferedPolicyTest(ServerTestCase):
                 records = []
                 client.on_request = records.append
                 with (
-                    self.assertLogs("nci_si_mcp", level="DEBUG") as logs,
+                    self.assertLogs("nci_sip_mcp", level="DEBUG") as logs,
                     self.assertRaises(UpstreamUnavailableError) as caught,
                 ):
                     client.get_json("/x")
@@ -1365,7 +1365,7 @@ class BufferedPolicyTest(ServerTestCase):
                 self.subTest(expected=expected),
                 scope,
                 correlated("policy-test"),
-                self.assertLogs("nci_si_mcp", level="INFO") as logs,
+                self.assertLogs("nci_sip_mcp", level="INFO") as logs,
             ):
                 with audited("read", {}, {}, ()) as record:
                     result = call("read", lambda: client.get_json("/x"))

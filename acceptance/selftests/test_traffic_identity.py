@@ -5,8 +5,8 @@ import unittest
 from contextlib import suppress
 from unittest.mock import patch
 
-from nci_si_acceptance import traffic_identity
-from nci_si_acceptance.traffic_identity import (
+from nci_sip_acceptance import traffic_identity
+from nci_sip_acceptance.traffic_identity import (
     INSTALLATION_ID_ENV,
     IdentitySnapshot,
     capture_identity,
@@ -54,13 +54,13 @@ class AcceptanceIdentitySnapshotTest(unittest.TestCase):
                 installation_label(captured)
             self.assertEqual(
                 str(raised.exception),
-                "Set NCI_SI_ACCEPTANCE_INSTALLATION_ID to exactly 32 lowercase hexadecimal "
+                "Set NCI_SIP_ACCEPTANCE_INSTALLATION_ID to exactly 32 lowercase hexadecimal "
                 "characters and retry.",
             )
             self.assertNotIn(canary, str(raised.exception))
             repaired = installation_label(capture_identity())
 
-        self.assertTrue(repaired.startswith("nci-si-acceptance/"))
+        self.assertTrue(repaired.startswith("nci-sip-acceptance/"))
         self.assertIn(f"(installation={'b' * 32}; ", repaired)
 
     def test_new_snapshot_observes_rotation_without_changing_the_old_label(self):

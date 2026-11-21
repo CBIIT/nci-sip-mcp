@@ -12,18 +12,18 @@ import httpx2
 from mcp.client import Client
 from mcp.server.mcpserver import MCPServer
 
-from nci_si_mcp import container_entry
-from nci_si_mcp.audit import JsonFormatter
-from nci_si_mcp.config import Settings
-from nci_si_mcp.transport import create_http_app
+from nci_sip_mcp import container_entry
+from nci_sip_mcp.audit import JsonFormatter
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.transport import create_http_app
 from test_server import ServerFixture
 
 
 class AuthorityConfigurationTest(unittest.TestCase):
     def test_programmatic_empty_allowlists_are_rejected(self):
         for field, variable in (
-            ("http_allowed_hosts", "NCI_SI_HTTP_ALLOWED_HOSTS"),
-            ("http_allowed_origins", "NCI_SI_HTTP_ALLOWED_ORIGINS"),
+            ("http_allowed_hosts", "NCI_SIP_HTTP_ALLOWED_HOSTS"),
+            ("http_allowed_origins", "NCI_SIP_HTTP_ALLOWED_ORIGINS"),
         ):
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, variable):
                 Settings(**{field: ()})
@@ -41,13 +41,13 @@ class StartupBoundaryTest(ServerFixture):
         with (
             patch.dict(
                 os.environ,
-                {"NCI_SI_HTTP_AUTH_MODE": "required", "NCI_SI_TRANSPORT": "stdio"},
+                {"NCI_SIP_HTTP_AUTH_MODE": "required", "NCI_SIP_TRANSPORT": "stdio"},
                 clear=True,
             ),
             patch.object(container_entry, "prepared_index", return_value=index) as prepare,
             patch.object(container_entry, "create_mcp") as create,
             patch.object(container_entry, "run_http") as http,
-            self.assertLogs("nci_si_mcp.container_entry", level="ERROR") as logs,
+            self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as logs,
         ):
             self.assertEqual(container_entry.main(), 1)
         prepare.assert_not_called()
@@ -59,7 +59,7 @@ class StartupBoundaryTest(ServerFixture):
                 (record["event"], record["asset"], record["errorType"], record["parameter"])
                 for record in records
             ],
-            [("container_startup_failed", "settings", "ValueError", "NCI_SI_HTTP_AUTH_MODE")],
+            [("container_startup_failed", "settings", "ValueError", "NCI_SIP_HTTP_AUTH_MODE")],
         )
         self.assertNotIn("required", json.dumps(records))
         self.assertNotIn("stdio", json.dumps(records))
@@ -102,11 +102,11 @@ class StartupBoundaryTest(ServerFixture):
             patch.dict(
                 os.environ,
                 {
-                    "NCI_SI_DATA_DIR": str(self.settings.data_dir),
-                    "NCI_SI_TRANSPORT": "streamable-http",
-                    "NCI_SI_HTTP_SESSIONS": "stateless",
-                    "NCI_SI_HTTP_AUTH_MODE": "required",
-                    "NCI_SI_HTTP_AUTH_FACTORY": "test_http_access:integration",
+                    "NCI_SIP_DATA_DIR": str(self.settings.data_dir),
+                    "NCI_SIP_TRANSPORT": "streamable-http",
+                    "NCI_SIP_HTTP_SESSIONS": "stateless",
+                    "NCI_SIP_HTTP_AUTH_MODE": "required",
+                    "NCI_SIP_HTTP_AUTH_FACTORY": "test_http_access:integration",
                 },
                 clear=True,
             ),

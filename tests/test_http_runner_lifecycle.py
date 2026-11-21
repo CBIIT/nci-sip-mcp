@@ -134,8 +134,8 @@ class HTTPRunnerLifecycleTest(unittest.TestCase):
                 environment={
                     "PATH": "controlled-path",
                     "HOME": "isolated-home",
-                    "NCI_SI_ACCEPTANCE_REGISTRY_RELEASE": "optional",
-                    "NCI_SI_DATA_DIR": "inherited-index",
+                    "NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE": "optional",
+                    "NCI_SIP_DATA_DIR": "inherited-index",
                 },
             )
         self.assertEqual(result, 0)
@@ -147,14 +147,14 @@ class HTTPRunnerLifecycleTest(unittest.TestCase):
             {
                 "PATH": "controlled-path",
                 "HOME": "isolated-home",
-                "NCI_SI_ACCEPTANCE_URL": "http://127.0.0.1:8000/mcp",
-                "NCI_SI_ACCEPTANCE_MODE": "fixture",
-                "NCI_SI_ACCEPTANCE_PREPARED": "1",
-                "NCI_SI_ACCEPTANCE_REGISTRY_RELEASE": "required",
-                "NCI_SI_ACCEPTANCE_SECURITY_SERVER": shlex.join(
+                "NCI_SIP_ACCEPTANCE_URL": "http://127.0.0.1:8000/mcp",
+                "NCI_SIP_ACCEPTANCE_MODE": "fixture",
+                "NCI_SIP_ACCEPTANCE_PREPARED": "1",
+                "NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE": "required",
+                "NCI_SIP_ACCEPTANCE_SECURITY_SERVER": shlex.join(
                     [sys.executable, str(runner.ROOT / "scripts/permissions_fixture.py")]
                 ),
-                "NCI_SI_ACCEPTANCE_STATE_HOOK": shlex.join(
+                "NCI_SIP_ACCEPTANCE_STATE_HOOK": shlex.join(
                     [
                         sys.executable,
                         "-m",

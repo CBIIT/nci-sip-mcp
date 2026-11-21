@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "a" * 32
 LABEL_SUFFIX = f" (installation={TOKEN}; +https://github.com/CBIIT/nci-sip-mcp)"
 VERSION_ERROR = (
-    "The installed nci-si-mcp version cannot form a safe label. "
+    "The installed nci-sip-mcp version cannot form a safe label. "
     "Reinstall the package with valid metadata and retry."
 )
 
@@ -117,7 +117,7 @@ class CoreIdentityCLITest(unittest.TestCase):
         )
         if result.returncode != 0:
             raise RuntimeError(f"offline core wheel build failed: {result.stderr}")
-        wheels = list(cls.wheelhouse.glob("nci_si_mcp-*.whl"))
+        wheels = list(cls.wheelhouse.glob("nci_sip_mcp-*.whl"))
         if len(wheels) != 1:
             raise RuntimeError(f"expected one core wheel, found {len(wheels)}")
         cls.environment = cls.root / "venv"
@@ -160,7 +160,7 @@ class CoreIdentityCLITest(unittest.TestCase):
         )
         if probe.returncode != 0:
             raise RuntimeError(f"could not locate isolated site-packages: {probe.stderr}")
-        metadata = list(Path(probe.stdout.strip()).glob("nci_si_mcp-*.dist-info/METADATA"))
+        metadata = list(Path(probe.stdout.strip()).glob("nci_sip_mcp-*.dist-info/METADATA"))
         if len(metadata) != 1:
             raise RuntimeError(f"expected one installed core metadata file, found {len(metadata)}")
         return metadata[0]
@@ -206,9 +206,9 @@ class CoreIdentityCLITest(unittest.TestCase):
     def _child(self, arguments, token=None, configured_id=None):
         environment = self._environment()
         if token is not None:
-            environment["NCI_SI_INSTALLATION_ID"] = token
+            environment["NCI_SIP_INSTALLATION_ID"] = token
         if configured_id is not None:
-            environment["NCI_SI_INSTALLATION_ID"] = configured_id
+            environment["NCI_SIP_INSTALLATION_ID"] = configured_id
         result = subprocess.run(  # noqa: S603 - fixed module and owned isolated wheel
             [str(self.python), "-B", *arguments],
             capture_output=True,
@@ -225,7 +225,7 @@ class CoreIdentityCLITest(unittest.TestCase):
 
     def _module(self, *arguments, token=None, configured_id=None):
         return self._child(
-            ["-m", "nci_si_mcp.traffic_identity", *arguments],
+            ["-m", "nci_sip_mcp.traffic_identity", *arguments],
             token,
             configured_id,
         )
@@ -234,7 +234,7 @@ class CoreIdentityCLITest(unittest.TestCase):
         result = self._child(
             [
                 "-c",
-                "import importlib.metadata; print(importlib.metadata.version('nci-si-mcp'))",
+                "import importlib.metadata; print(importlib.metadata.version('nci-sip-mcp'))",
             ]
         )
         self.assertEqual((result.returncode, result.stderr), (0, ""))
@@ -267,7 +267,7 @@ class CoreIdentityCLITest(unittest.TestCase):
         environment = self._environment()
         environment["PYTHONPATH"] = str(ROOT / "src")
         result = subprocess.run(
-            [sys.executable, "-S", "-c", "import nci_si_mcp"],
+            [sys.executable, "-S", "-c", "import nci_sip_mcp"],
             capture_output=True,
             text=True,
             check=False,
@@ -291,10 +291,10 @@ class CoreIdentityCLITest(unittest.TestCase):
         missing = self._module("show")
         error = self._error(
             missing,
-            "NCI_SI_INSTALLATION_ID",
+            "NCI_SIP_INSTALLATION_ID",
             "is missing",
         )
-        self.assertIn("NCI_SI_INSTALLATION_ID", error["message"])
+        self.assertIn("NCI_SIP_INSTALLATION_ID", error["message"])
         self._assert_no_configuration_writes()
 
     def test_generate_does_not_read_malformed_installed_version(self):
@@ -312,10 +312,10 @@ class CoreIdentityCLITest(unittest.TestCase):
         version = self._installed_version()
         shown = self._module("show", token=TOKEN)
 
-        self.assertEqual(shown.stdout, f"nci-si-mcp/{version}{LABEL_SUFFIX}\n")
+        self.assertEqual(shown.stdout, f"nci-sip-mcp/{version}{LABEL_SUFFIX}\n")
         self.assertEqual(
             (shown.returncode, shown.stdout, shown.stderr),
-            (0, f"nci-si-mcp/{version}{LABEL_SUFFIX}\n", ""),
+            (0, f"nci-sip-mcp/{version}{LABEL_SUFFIX}\n", ""),
         )
         self._assert_no_configuration_writes()
 
@@ -329,7 +329,7 @@ class CoreIdentityCLITest(unittest.TestCase):
 
         self._error(
             refused,
-            "nci-si-mcp installed version",
+            "nci-sip-mcp installed version",
             "must be a safe printable ASCII version and keep the complete label within 256 bytes",
             VERSION_ERROR,
         )
@@ -342,7 +342,7 @@ class CoreIdentityCLITest(unittest.TestCase):
 
         self._error(
             refused,
-            "nci-si-mcp installed version",
+            "nci-sip-mcp installed version",
             "must be a safe printable ASCII version and keep the complete label within 256 bytes",
             VERSION_ERROR,
         )
@@ -352,29 +352,29 @@ class CoreIdentityCLITest(unittest.TestCase):
     def test_package_version_reload_tracks_valid_corrupt_and_repaired_metadata(self):
         metadata_path = json.dumps(str(self.metadata))
         code = (
-            "import importlib, pathlib, nci_si_mcp\n"
+            "import importlib, pathlib, nci_sip_mcp\n"
             f"path = pathlib.Path({metadata_path})\n"
-            "initial = nci_si_mcp.__version__\n"
-            "initially_introspectable = '__version__' in dir(nci_si_mcp)\n"
+            "initial = nci_sip_mcp.__version__\n"
+            "initially_introspectable = '__version__' in dir(nci_sip_mcp)\n"
             "metadata = path.read_bytes()\n"
             "old = b'Version: ' + initial.encode()\n"
             "assert metadata.count(old) == 1\n"
             "metadata = metadata.replace(old, b'Version: snapshot-change', 1)\n"
             "path.write_bytes(metadata)\n"
-            "snapshot = nci_si_mcp.__version__\n"
+            "snapshot = nci_sip_mcp.__version__\n"
             "metadata = path.read_bytes()\n"
             "bad_version = b'Version: private-' + bytes([255]) + b'-canary'\n"
             "metadata = metadata.replace(b'Version: snapshot-change', bad_version, 1)\n"
             "path.write_bytes(metadata)\n"
             "try:\n"
-            "    importlib.reload(nci_si_mcp)\n"
+            "    importlib.reload(nci_sip_mcp)\n"
             "except UnicodeDecodeError:\n"
             "    reload_error = 'UnicodeDecodeError'\n"
             "else:\n"
             "    reload_error = 'none'\n"
-            "corrupt_introspectable = '__version__' in dir(nci_si_mcp)\n"
+            "corrupt_introspectable = '__version__' in dir(nci_sip_mcp)\n"
             "try:\n"
-            "    nci_si_mcp.__version__\n"
+            "    nci_sip_mcp.__version__\n"
             "except (AttributeError, UnicodeDecodeError):\n"
             "    explicit_failed = True\n"
             "else:\n"
@@ -382,10 +382,10 @@ class CoreIdentityCLITest(unittest.TestCase):
             "metadata = path.read_bytes()\n"
             "metadata = metadata.replace(bad_version, b'Version: 7.7.7', 1)\n"
             "path.write_bytes(metadata)\n"
-            "importlib.reload(nci_si_mcp)\n"
-            "repaired_introspectable = '__version__' in dir(nci_si_mcp)\n"
+            "importlib.reload(nci_sip_mcp)\n"
+            "repaired_introspectable = '__version__' in dir(nci_sip_mcp)\n"
             "print(f'{initial}|{snapshot}|{initially_introspectable}|{reload_error}|"
-            "{corrupt_introspectable}|{explicit_failed}|{nci_si_mcp.__version__}|"
+            "{corrupt_introspectable}|{explicit_failed}|{nci_sip_mcp.__version__}|"
             "{repaired_introspectable}')\n"
         )
         result = self._child(["-c", code])
@@ -404,9 +404,9 @@ class CoreIdentityCLITest(unittest.TestCase):
         self._write_invalid_utf8_version()
         metadata_path = json.dumps(str(self.metadata))
         code = (
-            "import importlib, pathlib, nci_si_mcp\n"
+            "import importlib, pathlib, nci_sip_mcp\n"
             "try:\n"
-            "    nci_si_mcp.__version__\n"
+            "    nci_sip_mcp.__version__\n"
             "except (AttributeError, UnicodeDecodeError):\n"
             "    initial_access_failed = True\n"
             "else:\n"
@@ -416,11 +416,11 @@ class CoreIdentityCLITest(unittest.TestCase):
             "metadata = path.read_bytes()\n"
             "assert metadata.count(bad_version) == 1\n"
             "path.write_bytes(metadata.replace(bad_version, b'Version: 7.7.7', 1))\n"
-            "importlib.reload(nci_si_mcp)\n"
-            "repaired_version = nci_si_mcp.__version__\n"
-            "del nci_si_mcp.__version__\n"
+            "importlib.reload(nci_sip_mcp)\n"
+            "repaired_version = nci_sip_mcp.__version__\n"
+            "del nci_sip_mcp.__version__\n"
             "print('|'.join((str(initial_access_failed), repaired_version, "
-            "str(hasattr(nci_si_mcp, '__version__')))))\n"
+            "str(hasattr(nci_sip_mcp, '__version__')))))\n"
         )
         result = self._child(["-c", code])
 
@@ -432,13 +432,13 @@ class CoreIdentityCLITest(unittest.TestCase):
     def test_invalid_tokens_are_refused_without_echoing_them(self):
         version = self._installed_version()
         valid = self._module("show", token=TOKEN)
-        self.assertEqual(valid.stdout, f"nci-si-mcp/{version}{LABEL_SUFFIX}\n")
+        self.assertEqual(valid.stdout, f"nci-sip-mcp/{version}{LABEL_SUFFIX}\n")
         for token in ("PRIVATE-ID-CANARY", "A" * 32, "a" * 31, "a" * 33, "g" * 32, "é" * 32):
             with self.subTest(token=token):
                 result = self._module("show", token=token)
                 error = self._error(
                     result,
-                    "NCI_SI_INSTALLATION_ID",
+                    "NCI_SIP_INSTALLATION_ID",
                     "must be exactly 32 lowercase hexadecimal characters",
                 )
                 self.assertIn("32 lowercase hexadecimal characters", error["message"])
@@ -448,7 +448,7 @@ class CoreIdentityCLITest(unittest.TestCase):
     def test_installed_versions_are_safe_and_labels_are_neither_truncated_nor_overlong(self):
         version = self._installed_version()
         valid = self._module("show", token=TOKEN)
-        self.assertEqual(valid.stdout, f"nci-si-mcp/{version}{LABEL_SUFFIX}\n")
+        self.assertEqual(valid.stdout, f"nci-sip-mcp/{version}{LABEL_SUFFIX}\n")
         for version in (
             "bad version",
             "bad); installation=other",
@@ -461,26 +461,26 @@ class CoreIdentityCLITest(unittest.TestCase):
                 refused = self._module("show", token=TOKEN)
                 self._error(
                     refused,
-                    "nci-si-mcp installed version",
+                    "nci-sip-mcp installed version",
                     "must be a safe printable ASCII version and keep the complete label within "
                     "256 bytes",
                     VERSION_ERROR,
                 )
                 self.assertNotIn(version, refused.stdout + refused.stderr)
 
-        fixed_length = len("nci-si-mcp/") + len(LABEL_SUFFIX)
+        fixed_length = len("nci-sip-mcp/") + len(LABEL_SUFFIX)
         self._write_version("v" * (256 - fixed_length))
         actual = self._installed_version()
         accepted = self._module("show", token=TOKEN)
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        self.assertEqual(accepted.stdout, f"nci-si-mcp/{actual}{LABEL_SUFFIX}\n")
+        self.assertEqual(accepted.stdout, f"nci-sip-mcp/{actual}{LABEL_SUFFIX}\n")
         self.assertEqual(len(accepted.stdout.rstrip("\n").encode("ascii")), 256)
 
         self._write_version("v" * (257 - fixed_length))
         refused = self._module("show", token=TOKEN)
         self._error(
             refused,
-            "nci-si-mcp installed version",
+            "nci-sip-mcp installed version",
             "must be a safe printable ASCII version and keep the complete label within 256 bytes",
             VERSION_ERROR,
         )
@@ -500,7 +500,7 @@ class CoreIdentityCLITest(unittest.TestCase):
                 "-B",
                 "-c",
                 "import os, socket\n"
-                "missing_path = '/nci-si-identity-sentinel-' + str(os.getpid())\n"
+                "missing_path = '/nci-sip-identity-sentinel-' + str(os.getpid())\n"
                 "for kind, attempt in (\n"
                 "    ('DNS', lambda: socket.getaddrinfo('192.0.2.1', 9, "
                 "flags=socket.AI_NUMERICHOST)),\n"

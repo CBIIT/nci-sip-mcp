@@ -7,6 +7,7 @@ import hashlib
 import re
 import subprocess
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
@@ -42,6 +43,40 @@ SYMBOLS = {
 
 def digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _fingerprint_value(value: object) -> str:
+    if isinstance(value, ast.AST):
+        return fingerprint_dump(value)
+    if isinstance(value, list):
+        return f"[{', '.join(_fingerprint_value(item) for item in value)}]"
+    return repr(value)
+
+
+def fingerprint_dump(node: ast.AST) -> str:
+    fields = []
+    for name in node._fields:
+        try:
+            value: object = getattr(node, name)
+        except AttributeError:
+            continue
+        default: object = getattr(type(node), name, ...)
+        if value is None and default is None:
+            continue
+        if _is_default_empty_list(node, name, value):
+            continue
+        fields.append(f"{name}={_fingerprint_value(value)}")
+    return f"{type(node).__name__}({', '.join(fields)})"
+
+
+def _is_default_empty_list(node: ast.AST, name: str, value: object) -> bool:
+    if not isinstance(value, list) or value:
+        return False
+    field_types: object = getattr(type(node), "_field_types", {})
+    if not isinstance(field_types, dict) or name not in field_types:
+        return False
+    field_type: object = field_types[name]
+    return getattr(field_type, "__origin__", ...) is list
 
 
 @dataclass(frozen=True)
@@ -98,24 +133,82 @@ def scope(root: Path, paths: list[str], base: str, head: str) -> dict[str, set[i
         return result
     merge_base = git(root, "merge-base", base, head).strip()
     diff = git(
-        root, "diff", "--no-ext-diff", "--unified=0", "--no-renames", merge_base, head, "--", *ROOTS
+        root,
+        "-c",
+        "core.quotepath=off",
+        "diff",
+        "--no-ext-diff",
+        "--unified=0",
+        "--no-renames",
+        merge_base,
+        head,
+        "--",
+        *ROOTS,
     )
     return diff_lines(diff)
 
 
+@dataclass(frozen=True, slots=True)
+class Hunk:
+    """One zero-context diff hunk: its file, the new-side line range, and its changed lines."""
+
+    file: str
+    start: int
+    count: int
+    removed: tuple[str, ...]
+    added: tuple[str, ...]
+
+
+def hunk_body(lines: Iterator[str], count: int) -> list[str]:
+    body: list[str] = []
+    while len(body) < count and (line := next(lines, None)) is not None:
+        if not line.startswith("\\"):
+            body.append(line)
+    return body
+
+
+def hunk_header(line: str) -> tuple[int, int, int]:
+    match = re.match(r"@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+    if not match:
+        raise ValueError(f"Unparseable hunk header: {line}")
+    return int(match[1] or 1), int(match[2]), int(match[3] or 1)
+
+
+def file_name(line: str, name: str) -> str:
+    if line.startswith("diff --git"):
+        return ""
+    if line.startswith("+++ /dev/null"):
+        return "/dev/null"
+    # git appends a tab to the name when the path contains a space
+    return line[6:].removesuffix("\t") if line.startswith("+++ b/") else name
+
+
+def hunks(diff: str) -> Iterator[Hunk]:
+    name = ""
+    lines = iter(diff.split("\n"))
+    for line in lines:
+        name = file_name(line, name)
+        if line.startswith("@@"):
+            yield read_hunk(line, name, lines)
+
+
+def read_hunk(line: str, name: str, lines: Iterator[str]) -> Hunk:
+    removed_count, start, count = hunk_header(line)
+    if not name:
+        raise ValueError(f"Hunk without a file name: {line}")
+    body = hunk_body(lines, removed_count + count)
+    removed = tuple(item[1:] for item in body if item.startswith("-"))
+    added = tuple(item[1:] for item in body if item.startswith("+"))
+    return Hunk(name, start, count, removed, added)
+
+
 def diff_lines(diff: str) -> dict[str, set[int] | None]:
     result: dict[str, set[int] | None] = {}
-    name = ""
-    for line in diff.splitlines():
-        if line.startswith("+++ b/"):
-            name = line[6:]
-        match = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
-        if match and eligible(name):
-            start, count = int(match[1]), int(match[2] or 1)
-            result.setdefault(name, set())
-            lines = result[name]
+    for item in hunks(diff):
+        if eligible(item.file):
+            lines = result.setdefault(item.file, set())
             if lines is not None:
-                lines.update(range(start, start + count))
+                lines.update(range(item.start, item.start + item.count))
     return result
 
 
@@ -247,9 +340,9 @@ def candidates(path: str, source: bytes) -> tuple[list[Mutant], list[dict]]:
                     qualname or "<module>",
                     operator,
                     site,
-                    digest(ast.dump(cast("ast.AST", owner), include_attributes=False)),
-                    digest(ast.dump(node)),
-                    digest(ast.dump(ast.parse(after))),
+                    digest(fingerprint_dump(cast("ast.AST", owner))),
+                    digest(fingerprint_dump(node)),
+                    digest(fingerprint_dump(ast.parse(after))),
                     node.lineno,
                     int(getattr(node, "end_lineno", node.lineno)),
                     start,

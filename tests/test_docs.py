@@ -25,18 +25,18 @@ import yaml
 from jsonschema import Draft202012Validator
 from mcp.client import Client
 
-from nci_si_mcp.audit import Audit
-from nci_si_mcp.cli import build_parser
-from nci_si_mcp.config import DEFAULT_CALL_DEADLINE_SECONDS, DEFAULT_EXCLUSION_ROLE_CODES, Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.errors import CORRELATION_ID_FORM, ErrorCode, correlated
-from nci_si_mcp.evs import LICENSE_KEY_HEADER
-from nci_si_mcp.http_client import MAX_RETRY_DELAY_SECONDS
-from nci_si_mcp.models import IndexManifest
-from nci_si_mcp.registry import SPECS
-from nci_si_mcp.server import create_mcp
-from nci_si_mcp.transport import GRACEFUL_SHUTDOWN_SECONDS, create_http_app
-from nci_si_mcp.validation import (
+from nci_sip_mcp.audit import Audit
+from nci_sip_mcp.cli import build_parser
+from nci_sip_mcp.config import DEFAULT_CALL_DEADLINE_SECONDS, DEFAULT_EXCLUSION_ROLE_CODES, Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.errors import CORRELATION_ID_FORM, ErrorCode, correlated
+from nci_sip_mcp.evs import LICENSE_KEY_HEADER
+from nci_sip_mcp.http_client import MAX_RETRY_DELAY_SECONDS
+from nci_sip_mcp.models import IndexManifest
+from nci_sip_mcp.registry import SPECS
+from nci_sip_mcp.server import create_mcp
+from nci_sip_mcp.transport import GRACEFUL_SHUTDOWN_SECONDS, create_http_app
+from nci_sip_mcp.validation import (
     MAX_DICTIONARY_TEXT,
     MAX_MATCH_TEXT,
     MAX_QUERY_TEXT,
@@ -49,7 +49,7 @@ from nci_si_mcp.validation import (
 from ncit_index.scoring import MAX_LEXICAL_TOKENS
 
 ROOT = Path(__file__).parent.parent
-PACKAGE = ROOT / "src" / "nci_si_mcp"
+PACKAGE = ROOT / "src" / "nci_sip_mcp"
 QUICKSTART = (ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
 ARCHITECTURE = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
 
@@ -197,7 +197,7 @@ def operations_endpoints(settings):
     ready = asyncio.run(endpoints["/ready"](None))
     required = create_http_app(replace(settings, http_require_index=True))
     blocked_endpoint = next(route.endpoint for route in required.routes if route.path == "/ready")
-    with patch("nci_si_mcp.transport.emit") as transition:
+    with patch("nci_sip_mcp.transport.emit") as transition:
         blocked = asyncio.run(blocked_endpoint(None))
     return {
         **{
@@ -214,7 +214,7 @@ def operations_endpoints(settings):
 
 def operations_signals(settings):
     """Resolve the document's inventory through the interfaces that own the signals."""
-    with patch("nci_si_mcp.audit.emit") as completion:
+    with patch("nci_sip_mcp.audit.emit") as completion:
         Audit("doc-contract", {}, {}, (), result={}).finish()
     manifest = IndexManifest("ncit", "test", None, "hashing", "hashing", 0, "test", "test")
     with correlated():
@@ -346,17 +346,17 @@ class OperationsDocumentationTest(unittest.TestCase):
     def assert_settings(self, document):
         rows = operations_rows(document, "Operational settings")
         self.assertGreater(len(rows), 0, "operations settings inventory must not be empty")
-        self.assertEqual({name for name, _ in rows}, set(re.findall(r"NCI_SI_[A-Z_]+", document)))
+        self.assertEqual({name for name, _ in rows}, set(re.findall(r"NCI_SIP_[A-Z_]+", document)))
         with patch.dict(os.environ, clear=True):
             defaults = Settings.from_env()
         for name, encoded in rows:
-            attribute = name.removeprefix("NCI_SI_").lower()
+            attribute = name.removeprefix("NCI_SIP_").lower()
             self.assertTrue(hasattr(defaults, attribute), name)
             self.assertEqual(json.loads(encoded), getattr(defaults, attribute), name)
 
     def test_governance_states_the_exact_sponsor_approval_path(self):
         expected = (
-            "The government sponsor approves changes; the NCI SI MCP project coordinator "
+            "The government sponsor approves changes; the NCI SIP MCP project coordinator "
             "relays that approval, and the reviewer acts for the coordinator."
         )
         for name in ("AGENTS.md", "CONTRIBUTING.md"):
@@ -369,7 +369,7 @@ class OperationsDocumentationTest(unittest.TestCase):
         document = path.read_text() if path.exists() else ""
         with (
             tempfile.TemporaryDirectory() as directory,
-            patch("nci_si_mcp.server.configure_logging"),
+            patch("nci_sip_mcp.server.configure_logging"),
         ):
             available = operations_signals(Settings(data_dir=Path(directory)))
         self.assert_signals(document, available)
@@ -379,18 +379,18 @@ class OperationsDocumentationTest(unittest.TestCase):
         document = read("docs/operations.md")
         with (
             tempfile.TemporaryDirectory() as directory,
-            patch("nci_si_mcp.server.configure_logging"),
+            patch("nci_sip_mcp.server.configure_logging"),
         ):
             available = operations_signals(Settings(data_dir=Path(directory)))
         mutations = (
             ("/ready`", "/invented`", self.assert_signals),
             ("elapsedMs", "inventedField", self.assert_signals),
             ("builtAt", "inventedDate", self.assert_signals),
-            ("NCI_SI_LOG_LEVEL", "NCI_SI_INVENTED", self.assert_settings),
+            ("NCI_SIP_LOG_LEVEL", "NCI_SIP_INVENTED", self.assert_settings),
             ('`"INFO"`', '`"DEBUG"`', self.assert_settings),
             (
                 "## Operational settings",
-                "NCI_SI_UNLISTED\n\n## Operational settings",
+                "NCI_SIP_UNLISTED\n\n## Operational settings",
                 self.assert_settings,
             ),
         )
@@ -409,14 +409,14 @@ class DocumentationTest(unittest.TestCase):
         self.assertEqual(
             per_file,
             {
-                "src/nci_si_mcp/seam.py": ["N803"],
-                "src/nci_si_mcp/content.py": ["N803"],
-                "src/nci_si_mcp/cadsr_matching.py": ["N803"],
-                "src/nci_si_mcp/workflows.py": ["N803"],
-                "src/nci_si_mcp/cadsr_content.py": ["N803"],
+                "src/nci_sip_mcp/seam.py": ["N803"],
+                "src/nci_sip_mcp/content.py": ["N803"],
+                "src/nci_sip_mcp/cadsr_matching.py": ["N803"],
+                "src/nci_sip_mcp/workflows.py": ["N803"],
+                "src/nci_sip_mcp/cadsr_content.py": ["N803"],
                 "src/ncit_index/embeddings.py": ["PLC0415"],
-                "src/nci_si_mcp/server.py": ["PLC0415"],
-                "src/nci_si_mcp/transport.py": ["PLC0415"],
+                "src/nci_sip_mcp/server.py": ["PLC0415"],
+                "src/nci_sip_mcp/transport.py": ["PLC0415"],
                 "src/ncit_index/scoring.py": ["PLC0415"],
                 "scripts/**/*.py": ["T20"],
                 "acceptance/{tests,selftests}/**/*.py": ["S101"],
@@ -428,12 +428,12 @@ class DocumentationTest(unittest.TestCase):
 
     def test_ruff_enforces_effective_parameter_spelling_outside_spec_modules(self):
         paths = [
-            ("src/nci_si_mcp/seam.py", 0),
-            ("src/nci_si_mcp/content.py", 0),
-            ("src/nci_si_mcp/cadsr_matching.py", 0),
-            ("src/nci_si_mcp/workflows.py", 0),
-            ("src/nci_si_mcp/cadsr_content.py", 0),
-            ("src/nci_si_mcp/config.py", 1),
+            ("src/nci_sip_mcp/seam.py", 0),
+            ("src/nci_sip_mcp/content.py", 0),
+            ("src/nci_sip_mcp/cadsr_matching.py", 0),
+            ("src/nci_sip_mcp/workflows.py", 0),
+            ("src/nci_sip_mcp/cadsr_content.py", 0),
+            ("src/nci_sip_mcp/config.py", 1),
         ]
         for name, exit_code in paths:
             with self.subTest(path=name):
@@ -624,12 +624,12 @@ class DocumentationTest(unittest.TestCase):
             self.assertIn(statement, readme)
 
     def test_quickstart_introduces_exactly_the_settings_the_code_reads(self):
-        setting = re.compile(r"NCI_SI_[A-Z_]+")
+        setting = re.compile(r"NCI_SIP_[A-Z_]+")
         sources = [path.read_text(encoding="utf-8") for path in PACKAGE.glob("*.py")]
         read_by_the_code = {name for source in sources for name in setting.findall(source)}
 
         # A setting is introduced by its row in the table or by an `export` example.
-        exported = set(re.findall(r"^export (NCI_SI_[A-Z_]+)=", QUICKSTART, flags=re.MULTILINE))
+        exported = set(re.findall(r"^export (NCI_SIP_[A-Z_]+)=", QUICKSTART, flags=re.MULTILINE))
         table = first_column(section(QUICKSTART, "Settings"))
         self.assertEqual(table | exported, read_by_the_code)
         self.assertEqual(set(setting.findall(QUICKSTART)), read_by_the_code)
@@ -637,7 +637,7 @@ class DocumentationTest(unittest.TestCase):
     def test_quickstart_names_the_licence_key_header_and_the_wait_cap_the_client_uses(self):
         table = section(QUICKSTART, "Settings")
         row = next(
-            line for line in table.splitlines() if line.startswith("| `NCI_SI_EVS_LICENSE_KEY` |")
+            line for line in table.splitlines() if line.startswith("| `NCI_SIP_EVS_LICENSE_KEY` |")
         )
         backoff = next(line for line in table.splitlines() if "RETRY_BACKOFF" in line)
 
@@ -655,7 +655,7 @@ class DocumentationTest(unittest.TestCase):
         self.assertEqual(set(documented), first_column(table))
         for name, default in documented.items():
             with self.subTest(name):
-                actual = getattr(defaults, name.removeprefix("NCI_SI_").lower())
+                actual = getattr(defaults, name.removeprefix("NCI_SIP_").lower())
                 if default == "unset":
                     self.assertIsNone(actual)
                 elif isinstance(actual, tuple):
@@ -668,9 +668,9 @@ class DocumentationTest(unittest.TestCase):
     def test_quickstart_documents_the_closed_value_sets_of_the_code(self):
         table = section(QUICKSTART, "Settings")
         for variable, values in (
-            ("NCI_SI_PROFILE", PROFILES),
-            ("NCI_SI_UPSTREAM_MODE", UPSTREAM_MODES),
-            ("NCI_SI_RELEASE_CHANNEL", RELEASE_CHANNELS),
+            ("NCI_SIP_PROFILE", PROFILES),
+            ("NCI_SIP_UPSTREAM_MODE", UPSTREAM_MODES),
+            ("NCI_SIP_RELEASE_CHANNEL", RELEASE_CHANNELS),
         ):
             with self.subTest(variable):
                 row = next(line for line in table.splitlines() if f"`{variable}`" in line)
@@ -682,7 +682,7 @@ class DocumentationTest(unittest.TestCase):
         rows = [line.split("|")[1:-1] for line in table.splitlines() if line.startswith("| ")]
         documented = {name.strip(): value.strip() for name, value, _reason in rows[1:]}
         expected = {
-            "Call deadline (`NCI_SI_CALL_DEADLINE_SECONDS`)": (
+            "Call deadline (`NCI_SIP_CALL_DEADLINE_SECONDS`)": (
                 f"{DEFAULT_CALL_DEADLINE_SECONDS:g} s default"
             ),
             "HTTP shutdown drain": f"{GRACEFUL_SHUTDOWN_SECONDS:g} s",
@@ -729,12 +729,12 @@ class DocumentationTest(unittest.TestCase):
         )
         self.assertEqual(
             rows["timeout"][0],
-            "Every attempt at an upstream request timed out (`NCI_SI_TIMEOUT_SECONDS`; "
-            "`NCI_SI_MATCH_TIMEOUT_SECONDS` for caDSR matching) before the call deadline; "
+            "Every attempt at an upstream request timed out (`NCI_SIP_TIMEOUT_SECONDS`; "
+            "`NCI_SIP_MATCH_TIMEOUT_SECONDS` for caDSR matching) before the call deadline; "
             "timeouts are errors, never empty results",
         )
 
-    @patch("nci_si_mcp.server.configure_logging")
+    @patch("nci_sip_mcp.server.configure_logging")
     def test_every_usage_example_calls_a_tool_and_arguments_the_server_has(self, _):
         # Creating a server installs a root log handler; take it out again.
         root = logging.getLogger()
@@ -756,7 +756,7 @@ class DocumentationTest(unittest.TestCase):
                 self.assertIn(call["tool"], served)
                 self.assertLessEqual(set(call["arguments"]), served[call["tool"]])
 
-    @patch("nci_si_mcp.server.configure_logging")
+    @patch("nci_sip_mcp.server.configure_logging")
     def test_selection_examples_have_effective_controls_and_validate_as_complete_calls(self, _):
         async def schemas(data_dir):
             async with Client(create_mcp(Settings(data_dir=data_dir))) as client:
@@ -876,7 +876,7 @@ class DocumentationTest(unittest.TestCase):
         # `owner.name`, where the owner is a module or a class of one; `models.py` is a file name.
         named = re.findall(r"`(\w+)\.(?!py\b)(\w+)`", section(ARCHITECTURE, "Provenance"))
         stems = sorted(path.stem for path in PACKAGE.glob("*.py") if path.stem != "__init__")
-        modules = {stem: importlib.import_module(f"nci_si_mcp.{stem}") for stem in stems}
+        modules = {stem: importlib.import_module(f"nci_sip_mcp.{stem}") for stem in stems}
         owners = dict(modules)
         for module in modules.values():
             owners.update(vars(module))
@@ -991,11 +991,11 @@ class DocumentationTest(unittest.TestCase):
             read("acceptance/README.md"),
         )
         self.assertIn(
-            '"$SERVER_VENV/bin/python" -m nci_si_mcp.traffic_identity show',
+            '"$SERVER_VENV/bin/python" -m nci_sip_mcp.traffic_identity show',
             guide_text,
         )
         self.assertIn(
-            '"$ACCEPTANCE_VENV/bin/python" -m nci_si_acceptance.traffic_identity show',
+            '"$ACCEPTANCE_VENV/bin/python" -m nci_sip_acceptance.traffic_identity show',
             guide_text,
         )
         self.assertIn(
@@ -1004,7 +1004,7 @@ class DocumentationTest(unittest.TestCase):
         )
         self.assertNotIn("pdm run --working-dir acceptance", guide_text)
         self.assertIn(
-            "pdm run python -m nci_si_acceptance.traffic_identity show",
+            "pdm run python -m nci_sip_acceptance.traffic_identity show",
             guide_text,
         )
 
@@ -1012,7 +1012,7 @@ class DocumentationTest(unittest.TestCase):
         exports = [
             line.strip()
             for line in QUICKSTART.splitlines()
-            if line.strip().startswith("export NCI_SI_INSTALLATION_ID=")
+            if line.strip().startswith("export NCI_SIP_INSTALLATION_ID=")
         ]
 
         self.assertTrue(exports, "QUICKSTART should show the identity setting")
@@ -1077,12 +1077,62 @@ class DocumentationTest(unittest.TestCase):
         self.assertEqual(
             commands,
             [
-                '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"',
+                '"$INSTALLER_VENV/bin/python" -m pip install "nci-sip-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"',
+                '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"',
                 '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-si-mcp@${LEGACY_RELEASE_TAG}"',
-                '"$SERVER_VENV/bin/python" -m pip install "nci-si-mcp[server] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"',
-                '"$INDEX_VENV/bin/python" -m pip install "nci-si-mcp[server,index] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"',
+                '"$SERVER_VENV/bin/python" -m pip install "nci-sip-mcp[server] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"',
+                '"$INDEX_VENV/bin/python" -m pip install "nci-sip-mcp[server,index] @ git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"',
             ],
         )
+
+    def test_container_attestation_examples_keep_current_and_historical_identities(self):
+        commands = [
+            line.strip()
+            for line in read("docs/container.md").splitlines()
+            if line.strip().startswith("`gh attestation verify ")
+        ]
+        self.assertEqual(
+            commands,
+            [
+                "`gh attestation verify oci://ghcr.io/cbiit/nci-sip-mcp@sha256:<digest> "
+                "--repo CBIIT/nci-sip-mcp --signer-workflow "
+                "CBIIT/nci-sip-mcp/.github/workflows/release.yml`.",
+                "`gh attestation verify oci://ghcr.io/cbiit/nci-si-mcp@sha256:<digest> "
+                "--repo CBIIT/nci-si-mcp --signer-workflow "
+                "CBIIT/nci-si-mcp/.github/workflows/release.yml`.",
+            ],
+        )
+
+    def test_implementation_plan_keeps_its_dated_pre_sip_package_and_settings(self):
+        plan = read("docs/implementation-plan.md")
+        dated_baseline = plan.split("\n## 9. Acceptance suite", 1)[0]
+        self.assertIn("how `nci_si_mcp` is extended", dated_baseline)
+        self.assertIn("`nci_si_mcp.platform`", dated_baseline)
+        self.assertIn("src/nci_si_mcp/", dated_baseline)
+        self.assertIn("Settings after the change. `NCI_SI_EVS_BASE_URL`", dated_baseline)
+        self.assertIn("`NCI_SI_CADSR_CREDENTIAL`", dated_baseline)
+        self.assertNotIn("NCI_SIP_", dated_baseline)
+
+    def test_pre_sip_canonical_origin_command_sets_a_real_compatible_tag(self):
+        document = (ROOT / "docs/installer-targets.md").read_text(encoding="utf-8")
+        section = document.split("### Pre-SIP package release\n", 1)[1]
+        section = section.split("\n### ", 1)[0]
+        assignments = re.findall(r"^PRE_SIP_TAG=(v\d+\.\d+\.\d+)$", section, re.MULTILINE)
+        self.assertEqual(assignments, ["v0.39.2"])
+        project = tomllib.loads(
+            subprocess.check_output(  # noqa: S603 - fixed Git inspection of a verified docs tag
+                ["git", "show", f"{assignments[0]}:pyproject.toml"],  # noqa: S607
+                cwd=ROOT,
+                text=True,
+            )
+        )
+        self.assertEqual(project["project"]["name"], "nci-si-mcp")
+        self.assertIn("`v0.29.1` or later while still pre-SIP", section)
+        self.assertIn(
+            '"nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"',
+            section,
+        )
+        self.assertIn("v0.28.0 or v0.29.0", document)
 
     def test_every_file_in_docs_has_a_lower_case_name(self):
         # Owner's rule: names in docs/ differ by meaning, never by case alone.
@@ -1132,20 +1182,20 @@ class DocumentationTest(unittest.TestCase):
 
     def test_shell_blocks_run_project_commands_through_pdm_run(self):
         # After `pdm install` the environment is not activated, so a bare `python -m ...`
-        # or `nci-si-mcp ...` fails for a new developer. The one exception installs the
-        # released package with pip, which puts `nci-si-mcp` on the PATH itself.
+        # or `nci-sip-mcp ...` fails for a new developer. The one exception installs the
+        # released package with pip, which puts `nci-sip-mcp` on the PATH itself.
         released = {
             ("docs/local-guide.md", command)
             for command in (
                 'python3.14 -m venv "$SERVER_VENV"',
                 'python3.14 -m venv "$INDEX_VENV"',
-                '"$INDEX_VENV/bin/nci-si-mcp" index-sample C3262 C2991 C40704 C153397 C116938',
-                '"$INDEX_VENV/bin/nci-si-mcp" evaluate',
-                '"$INDEX_VENV/bin/nci-si-mcp" serve --transport streamable-http',
+                '"$INDEX_VENV/bin/nci-sip-mcp" index-sample C3262 C2991 C40704 C153397 C116938',
+                '"$INDEX_VENV/bin/nci-sip-mcp" evaluate',
+                '"$INDEX_VENV/bin/nci-sip-mcp" serve --transport streamable-http',
             )
         }
         bare = re.compile(
-            r"(?:\w+=\S+\s+)*(?:python3?(?:\.\d+)?|nci-si-mcp|pytest|ruff|basedpyright)\s"
+            r"(?:\w+=\S+\s+)*(?:python3?(?:\.\d+)?|nci-sip-mcp|pytest|ruff|basedpyright)\s"
         )
         found = [
             (name, number)

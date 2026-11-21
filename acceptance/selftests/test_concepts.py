@@ -9,8 +9,8 @@ from urllib.request import Request, urlopen
 import pytest
 import yaml
 
-from nci_si_acceptance.concepts import ConceptRules, Recording, recording_key
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_sip_acceptance.concepts import ConceptRules, Recording, recording_key
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures
 
 RULES = {
     "base": ["code", "name"],

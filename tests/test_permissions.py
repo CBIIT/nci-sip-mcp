@@ -10,10 +10,10 @@ from mcp.client import Client
 from mcp.shared.exceptions import MCPError
 
 from fakes import cde_response, cde_row, concept, primary_element
-from nci_si_mcp import cadsr_content, cadsr_matching, seam, workflows
-from nci_si_mcp.caching import cache_call
-from nci_si_mcp.errors import PlatformError, correlated
-from nci_si_mcp.permissions import (
+from nci_sip_mcp import cadsr_content, cadsr_matching, seam, workflows
+from nci_sip_mcp.caching import cache_call
+from nci_sip_mcp.errors import PlatformError, correlated
+from nci_sip_mcp.permissions import (
     Authority,
     PolicyUnavailableError,
     Principal,
@@ -22,8 +22,8 @@ from nci_si_mcp.permissions import (
     require,
     secured,
 )
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.server import create_mcp
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.server import create_mcp
 from test_evs_client import FakeResponse
 from test_index import normalized
 from test_release_selection import initialize_http
@@ -275,7 +275,7 @@ class SurfacePermissionTest(ServerFixture):
                     [t.name for t in (await client.list_tools()).tools], ["get_data_element"]
                 )
                 current = PolicyUnavailableError("private policy backend information")
-                with self.assertLogs("nci_si_mcp.server_permissions", level="WARNING") as logs:
+                with self.assertLogs("nci_sip_mcp.server_permissions", level="WARNING") as logs:
                     failed = await client.call_tool("get_concept", pinned(code="C3262"))
                 self.assertEqual(failed.structured_content["error"]["code"], "permission_denied")
                 self.assertNotIn("backend", str(failed))
@@ -346,7 +346,7 @@ class CompoundPermissionTest(WorkflowFixture):
             authority_scope(
                 authority("expand_cohort", "get_concept_neighborhood", "get_concept_hierarchy")
             ),
-            patch("nci_si_mcp.permissions.time", side_effect=lambda: now),
+            patch("nci_sip_mcp.permissions.time", side_effect=lambda: now),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=concepts),
         ):
             result = self.call("expand_cohort", conceptCode="C1")
@@ -371,7 +371,7 @@ class CompoundPermissionTest(WorkflowFixture):
                     "find_data_elements_for_concept",
                 )
             ),
-            patch("nci_si_mcp.permissions.time", side_effect=lambda: now),
+            patch("nci_sip_mcp.permissions.time", side_effect=lambda: now),
             patch.object(self.evs, "search_concepts", create=True, side_effect=search),
         ):
             result = self.call(text="Neoplasm")
@@ -396,7 +396,7 @@ class CompoundPermissionTest(WorkflowFixture):
             authority_scope(
                 authority("expand_cohort", "get_concept_neighborhood", "get_concept_hierarchy")
             ),
-            patch("nci_si_mcp.permissions.time", side_effect=lambda: now),
+            patch("nci_sip_mcp.permissions.time", side_effect=lambda: now),
             patch.object(self.evs, "get_terminologies", side_effect=releases),
         ):
             result = self.call("expand_cohort", conceptCode="C1")
@@ -423,7 +423,7 @@ class CompoundPermissionTest(WorkflowFixture):
                         "get_concept_for_permissible_value", "get_data_element", "get_concept"
                     )
                 ),
-                patch("nci_si_mcp.permissions.time", side_effect=lambda: now),
+                patch("nci_sip_mcp.permissions.time", side_effect=lambda: now),
                 patch.object(self.context.cadsr, "get_data_element", side_effect=values),
             ):
                 result = self.call(
@@ -456,7 +456,7 @@ class CompoundPermissionTest(WorkflowFixture):
                     "find_data_elements_for_concept",
                 )
             ),
-            patch("nci_si_mcp.permissions.time", side_effect=lambda: now),
+            patch("nci_sip_mcp.permissions.time", side_effect=lambda: now),
             patch.object(self.evs, "get_terminologies", side_effect=releases),
             patch.object(
                 self.evs, "search_concepts", create=True, return_value=(0, [])
@@ -486,10 +486,10 @@ class CompoundPermissionTest(WorkflowFixture):
                     expires_at=1060,
                 )
             ),
-            patch("nci_si_mcp.permissions.time", side_effect=lambda: now),
+            patch("nci_sip_mcp.permissions.time", side_effect=lambda: now),
             patch.object(self.evs, "get_terminologies", side_effect=releases),
             patch(
-                "nci_si_mcp.http_client._open",
+                "nci_sip_mcp.http_client._open",
                 return_value=FakeResponse(json.dumps(primary_element()).encode()),
             ) as requests,
         ):
@@ -558,7 +558,7 @@ class CompoundPermissionTest(WorkflowFixture):
 
         with (
             authority_scope(authority("harmonize_data_dictionary", "match_data_elements")),
-            patch("nci_si_mcp.permissions.time", side_effect=lambda: now),
+            patch("nci_sip_mcp.permissions.time", side_effect=lambda: now),
             patch.object(self.context.cadsr, "match_data_element", side_effect=match),
         ):
             result = self.call(
@@ -587,7 +587,7 @@ class CompoundPermissionTest(WorkflowFixture):
                     "resolve_stored_value",
                 )
             ),
-            patch("nci_si_mcp.permissions.time", side_effect=lambda: now),
+            patch("nci_sip_mcp.permissions.time", side_effect=lambda: now),
             patch.object(
                 self.evs,
                 "get_gdc_mapset",
@@ -645,7 +645,7 @@ class CompoundPermissionTest(WorkflowFixture):
             authority_scope(
                 authority("ground_value", "get_concept", "find_data_elements_for_concept")
             ),
-            patch("nci_si_mcp.permissions.time", side_effect=lambda: now),
+            patch("nci_sip_mcp.permissions.time", side_effect=lambda: now),
             patch.object(self.evs, "get_concept", side_effect=expire),
         ):
             result = self.call(conceptCode="C1")

@@ -27,8 +27,8 @@ No paired case comparison was run; retrieval quality and latency remain unmeasur
 ## Contract and status comparison
 
 Match 2.0 cells distinguish the public contract observed on 25 October from this
-repository's handling in [the matching adapter](../../src/nci_si_mcp/cadsr_matching.py),
-[client](../../src/nci_si_mcp/cadsr.py) and
+repository's handling in [the matching adapter](../../src/nci_sip_mcp/cadsr_matching.py),
+[client](../../src/nci_sip_mcp/cadsr.py) and
 [offline contract tests](../../tests/test_cadsr_matching.py). Engine unknowns must
 not be filled from Match 2.0 or from the team's implementation description.
 

@@ -961,7 +961,7 @@ class InjectedInspectionTest(unittest.TestCase):
             ("foreign real uid", "123 99 123 501 503 Z\n", False),
             ("foreign group", "123 99 124 501 502 Z\n", False),
             ("foreign parent", "123 98 123 501 502 Z\n", False),
-            ("unknown state", "123 99 123 501 502 Z?\n", False),
+            ("unknown state", "123 99 123 501 502 X?\n", False),
         )
         for label, output, allowed in cases:
             with self.subTest(label=label):
@@ -981,6 +981,46 @@ class InjectedInspectionTest(unittest.TestCase):
                     else:
                         with self.assertRaises(PermissionError) as raised:
                             runner._signal_owned(owner, signal.SIGKILL, runner.monotonic() + 5)
+                        self.assertIs(raised.exception, denial)
+
+    def test_macos_state_modifiers_follow_the_state_letter_when_classifying_terminal(self):
+        owner = runner._Owner(123, 501, 502)
+        cases = (
+            ("niced zombie", "123 99 123 501 502 ZN\n", True),
+            ("foreground zombie", "123 99 123 501 502 Z+\n", True),
+            ("leader zombie", "123 99 123 501 502 Zs\n", True),
+            ("niced sleeping", "123 99 123 501 502 SN\n", False),
+            ("running foreground", "123 99 123 501 502 R+\n", False),
+            ("sleeping", "123 99 123 501 502 S\n", False),
+            ("idle", "123 99 123 501 502 I\n", False),
+            ("foreign zombie", "123 99 123 503 502 ZN\n", False),
+            (
+                "niced zombie with live member",
+                "123 99 123 501 502 ZN\n124 123 123 501 502 S\n",
+                False,
+            ),
+        )
+        for label, output, allowed in cases:
+            with self.subTest(label=label):
+                denial = PermissionError(label)
+                with (
+                    patch.object(runner.sys, "platform", "darwin"),
+                    patch.object(runner.os, "getpid", return_value=99),
+                    patch.object(runner, "_observe", return_value=0),
+                    patch.object(runner.os, "killpg", side_effect=denial),
+                    patch.object(
+                        runner.subprocess,
+                        "run",
+                        return_value=subprocess.CompletedProcess([], 0, output, ""),
+                    ),
+                ):
+                    if allowed:
+                        self.assertFalse(
+                            runner._signal_owned(owner, signal.SIGTERM, runner.monotonic() + 5)
+                        )
+                    else:
+                        with self.assertRaises(PermissionError) as raised:
+                            runner._signal_owned(owner, signal.SIGTERM, runner.monotonic() + 5)
                         self.assertIs(raised.exception, denial)
 
     def test_incomplete_or_failed_injected_inspection_retains_denial_with_diagnostic(self):

@@ -57,13 +57,13 @@ A5:
     A5.1: A tool that can return a large result takes caller limits and applies a documented default.
     A5.2: >-
       Result size, traversal depth, outbound requests and elapsed time per tool call are bounded.
-      NCI_SI_CALL_DEADLINE_SECONDS sets one shared elapsed-time budget, default 50 seconds,
+      NCI_SIP_CALL_DEADLINE_SECONDS sets one shared elapsed-time budget, default 50 seconds,
       validated as finite and positive with no disable switch; index operator commands are
       outside this call deadline. Release discovery and nested work share it. Checks run before
       each HTTP attempt, before each retry wait, after each body chunk and at traversal
       checkpoints. One stalled body read can overrun by at most the socket timeout chosen at
-      request open, min(timeout, remaining), where timeout is NCI_SI_TIMEOUT_SECONDS or
-      NCI_SI_MATCH_TIMEOUT_SECONDS for matching. DNS and connection setup also prevent a hard
+      request open, min(timeout, remaining), where timeout is NCI_SIP_TIMEOUT_SECONDS or
+      NCI_SIP_MATCH_TIMEOUT_SECONDS for matching. DNS and connection setup also prevent a hard
       real-time guarantee.
     A5.3: The outbound request bound counts retries.
     A5.4: >-

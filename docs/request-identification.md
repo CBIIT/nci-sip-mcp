@@ -10,14 +10,14 @@ From the repository root, the PDM environment includes both the server and stand
 acceptance packages:
 
 ```bash
-pdm run python -m nci_si_mcp.traffic_identity generate
-pdm run python -m nci_si_acceptance.traffic_identity generate
+pdm run python -m nci_sip_mcp.traffic_identity generate
+pdm run python -m nci_sip_acceptance.traffic_identity generate
 ```
 
 Each `generate` command prints one UUID4 value as 32 lowercase hexadecimal characters. For a
 persistent installation, save each value in durable deployment configuration under its matching
 variable:
-`NCI_SI_INSTALLATION_ID` for the core package or `NCI_SI_ACCEPTANCE_INSTALLATION_ID` for the
+`NCI_SIP_INSTALLATION_ID` for the core package or `NCI_SIP_ACCEPTANCE_INSTALLATION_ID` for the
 acceptance package. It does not write configuration or change the process environment. Keep the
 saved value across restarts and upgrades; do not generate a fresh value at startup. For isolated
 CI jobs, use the job-scoped lifecycle described below instead.
@@ -26,15 +26,15 @@ Before running `show`, set the corresponding variable to its previously saved va
 shell, replace the placeholders below with those saved values:
 
 ```bash
-export NCI_SI_INSTALLATION_ID='<saved-core-value>'
-export NCI_SI_ACCEPTANCE_INSTALLATION_ID='<saved-acceptance-value>'
+export NCI_SIP_INSTALLATION_ID='<saved-core-value>'
+export NCI_SIP_ACCEPTANCE_INSTALLATION_ID='<saved-acceptance-value>'
 ```
 
 Then inspect the configured labels:
 
 ```bash
-pdm run python -m nci_si_mcp.traffic_identity show
-pdm run python -m nci_si_acceptance.traffic_identity show
+pdm run python -m nci_sip_mcp.traffic_identity show
+pdm run python -m nci_sip_acceptance.traffic_identity show
 ```
 
 `show` reports the configured product, the version of the package that owns the command, and its
@@ -51,8 +51,8 @@ The [local server guide](local-guide.md#server) names the installed server envir
 acceptance distribution. Use each environment's Python directly:
 
 ```bash
-"$SERVER_VENV/bin/python" -m nci_si_mcp.traffic_identity generate
-"$ACCEPTANCE_VENV/bin/python" -m nci_si_acceptance.traffic_identity generate
+"$SERVER_VENV/bin/python" -m nci_sip_mcp.traffic_identity generate
+"$ACCEPTANCE_VENV/bin/python" -m nci_sip_acceptance.traffic_identity generate
 ```
 
 Save each generated value in the environment's durable deployment configuration. Before running
@@ -60,10 +60,10 @@ Save each generated value in the environment's durable deployment configuration.
 one during inspection:
 
 ```bash
-export NCI_SI_INSTALLATION_ID='<saved-core-value>'
-export NCI_SI_ACCEPTANCE_INSTALLATION_ID='<saved-acceptance-value>'
-"$SERVER_VENV/bin/python" -m nci_si_mcp.traffic_identity show
-"$ACCEPTANCE_VENV/bin/python" -m nci_si_acceptance.traffic_identity show
+export NCI_SIP_INSTALLATION_ID='<saved-core-value>'
+export NCI_SIP_ACCEPTANCE_INSTALLATION_ID='<saved-acceptance-value>'
+"$SERVER_VENV/bin/python" -m nci_sip_mcp.traffic_identity show
+"$ACCEPTANCE_VENV/bin/python" -m nci_sip_acceptance.traffic_identity show
 ```
 
 ## Persist and rotate

@@ -13,11 +13,11 @@ ACCEPTANCE = Path(__file__).resolve().parents[1]
 TOKEN = "b" * 32
 LABEL_SUFFIX = f" (installation={TOKEN}; +https://github.com/CBIIT/nci-sip-mcp)"
 ID_ERROR = (
-    "Set NCI_SI_ACCEPTANCE_INSTALLATION_ID to exactly 32 lowercase hexadecimal characters "
+    "Set NCI_SIP_ACCEPTANCE_INSTALLATION_ID to exactly 32 lowercase hexadecimal characters "
     "and retry."
 )
 VERSION_ERROR = (
-    "The installed nci-si-acceptance version cannot form a safe label. "
+    "The installed nci-sip-acceptance version cannot form a safe label. "
     "Reinstall the acceptance package with valid metadata and retry."
 )
 
@@ -119,7 +119,7 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
         )
         if result.returncode != 0:
             raise RuntimeError(f"offline acceptance wheel build failed: {result.stderr}")
-        wheels = list(cls.wheelhouse.glob("nci_si_acceptance-*.whl"))
+        wheels = list(cls.wheelhouse.glob("nci_sip_acceptance-*.whl"))
         if len(wheels) != 1:
             raise RuntimeError(f"expected one acceptance wheel, found {len(wheels)}")
         cls.environment = cls.root / "venv"
@@ -162,7 +162,7 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
         )
         if probe.returncode != 0:
             raise RuntimeError(f"could not locate isolated site-packages: {probe.stderr}")
-        metadata = list(Path(probe.stdout.strip()).glob("nci_si_acceptance-*.dist-info/METADATA"))
+        metadata = list(Path(probe.stdout.strip()).glob("nci_sip_acceptance-*.dist-info/METADATA"))
         if len(metadata) != 1:
             raise RuntimeError(
                 f"expected one installed acceptance metadata file, found {len(metadata)}"
@@ -210,9 +210,9 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
     def _child(self, arguments, token=None, configured_id=None):
         environment = self._environment()
         if token is not None:
-            environment["NCI_SI_ACCEPTANCE_INSTALLATION_ID"] = token
+            environment["NCI_SIP_ACCEPTANCE_INSTALLATION_ID"] = token
         if configured_id is not None:
-            environment["NCI_SI_ACCEPTANCE_INSTALLATION_ID"] = configured_id
+            environment["NCI_SIP_ACCEPTANCE_INSTALLATION_ID"] = configured_id
         result = subprocess.run(  # noqa: S603 - fixed module and owned isolated wheel
             [str(self.python), "-B", *arguments],
             capture_output=True,
@@ -229,7 +229,7 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
 
     def _module(self, *arguments, token=None, configured_id=None):
         return self._child(
-            ["-m", "nci_si_acceptance.traffic_identity", *arguments],
+            ["-m", "nci_sip_acceptance.traffic_identity", *arguments],
             token,
             configured_id,
         )
@@ -238,7 +238,8 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
         result = self._child(
             [
                 "-c",
-                "import importlib.metadata; print(importlib.metadata.version('nci-si-acceptance'))",
+                "import importlib.metadata; "
+                "print(importlib.metadata.version('nci-sip-acceptance'))",
             ]
         )
         self.assertEqual((result.returncode, result.stderr), (0, ""))
@@ -284,7 +285,7 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
         version = self._installed_version()
         valid = self._module("show", token=TOKEN)
 
-        self.assertEqual(valid.stdout, f"nci-si-acceptance/{version}{LABEL_SUFFIX}\n")
+        self.assertEqual(valid.stdout, f"nci-sip-acceptance/{version}{LABEL_SUFFIX}\n")
         self.assertEqual((valid.returncode, valid.stderr), (0, ""))
         for token in ("PRIVATE-ID-CANARY", "A" * 32, "a" * 31, "a" * 33, "g" * 32, "é" * 32):
             with self.subTest(token=token):
@@ -327,7 +328,7 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
     def test_installed_version_is_safe_and_the_complete_label_is_capped_at_256_bytes(self):
         version = self._installed_version()
         valid = self._module("show", token=TOKEN)
-        self.assertEqual(valid.stdout, f"nci-si-acceptance/{version}{LABEL_SUFFIX}\n")
+        self.assertEqual(valid.stdout, f"nci-sip-acceptance/{version}{LABEL_SUFFIX}\n")
 
         unsafe_versions = (
             "bad version",
@@ -346,11 +347,11 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
                 )
                 self.assertNotIn(value, refused.stdout + refused.stderr)
 
-        fixed_length = len("nci-si-acceptance/") + len(LABEL_SUFFIX)
+        fixed_length = len("nci-sip-acceptance/") + len(LABEL_SUFFIX)
         self._write_version("v" * (256 - fixed_length))
         actual = self._installed_version()
         accepted = self._module("show", token=TOKEN)
-        label = f"nci-si-acceptance/{actual}{LABEL_SUFFIX}"
+        label = f"nci-sip-acceptance/{actual}{LABEL_SUFFIX}"
         self.assertEqual(
             (accepted.returncode, accepted.stdout, accepted.stderr), (0, label + "\n", "")
         )
@@ -376,9 +377,9 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
             [
                 "-c",
                 "import importlib.metadata, importlib.util\n"
-                "assert importlib.util.find_spec('nci_si_mcp') is None\n"
+                "assert importlib.util.find_spec('nci_sip_mcp') is None\n"
                 "try:\n"
-                "    importlib.metadata.distribution('nci-si-mcp')\n"
+                "    importlib.metadata.distribution('nci-sip-mcp')\n"
                 "except importlib.metadata.PackageNotFoundError:\n"
                 "    pass\n"
                 "else:\n"
@@ -393,7 +394,7 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
                 "-B",
                 "-c",
                 "import os, socket\n"
-                "missing_path = '/nci-si-identity-sentinel-' + str(os.getpid())\n"
+                "missing_path = '/nci-sip-identity-sentinel-' + str(os.getpid())\n"
                 "for kind, attempt in (\n"
                 "    ('DNS', lambda: socket.getaddrinfo('192.0.2.1', 9, "
                 "flags=socket.AI_NUMERICHOST)),\n"

@@ -8,7 +8,7 @@ import importlib
 import importlib.util
 import inspect
 import json
-import os
+import select
 import signal
 import sqlite3
 import subprocess
@@ -17,20 +17,33 @@ import textwrap
 import threading
 import time
 from contextlib import closing, contextmanager
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-import nci_si_acceptance
-import nci_si_mcp
-from nci_si_acceptance import request_budget, request_children
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_mcp.http_client import RequestPolicyError
+import nci_sip_acceptance
+import nci_sip_mcp
+from nci_sip_acceptance import request_budget, request_children, request_supervision
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_mcp.http_client import RequestPolicyError
 
 KNOWN_BODY_BYTES = 5
 OBSERVED_FAILURE_COUNT = 2
 FAILED_WORKER_EXIT = 7
+LEGACY_WORKER_GRACE_SECONDS = 10.0
+LEGACY_WORKER_COUNT = 2
+CLEANUP_WORKER = (
+    "import sys\nfrom pathlib import Path\n"
+    "print('ready', flush=True)\n"
+    "line = sys.stdin.buffer.readline()\n"
+    "if line:\n"
+    "    Path(sys.argv[1]).write_bytes(line)\n"
+)
+STALL_BEFORE_READY = (
+    "import sys\nprint('started', file=sys.stderr, flush=True)\nsys.stdin.buffer.read()"
+)
 
 
 def failure_leaves(error):
@@ -85,78 +98,353 @@ def authorization():
 
 def supervisor(directory):
     # Drive the new public entry point without turning its absence into collection failure.
-    name = "nci_si_acceptance.request_supervision"
+    name = "nci_sip_acceptance.request_supervision"
     assert importlib.util.find_spec(name) is not None, "An owned caller needs SupervisedRun"
     return importlib.import_module(name).SupervisedRun.create(authorization(), directory)
 
 
-@pytest.mark.skipif(not hasattr(os, "waitpid"), reason="Owns the POSIX nonterminal wait receipt")
-def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(tmp_path, monkeypatch):
-    owner = supervisor(tmp_path)
-    clock, polling = [time.monotonic()], threading.local()
-    actual_waitpid = os.waitpid
-    polls = []
-    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
-    command = [sys.executable, "-I", "-c", "import sys;sys.stdin.buffer.read()"]
-    with (
-        subprocess.Popen(  # noqa: S603 - fixed owned interpreter and synthetic stdin-only worker.
-            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ) as first,
-        subprocess.Popen(  # noqa: S603 - same fixed program, distinct owned worker.
-            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ) as second,
-    ):
-        first_wait, second_wait = first.wait, second.wait
+def child_stream_state(child):
+    return tuple(stream.closed for stream in (child.stdin, child.stdout, child.stderr))
 
-        def finish_first(*args, **kwargs):
-            code = first_wait(*args, **kwargs)
-            if code == 0:
-                clock[0] += request_children.CLEANUP_SECONDS + 1
-            return code
 
-        def wait_second(*args, **kwargs):
-            polling.second = True
-            try:
-                return second_wait(*args, **kwargs)
-            finally:
-                polling.second = False
+def kill_pending_owned_worker(child):
+    try:
+        if child.poll() is None:
+            child.kill()
+    except ProcessLookupError:
+        pass
+    except BaseException as error:  # noqa: BLE001 - return teardown failures without masking setup.
+        return [error]
+    return []
 
-        def waitpid(pid, options):
-            receipt = actual_waitpid(pid, options)
-            if pid == second.pid and getattr(polling, "second", False) and receipt[0] == 0:
-                polls.append(receipt)
-                second.stdin.close()
-            return receipt
 
-        monkeypatch.setattr(first, "wait", finish_first)
-        monkeypatch.setattr(second, "wait", wait_second)
-        monkeypatch.setattr(os, "waitpid", waitpid)
-        failure = None
+def close_owned_worker_streams(child):
+    errors = []
+    for stream in (child.stdin, child.stdout, child.stderr):
         try:
-            try:
-                with owner:
-                    owner.register_child(first, participant="first-worker", role="worker")
-                    owner.register_child(second, participant="second-worker", role="worker")
-                    first.stdin.close()
-            except BaseException as error:  # noqa: BLE001 - assert caller outcome outside capture.
-                failure = error
-            assert polls and all(pid == 0 for pid, _status in polls)
-            assert failure is None
-            assert (first.returncode, second.returncode) == (0, 0)
-            assert all(
-                stream.closed
-                for child in (first, second)
-                for stream in (child.stdin, child.stdout, child.stderr)
+            if stream is not None and not stream.closed:
+                stream.close()
+        except BaseException as error:  # noqa: BLE001 - retain cleanup failures for the test.
+            errors.append(error)
+    return errors
+
+
+def close_and_reap_worker(child, wait):
+    errors = kill_pending_owned_worker(child)
+    try:
+        wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        errors.extend(kill_pending_owned_worker(child))
+        try:
+            wait(timeout=3)
+        except BaseException as error:  # noqa: BLE001 - retain bounded reap failures.
+            errors.append(error)
+    except BaseException as error:  # noqa: BLE001 - retain bounded reap failures.
+        errors.append(error)
+    errors.extend(close_owned_worker_streams(child))
+    return errors
+
+
+def join_owned_helper(helper, children):
+    errors = []
+    helper.join(request_supervision.JOIN_SECONDS)
+    if helper.is_alive():
+        for child, _wait in children:
+            errors.extend(kill_pending_owned_worker(child))
+        helper.join(request_supervision.JOIN_SECONDS)
+    if helper.is_alive():
+        errors.append(TimeoutError("owned cleanup helper did not stop"))
+    return errors
+
+
+def finish_owned_workers(release, helper, children):
+    errors = []
+    release.set()
+    if helper is not None and helper.ident is not None:
+        try:
+            errors.extend(join_owned_helper(helper, children))
+        except BaseException as error:  # noqa: BLE001 - retain helper teardown failures.
+            errors.append(error)
+    for child, wait in children:
+        errors.extend(close_and_reap_worker(child, wait))
+    return errors
+
+
+def finish_first_worker_wait(actual_wait, clock, timeout=None):
+    result = actual_wait(timeout=timeout)
+    if result == 0:
+        clock[0] += request_children.CLEANUP_SECONDS + 1
+    return result
+
+
+def release_legacy_worker(second, release, release_sent, helper_done, helper_errors):
+    try:
+        allowance = (
+            request_children.CLEANUP_SECONDS
+            + request_supervision.STOP_SECONDS
+            + request_supervision.JOIN_SECONDS
+        )
+        if not release.wait(allowance):
+            raise TimeoutError("second public child wait was not reached")
+        if second.poll() is None and second.stdin is not None and not second.stdin.closed:
+            second.stdin.write(b"finish\n")
+            second.stdin.flush()
+            release_sent.set()
+    except BaseException as error:  # noqa: BLE001 - assert helper failures after cleanup.
+        helper_errors.append(error)
+    finally:
+        helper_done.set()
+
+
+def wait_for_legacy_worker(second, owner, waits, wait_entered, release, actual_wait, timeout=None):
+    if not waits:
+        waits.append((second.poll() is None, owner.cleanup_deadline().remaining(), timeout))
+        wait_entered.set()
+        release.set()
+    try:
+        return actual_wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        release.set()
+        raise
+
+
+def start_cleanup_helper(helper, monkeypatch, failure_point, startup_error):
+    if failure_point == "helper-start":
+
+        def refuse_start():
+            raise startup_error
+
+        monkeypatch.setattr(helper, "start", refuse_start)
+    helper.start()
+
+
+def run_legacy_cleanup(owner, first, second):
+    try:
+        with owner:
+            owner.register_child(first, participant="first-worker", role="worker")
+            owner.register_child(second, participant="second-worker", role="worker")
+            first.stdin.close()
+    except BaseException as error:  # noqa: BLE001 - assert the caller outcome after cleanup.
+        return error
+    return None
+
+
+def run_legacy_cleanup_with_stream_snapshot(owner, first, second):
+    try:
+        failure = run_legacy_cleanup(owner, first, second)
+    finally:
+        supervisor_streams_closed = (
+            child_stream_state(first),
+            child_stream_state(second),
+        )
+    return failure, supervisor_streams_closed
+
+
+def restore_legacy_waits(monkeypatch, first, second, actual_first_wait, actual_second_wait):
+    if first is not None and actual_first_wait is not None:
+        monkeypatch.setattr(first, "wait", actual_first_wait)
+    if second is not None and actual_second_wait is not None:
+        monkeypatch.setattr(second, "wait", actual_second_wait)
+
+
+def run_legacy_worker_scenario(
+    owner, first_marker, marker, clock, monkeypatch, custody, failure_point=None, startup_error=None
+):
+    children = []
+    release, wait_entered = threading.Event(), threading.Event()
+    helper_done, release_sent = threading.Event(), threading.Event()
+    helper_errors, waits = [], []
+    helper = None
+    first = second = None
+    actual_first_wait = actual_second_wait = None
+    startup_failure = failure = supervisor_streams_closed = None
+    custody.update(children=children, release=release, helper=None)
+    try:
+        first = subprocess.Popen(  # noqa: S603 - fixed owned interpreter and synthetic worker.
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                STALL_BEFORE_READY if failure_point == "readiness" else CLEANUP_WORKER,
+                str(first_marker),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        actual_first_wait = first.wait
+        children.append((first, actual_first_wait))
+        second = subprocess.Popen(  # noqa: S603 - same program, distinct owned worker.
+            [sys.executable, "-I", "-c", CLEANUP_WORKER, str(marker)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        actual_second_wait = second.wait
+        children.append((second, actual_second_wait))
+        if failure_point == "readiness":
+            assert_worker_stalled_before_ready(first, custody)
+        else:
+            assert_worker_ready(first)
+        assert_worker_ready(second)
+        finish_first = partial(finish_first_worker_wait, actual_first_wait, clock)
+        public_second_wait = partial(
+            wait_for_legacy_worker,
+            second,
+            owner,
+            waits,
+            wait_entered,
+            release,
+            actual_second_wait,
+        )
+        monkeypatch.setattr(first, "wait", finish_first)
+        monkeypatch.setattr(second, "wait", public_second_wait)
+        helper = threading.Thread(
+            target=release_legacy_worker,
+            args=(second, release, release_sent, helper_done, helper_errors),
+            name="release-legacy-worker",
+        )
+        custody["helper"] = helper
+        start_cleanup_helper(helper, monkeypatch, failure_point, startup_error)
+        failure, supervisor_streams_closed = run_legacy_cleanup_with_stream_snapshot(
+            owner, first, second
+        )
+    except BaseException as error:  # noqa: BLE001 - retain setup failures for bounded cleanup.
+        startup_failure = error
+    finally:
+        cleanup_errors = finish_owned_workers(release, helper, children)
+        custody["cleanup_errors"] = cleanup_errors
+        custody["helper_errors"] = helper_errors
+        restore_legacy_waits(monkeypatch, first, second, actual_first_wait, actual_second_wait)
+    if startup_failure is not None:
+        teardown_errors = [*cleanup_errors, *helper_errors]
+        if teardown_errors:
+            raise startup_failure from BaseExceptionGroup(
+                "Owned test teardown failed", teardown_errors
             )
-            summary = owner.snapshot()
-            assert (summary["state"], summary["observationComplete"]) == ("completed", True)
-            assert owner.cleanup_deadline().remaining() == 0
-        finally:
-            # Independent bounded reaping owns only these two actual children.
-            for child, wait in ((first, first_wait), (second, second_wait)):
-                if child.poll() is None:
-                    child.kill()
-                wait(timeout=3)
+        raise startup_failure
+    return (
+        (failure, supervisor_streams_closed, cleanup_errors),
+        (helper, helper_done, helper_errors, wait_entered, waits, release_sent),
+        (first, second),
+    )
+
+
+def assert_worker_ready(child, timeout=3):
+    assert child.stdin is not None and child.stdout is not None
+    if not select.select([child.stdout], [], [], timeout)[0]:
+        raise TimeoutError("worker did not announce readiness")
+    assert child.stdout.readline() == b"ready\n"
+    assert child.poll() is None
+
+
+def assert_worker_stalled_before_ready(child, custody):
+    assert child.stderr is not None
+    assert select.select([child.stderr], [], [], 3)[0] == [child.stderr]
+    custody["started"] = child.stderr.readline()
+    custody["pending"] = child.poll() is None
+    assert custody["started"] == b"started\n"
+    assert custody["pending"] is True
+    try:
+        assert_worker_ready(child, timeout=0)
+    except TimeoutError as error:
+        custody["readiness_error"] = error
+        raise
+
+
+@pytest.fixture
+def owned_worker_custody():
+    custody = {}
+    yield custody
+    if custody:
+        helper, children = custody["helper"], custody["children"]
+        custody["release"].set()
+        errors = []
+        for child, wait in children:
+            errors.extend(close_and_reap_worker(child, wait))
+        if helper is not None and helper.ident is not None:
+            helper.join(request_supervision.JOIN_SECONDS)
+        assert errors == []
+        assert all(child.returncode is not None for child, _wait in children)
+        assert all(child_stream_state(child) == (True, True, True) for child, _wait in children)
+        assert helper is None or not helper.is_alive()
+
+
+@pytest.mark.parametrize("failure_point", ("readiness", "helper-start"))
+def test_legacy_fixture_setup_failures_stop_all_workers(
+    tmp_path, monkeypatch, owned_worker_custody, failure_point
+):
+    """Fixture-failure cleanup assurance; neither setup fault is a product behavior red."""
+    startup_error = RuntimeError("owned legacy helper-start failure")
+    expected = TimeoutError if failure_point == "readiness" else RuntimeError
+    with pytest.raises(expected) as caught:
+        run_legacy_worker_scenario(
+            supervisor(tmp_path / "run"),
+            tmp_path / "first-worker",
+            tmp_path / "second-worker",
+            [time.monotonic()],
+            monkeypatch,
+            owned_worker_custody,
+            failure_point,
+            startup_error,
+        )
+    if failure_point == "readiness":
+        assert str(caught.value) == "worker did not announce readiness"
+        assert caught.value is owned_worker_custody["readiness_error"]
+        assert (owned_worker_custody["started"], owned_worker_custody["pending"]) == (
+            b"started\n",
+            True,
+        )
+    else:
+        assert caught.value is startup_error
+        helper = owned_worker_custody["helper"]
+        assert helper is not None and helper.ident is None and not helper.is_alive()
+    children = owned_worker_custody["children"]
+    assert len(children) == LEGACY_WORKER_COUNT
+    owner_state = [(child.returncode, child_stream_state(child)) for child, _wait in children]
+    assert all(returncode is not None for returncode, _streams in owner_state)
+    assert all(streams == (True, True, True) for _returncode, streams in owner_state)
+    assert owned_worker_custody["cleanup_errors"] == []
+    assert owned_worker_custody["helper_errors"] == []
+    helper = owned_worker_custody["helper"]
+    assert helper is None or not helper.is_alive()
+
+
+def test_legacy_worker_wait_keeps_grace_after_earlier_cleanup(
+    tmp_path, monkeypatch, owned_worker_custody
+):
+    owner = supervisor(tmp_path)
+    clock = [time.monotonic()]
+    monkeypatch.setattr(request_children, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    first_marker = tmp_path / "first-worker"
+    marker = tmp_path / "second-worker-completed"
+    (
+        (failure, supervisor_streams_closed, cleanup_errors),
+        (helper, helper_done, helper_errors, wait_entered, waits, release_sent),
+        (first, second),
+    ) = run_legacy_worker_scenario(
+        owner, first_marker, marker, clock, monkeypatch, owned_worker_custody
+    )
+    assert cleanup_errors == []
+    assert helper is not None and helper.ident is not None and not helper.is_alive()
+    assert helper_done.is_set() and not helper.is_alive()
+    assert helper_errors == []
+    assert first.returncode is not None and second.returncode is not None
+    assert all(child_stream_state(child) == (True, True, True) for child in (first, second))
+    assert wait_entered.is_set() and waits
+    pending, remaining, timeout = waits[0]
+    assert pending and remaining == 0
+    assert timeout == request_supervision.STOP_SECONDS == LEGACY_WORKER_GRACE_SECONDS
+    assert release_sent.is_set()
+    assert failure is None
+    assert (first.returncode, second.returncode) == (0, 0)
+    assert owner.pending_owners == ()
+    assert not first_marker.exists()
+    assert marker.read_bytes() == b"finish\n"
+    summary = owner.snapshot()
+    assert (summary["state"], summary["observationComplete"]) == ("completed", True)
+    assert owner.cleanup_deadline().remaining() == 0
+    assert supervisor_streams_closed == ((True, True, True), (True, True, True))
 
 
 def test_initial_summary_precedes_admission(tmp_path):
@@ -254,7 +542,7 @@ def test_terminal_refusal_cannot_publish_completed(tmp_path):
 
 
 def test_caught_refusal_preserves_failed_state_and_five_known_bytes(tmp_path):
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     original = authorization()
     auth = Authorization(original.grants, Limits(logical=1), original.policy_sha256)
     owner = entry.SupervisedRun.create(auth, tmp_path)
@@ -279,20 +567,22 @@ def test_registered_short_worker_is_reaped_and_streams_closed(tmp_path):
     destination = tmp_path / "child.json"
     descriptor = tmp_path / "descriptor.json"
     descriptor.write_text(json.dumps(owner.run.descriptor.to_record()))
-    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
+    roots = [
+        str(Path(package.__file__).parents[1]) for package in (nci_sip_acceptance, nci_sip_mcp)
+    ]
     script = (
         "import sys,json; from pathlib import Path; "
-        "sys.path[:0]=sys.argv[1:3]; import nci_si_acceptance,nci_si_mcp; "
+        "sys.path[:0]=sys.argv[1:3]; import nci_sip_acceptance,nci_sip_mcp; "
         "sys.stdin.buffer.read(1); "
-        "from nci_si_acceptance.request_authorization import "
+        "from nci_sip_acceptance.request_authorization import "
         "Authorization,Limits,RequestGrant,RunDescriptor; "
-        "from nci_si_acceptance.request_budget import ControlledRun; "
+        "from nci_sip_acceptance.request_budget import ControlledRun; "
         "auth=Authorization((RequestGrant('GET','http://127.0.0.1:9/probe',()),),Limits(),'a'*64); "
         "descriptor=RunDescriptor.from_record(json.loads(Path(sys.argv[4]).read_text())); "
         "run=ControlledRun.attach(descriptor,auth,participant='worker-1'); "
         "run.check_wait(0); "
         "Path(sys.argv[3]).write_text(json.dumps([sys.executable,"
-        "nci_si_acceptance.__file__,nci_si_mcp.__file__]))"
+        "nci_sip_acceptance.__file__,nci_sip_mcp.__file__]))"
     )
     with subprocess.Popen(  # noqa: S603 - owned interpreter and explicit synthetic child program.
         [sys.executable, "-I", "-c", script, *roots, str(destination), str(descriptor)],
@@ -317,8 +607,8 @@ def test_registered_short_worker_is_reaped_and_streams_closed(tmp_path):
         assert child.stdin.closed and child.stdout.closed and child.stderr.closed
     assert json.loads(destination.read_text()) == [
         sys.executable,
-        nci_si_acceptance.__file__,
-        nci_si_mcp.__file__,
+        nci_sip_acceptance.__file__,
+        nci_sip_mcp.__file__,
     ]
     assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "completed"
 
@@ -327,13 +617,15 @@ def test_zero_exit_worker_with_pending_read_refuses_live_admission(tmp_path, mon
     owner = supervisor(tmp_path)
     descriptor = tmp_path / "descriptor.json"
     descriptor.write_text(json.dumps(owner.run.descriptor.to_record()))
-    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
+    roots = [
+        str(Path(package.__file__).parents[1]) for package in (nci_sip_acceptance, nci_sip_mcp)
+    ]
     script = (
         "import sys,json,os; from pathlib import Path; sys.path[:0]=sys.argv[1:3]; "
         "sys.stdin.buffer.read(1); "
-        "from nci_si_acceptance.request_authorization import "
+        "from nci_sip_acceptance.request_authorization import "
         "Authorization,Limits,RequestGrant,RunDescriptor; "
-        "from nci_si_acceptance.request_budget import ControlledRun; "
+        "from nci_sip_acceptance.request_budget import ControlledRun; "
         "auth=Authorization((RequestGrant('GET','http://127.0.0.1:9/probe',()),),Limits(),'a'*64); "
         "run=ControlledRun.attach(RunDescriptor.from_record(json.loads(Path(sys.argv[3]).read_text())),"
         "auth,participant='worker'); logical=run.logical(auth.grants[0]); "
@@ -502,7 +794,7 @@ def test_live_observer_after_join_timeout_prevents_completed_success(tmp_path, m
     owner = supervisor(tmp_path)
     release = threading.Event()
     owner._observer = threading.Thread(target=lambda: release.wait(5))
-    monkeypatch.setattr("nci_si_acceptance.request_supervision.JOIN_SECONDS", 0.05)
+    monkeypatch.setattr("nci_sip_acceptance.request_supervision.JOIN_SECONDS", 0.05)
     started = time.monotonic()
     try:
         with (
@@ -592,7 +884,7 @@ def test_unexpected_real_child_exit_closes_admission(
 
 def test_close_precedes_actual_owned_service_stop(tmp_path, monkeypatch):
     owner = supervisor(tmp_path)
-    module = importlib.import_module("nci_si_acceptance.request_supervision")
+    module = importlib.import_module("nci_sip_acceptance.request_supervision")
     original_stop = module.stop_child
     admitted = []
 
@@ -903,7 +1195,7 @@ def test_later_marker_publication_keeps_earlier_local_latch(tmp_path, monkeypatc
 
 def test_attached_constructor_cannot_change_controller_summary(tmp_path):
     owner = supervisor(tmp_path)
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     with owner:
         owner.run.authorize_participant("attached")
         attached = request_budget.ControlledRun.attach(
@@ -919,7 +1211,7 @@ def test_attached_constructor_cannot_change_controller_summary(tmp_path):
 
 
 def test_unenrolled_constructor_rejection_preserves_unmanaged_caller(tmp_path):
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     run = request_budget.ControlledRun.create(authorization(), tmp_path)
     failure = None
     try:
@@ -935,7 +1227,7 @@ def test_unenrolled_constructor_rejection_preserves_unmanaged_caller(tmp_path):
 
 def test_closed_constructor_cannot_overwrite_completed_summary(tmp_path):
     owner = supervisor(tmp_path)
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     with owner:
         pass
     path = owner.run.directory / "summary.json"
@@ -949,13 +1241,15 @@ def test_closed_constructor_cannot_overwrite_completed_summary(tmp_path):
 @pytest.mark.parametrize("owner_state", ["paused", "lost"])
 def test_actual_controller_loss_refuses_attached_participant(tmp_path, owner_state):
     descriptor = tmp_path / "controller.json"
-    roots = [str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)]
+    roots = [
+        str(Path(package.__file__).parents[1]) for package in (nci_sip_acceptance, nci_sip_mcp)
+    ]
     script = """
 import sys,json
 from pathlib import Path
 sys.path[:0] = sys.argv[1:3]
-from nci_si_acceptance.request_authorization import Authorization,Limits,RequestGrant
-from nci_si_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.request_authorization import Authorization,Limits,RequestGrant
+from nci_sip_acceptance.request_supervision import SupervisedRun
 auth=Authorization((RequestGrant('GET','http://127.0.0.1:9/probe',()),),Limits(),'a'*64)
 with SupervisedRun.create(auth,Path(sys.argv[4])) as owner:
     owner.run.authorize_participant('participant')
@@ -1024,7 +1318,7 @@ def test_new_supervision_operations_recheck_private_identity(tmp_path, operation
 @pytest.mark.parametrize("role", ["worker", "service"])
 def test_actual_unreaped_child_failure_preserves_initiating_exception(tmp_path, monkeypatch, role):
     owner = supervisor(tmp_path)
-    module = importlib.import_module("nci_si_acceptance.request_supervision")
+    module = importlib.import_module("nci_sip_acceptance.request_supervision")
     original_stop = module.stop_child
     initiating = KeyError("initiating caller failure")
 
@@ -1079,7 +1373,7 @@ def test_paused_real_observer_cannot_bypass_shutdown_budget(tmp_path, monkeypatc
             finished.set()
 
     monkeypatch.setattr(owner, "_pulse", paused_pulse)
-    monkeypatch.setattr("nci_si_acceptance.request_supervision.JOIN_SECONDS", 0.05)
+    monkeypatch.setattr("nci_sip_acceptance.request_supervision.JOIN_SECONDS", 0.05)
     controller = threading.Thread(target=run)
     controller.start()
     try:
@@ -1250,8 +1544,8 @@ def test_handoff_append_order_decides_custody_during_shutdown(tmp_path, monkeypa
     owner = supervisor(tmp_path)
     arrived, release, finished = (threading.Event() for _ in range(3))
     registrations, shutdown = [], []
-    monkeypatch.setattr("nci_si_acceptance.request_supervision.JOIN_SECONDS", 0.05)
-    monkeypatch.setattr("nci_si_acceptance.request_supervision.STOP_SECONDS", 0.2)
+    monkeypatch.setattr("nci_sip_acceptance.request_supervision.JOIN_SECONDS", 0.05)
+    monkeypatch.setattr("nci_sip_acceptance.request_supervision.STOP_SECONDS", 0.2)
     with subprocess.Popen(
         [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
         stdin=subprocess.PIPE,
@@ -1302,7 +1596,7 @@ def test_handoff_append_order_decides_custody_during_shutdown(tmp_path, monkeypa
 
 @pytest.mark.parametrize("run", [None, object()])
 def test_constructor_refuses_foreign_run_before_attribute_access(run):
-    entry = importlib.import_module("nci_si_acceptance.request_supervision")
+    entry = importlib.import_module("nci_sip_acceptance.request_supervision")
     with pytest.raises(RequestPolicyError) as caught:
         entry.SupervisedRun(run)
     assert caught.value.reason == "authorization"
@@ -1456,7 +1750,7 @@ def test_initial_summary_must_be_incomplete_before_admission(tmp_path, state):
     path = owner.run.directory / "summary.json"
     value = owner.snapshot() | {"state": state}
     path.write_text(json.dumps(value))
-    reader = importlib.import_module("nci_si_acceptance.request_summary").read_summary
+    reader = importlib.import_module("nci_sip_acceptance.request_summary").read_summary
     assert reader(path, run_id=owner.run.descriptor.run_id, policy_sha256="a" * 64) == value
     try:
         with pytest.raises(RequestPolicyError) as caught:

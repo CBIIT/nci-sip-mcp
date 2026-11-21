@@ -10,11 +10,11 @@ from typing import Any
 
 import yaml
 
-from nci_si_mcp.config import Settings
-from nci_si_mcp.errors import PlatformError
-from nci_si_mcp.http_client import HttpClient, UpstreamError
-from nci_si_mcp.seam import NCIT_NAMESPACE
-from nci_si_mcp.ssis import (
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.errors import PlatformError
+from nci_sip_mcp.http_client import HttpClient, UpstreamError
+from nci_sip_mcp.seam import NCIT_NAMESPACE
+from nci_sip_mcp.ssis import (
     CADSR_GRAPH,
     NCIT_GRAPH,
     STATUS_FIELDS,
@@ -23,7 +23,7 @@ from nci_si_mcp.ssis import (
     graph_roles,
     graph_statuses,
 )
-from nci_si_mcp.validation import NCIT_CODE_FORM
+from nci_sip_mcp.validation import NCIT_CODE_FORM
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTER = ROOT / "docs/upstream/ssis-queries.yaml"

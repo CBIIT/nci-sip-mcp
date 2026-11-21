@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from nci_si_acceptance.request_authorization import (
+from nci_sip_acceptance.request_authorization import (
     Authorization,
     ConceptRequestFamily,
     ExactRequestFamily,
@@ -18,7 +18,7 @@ from nci_si_acceptance.request_authorization import (
     RequestGrant,
     RunDescriptor,
 )
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_sip_mcp.http_client import RequestPolicyError
 
 
 def refusal(construct):

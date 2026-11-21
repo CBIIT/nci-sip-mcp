@@ -8,8 +8,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from nci_si_mcp.config import PRODUCTION_BASE_URLS, Settings
-from nci_si_mcp.config_snapshot import capture, read_snapshot, serving_snapshot, validate_snapshot
+from nci_sip_mcp.config import PRODUCTION_BASE_URLS, Settings
+from nci_sip_mcp.config_snapshot import capture, read_snapshot, serving_snapshot, validate_snapshot
 
 
 class ConfigurationSnapshotTest(unittest.TestCase):
@@ -28,7 +28,7 @@ class ConfigurationSnapshotTest(unittest.TestCase):
             embedding_provider="sentence-transformers",
             timeout_seconds=17,
         )
-        snapshot = capture(settings, {"NCI_SI_TIMEOUT_SECONDS"}, cli_transport=True)
+        snapshot = capture(settings, {"NCI_SIP_TIMEOUT_SECONDS"}, cli_transport=True)
         raw = json.dumps(snapshot)
         self.assertNotIn("PRIVATE", raw)
         self.assertNotIn("credential", raw)
@@ -41,7 +41,7 @@ class ConfigurationSnapshotTest(unittest.TestCase):
         self.assertEqual(validate_snapshot(snapshot), snapshot)
 
     def test_capture_does_not_infer_values_from_the_companion_environment(self):
-        with patch.dict(os.environ, {"NCI_SI_TIMEOUT_SECONDS": "91"}):
+        with patch.dict(os.environ, {"NCI_SIP_TIMEOUT_SECONDS": "91"}):
             snapshot = capture(Settings(timeout_seconds=12), set())
         self.assertEqual(snapshot["settings"]["timeout_seconds"]["value"], 12.0)
 
@@ -86,7 +86,7 @@ class ConfigurationSnapshotTest(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             path = Path(temporary) / "target.json"
             with (
-                patch("nci_si_mcp.config_snapshot.os.link", side_effect=OSError("full")),
+                patch("nci_sip_mcp.config_snapshot.os.link", side_effect=OSError("full")),
                 self.assertRaises(OSError),
                 serving_snapshot(path, Settings(), set()),
             ):
@@ -147,7 +147,7 @@ class ConfigurationSnapshotTest(unittest.TestCase):
             upstream_mode="fixture",
             **dict.fromkeys(PRODUCTION_BASE_URLS, "https://PRIVATE.example"),
         )
-        snapshot = capture(settings, {"NCI_SI_UPSTREAM_MODE"})
+        snapshot = capture(settings, {"NCI_SIP_UPSTREAM_MODE"})
         self.assertEqual(snapshot["settings"]["upstream_mode"]["value"], "fixture")
         self.assertNotIn("PRIVATE", json.dumps(snapshot))
 

@@ -173,7 +173,7 @@ def run_steps():
 class WorkflowHygieneTest(unittest.TestCase):
     def test_local_run_expression_inputs_reach_exact_step_environment(self):
         expected = {
-            "Select the released index source (CI only)": {
+            "Select release or candidate index source (CI only)": {
                 "EVENT_NAME": "${{ github.event_name }}"
             },
             "Install released server and optional index environments": {

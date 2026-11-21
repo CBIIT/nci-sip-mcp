@@ -3,9 +3,9 @@ requires = ["pdm-backend>=2.4"]
 build-backend = "pdm.backend"
 
 [project]
-name = "nci-si-mcp"
+name = "nci-sip-mcp"
 dynamic = ["version"]
-description = "NCI Semantic Infrastructure MCP server for EVS and caDSR"
+description = "NCI Semantic Infrastructure Program MCP server for EVS and caDSR"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -26,8 +26,8 @@ embeddings = [
 ]
 
 [project.scripts]
-nci-si-install = "nci_si_mcp.installer:main"
-nci-si-mcp = "nci_si_mcp.cli:main"
+nci-sip-install = "nci_sip_mcp.installer:main"
+nci-sip-mcp = "nci_sip_mcp.cli:main"
 
 [dependency-groups]
 test = [
@@ -69,7 +69,7 @@ distribution = true
 # An editable path is a PDM extension that standard dependency groups do not allow.
 [tool.pdm.dev-dependencies]
 acceptance = [
-    "-e file:///${PROJECT_ROOT}/acceptance#egg=nci-si-acceptance",
+    "-e file:///${PROJECT_ROOT}/acceptance#egg=nci-sip-acceptance",
 ]
 
 # `pdm install` and `pdm sync` include the server and index extras used by the
@@ -123,7 +123,7 @@ lint = { composite = ["ruff check .", "basedpyright"] }
 fmt = "ruff format ."
 # The rolling cutoff and temporary security exceptions are owned by one entry point.
 lock = "python -m scripts.dependency_lock"
-# The acceptance suite against the server (fixture mode unless NCI_SI_ACCEPTANCE_MODE says
+# The acceptance suite against the server (fixture mode unless NCI_SIP_ACCEPTANCE_MODE says
 # otherwise), and the harness's own tests with its coverage minimum.
 acceptance = { cmd = "pytest", working_dir = "acceptance" }
 # Four workers: the self-tests wait on server processes, and four overlap those waits on the
@@ -132,15 +132,15 @@ acceptance-selftest = { cmd = "pytest selftests -n 4 --dist worksteal --cov --co
 acceptance-http = "python -m scripts.acceptance_http"
 operator-worker = "python -m scripts.operator_worker"
 benchmark-http = "python -m scripts.benchmark_http_cli"
-acceptance-record = "python -m nci_si_acceptance.record"
-acceptance-craft = "python -m nci_si_acceptance.craft"
-acceptance-expected = "python -m nci_si_acceptance.expected"
-acceptance-status = "python -m nci_si_acceptance.status"
-quickstart-tools = "python -m nci_si_acceptance.quickstart"
-acceptance-register = "python -m nci_si_acceptance.register"
-acceptance-stories = "python -m nci_si_acceptance.stories"
-acceptance-index-codes = "python -m nci_si_acceptance.suite"
-spec-render = "python -m nci_si_acceptance.document"
+acceptance-record = "python -m nci_sip_acceptance.record"
+acceptance-craft = "python -m nci_sip_acceptance.craft"
+acceptance-expected = "python -m nci_sip_acceptance.expected"
+acceptance-status = "python -m nci_sip_acceptance.status"
+quickstart-tools = "python -m nci_sip_acceptance.quickstart"
+acceptance-register = "python -m nci_sip_acceptance.register"
+acceptance-stories = "python -m nci_sip_acceptance.stories"
+acceptance-index-codes = "python -m nci_sip_acceptance.suite"
+spec-render = "python -m nci_sip_acceptance.document"
 docs-build = "python -m scripts.docs_site"
 portal = "python -m scripts.portal"
 github-setup = "python -m scripts.github_setup"
@@ -154,7 +154,7 @@ pythonpath = ["tests", "scripts/validation"]
 # PDM supplies an absolute root, including for children started from another directory.
 data_file = "${PDM_PROJECT_ROOT?}/tmp/coverage/unit/.coverage"
 branch = true
-source = ["nci_si_mcp", "ncit_index", "scripts"]
+source = ["nci_sip_mcp", "ncit_index", "scripts"]
 # Every script is measured except these, each named with its reason. The patterns start with
 # a wildcard because a test's child process runs from another directory.
 omit = [
@@ -205,15 +205,15 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # These public parameter spellings are mandated by spec/tools.yaml.
-"src/nci_si_mcp/seam.py" = ["N803"]
-"src/nci_si_mcp/content.py" = ["N803"]
-"src/nci_si_mcp/cadsr_matching.py" = ["N803"]
-"src/nci_si_mcp/workflows.py" = ["N803"]
-"src/nci_si_mcp/cadsr_content.py" = ["N803"]
+"src/nci_sip_mcp/seam.py" = ["N803"]
+"src/nci_sip_mcp/content.py" = ["N803"]
+"src/nci_sip_mcp/cadsr_matching.py" = ["N803"]
+"src/nci_sip_mcp/workflows.py" = ["N803"]
+"src/nci_sip_mcp/cadsr_content.py" = ["N803"]
 # Optional extras (mcp, sentence-transformers) are imported where they are first needed.
 "src/ncit_index/embeddings.py" = ["PLC0415"]
-"src/nci_si_mcp/server.py" = ["PLC0415"]
-"src/nci_si_mcp/transport.py" = ["PLC0415"]
+"src/nci_sip_mcp/server.py" = ["PLC0415"]
+"src/nci_sip_mcp/transport.py" = ["PLC0415"]
 "src/ncit_index/scoring.py" = ["PLC0415"]
 # The gate scripts report on the terminal.
 "scripts/**/*.py" = ["T20"]

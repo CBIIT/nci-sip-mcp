@@ -6,9 +6,9 @@ import unittest
 from contextlib import suppress
 from unittest.mock import patch
 
-from nci_si_mcp import traffic_identity
-from nci_si_mcp.errors import PlatformError, serialise
-from nci_si_mcp.traffic_identity import (
+from nci_sip_mcp import traffic_identity
+from nci_sip_mcp.errors import PlatformError, serialise
+from nci_sip_mcp.traffic_identity import (
     INSTALLATION_ID_ENV,
     IdentitySnapshot,
     capture_identity,
@@ -64,7 +64,7 @@ class IdentitySnapshotTest(unittest.TestCase):
             self.assertNotIn(canary, json.dumps(serialise(raised.exception)))
             repaired = installation_label(capture_identity())
 
-        self.assertTrue(repaired.startswith("nci-si-mcp/"))
+        self.assertTrue(repaired.startswith("nci-sip-mcp/"))
         self.assertIn(f"(installation={'a' * 32}; ", repaired)
 
     def test_new_snapshot_observes_rotation_without_changing_the_old_label(self):

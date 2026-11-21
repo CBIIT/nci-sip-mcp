@@ -29,13 +29,13 @@ class CompanionLockTest(unittest.TestCase):
                 package("ruff", groups=["lint"]),
                 package("zensical", groups=["docs"]),
                 package("pywin32", marker='sys_platform == "win32"'),
-                {"name": "nci-si-acceptance", "groups": ["acceptance"], "editable": True},
+                {"name": "nci-sip-acceptance", "groups": ["acceptance"], "editable": True},
             ]
         }
         text = render(lock)
         for name in ("mcp", "numpy", "pytest", "pyyaml"):
             self.assertIn(name + "==1.0", text)
-        for name in ("torch", "ruff", "zensical", "pywin32", "nci-si-acceptance"):
+        for name in ("torch", "ruff", "zensical", "pywin32", "nci-sip-acceptance"):
             self.assertNotIn(name + "==", text)
         self.assertIn("--hash=sha256:" + "a" * 64, text)
 

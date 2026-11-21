@@ -532,16 +532,22 @@ class MutationCliContractsTest(unittest.TestCase):
             root = Path(directory)
             project(root, "def broken(:\n")
             (root / "src/folder.py").mkdir()
-            for path, message in (
-                ("tests/test_example.py", "Not an eligible Python module: tests/test_example.py"),
-                ("src/example.py", "invalid syntax (<unknown>, line 1)"),
-                ("src/missing.py", "Not an eligible Python module: src/missing.py"),
-                ("src/folder.py", "Not an eligible Python module: src/folder.py"),
+            invalid = {"type": "ValueError"}
+            syntax = {"type": "SyntaxError", "filename": "<unknown>"}
+            for path, message, extra in (
+                (
+                    "tests/test_example.py",
+                    "Not an eligible Python module: tests/test_example.py",
+                    invalid,
+                ),
+                ("src/example.py", "invalid syntax (<unknown>, line 1)", syntax),
+                ("src/missing.py", "Not an eligible Python module: src/missing.py", invalid),
+                ("src/folder.py", "Not an eligible Python module: src/folder.py", invalid),
             ):
                 with self.subTest(path=path):
                     self.assertEqual(
                         command(root, "--paths", path),
-                        (2, [{"outcome": "INFRA", "message": message}]),
+                        (2, [{"outcome": "INFRA", "message": message, **extra}]),
                     )
 
     def test_scheduler_crash_raises_instead_of_returning_partial_results(self):
@@ -687,6 +693,46 @@ class MutationCliContractsTest(unittest.TestCase):
                 {"outcome": "INFRA", "message": "Mutant scheduler failed: controller lost job"},
             )
 
+    def test_cli_os_error_reports_infra_with_type_filename_and_traceback(self):
+        # Given an OS refusal naming a file, the real CLI keeps exit 2 and says
+        # which error it was and where; the traceback goes to stderr.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            project(root, "def answer():\n    return True\n")
+            package = Path(gate.__file__).parents[2]
+            driver = root / "driver.py"
+            driver.write_text(
+                "import sys\nfrom unittest.mock import patch\n"
+                f"sys.path.insert(0, {str(package)!r})\n"
+                "from scripts.validation import mutation_gate as gate\n"
+                "denial = PermissionError(1, 'Operation not permitted', '/x')\n"
+                "with patch.object(gate, 'collect', side_effect=denial):\n"
+                "    raise SystemExit(gate.main(sys.argv[1:]))\n"
+            )
+            child = subprocess.run(  # noqa: S603 - real CLI with OS-boundary fault injection
+                [sys.executable, str(driver), "--root", str(root), "--paths", "src/example.py"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            self.assertEqual(child.returncode, 2, child.stdout + child.stderr)
+            self.assertEqual(
+                json.loads(child.stdout.splitlines()[-1]),
+                {
+                    "outcome": "INFRA",
+                    "message": "[Errno 1] Operation not permitted: '/x'",
+                    "type": "PermissionError",
+                    "filename": "/x",
+                },
+            )
+            self.assertTrue(child.stderr.startswith("Traceback (most recent call last):\n"))
+            self.assertEqual(
+                child.stderr.splitlines()[-1],
+                "PermissionError: [Errno 1] Operation not permitted: '/x'",
+            )
+
 
 class MutationSourceContractsTest(unittest.TestCase):
     def test_scope_excludes_each_nonproduction_path_family(self):
@@ -716,6 +762,7 @@ class MutationSourceContractsTest(unittest.TestCase):
                                 {
                                     "outcome": "INFRA",
                                     "message": f"Not an eligible Python module: {name}",
+                                    "type": "ValueError",
                                 }
                             ],
                         ),
@@ -1067,7 +1114,7 @@ class MutationSourceContractsTest(unittest.TestCase):
                     (root / "allow.yaml").write_text(content)
                     self.assertEqual(
                         command(root, "--paths", "src/example.py", "--allowlist", "allow.yaml"),
-                        (2, [{"outcome": "INFRA", "message": message}]),
+                        (2, [{"outcome": "INFRA", "message": message, "type": "ValueError"}]),
                     )
 
     def test_changed_sites_use_merge_base_and_include_multiline_intersections_only(self):
@@ -1492,17 +1539,20 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                 "TMPDIR": str(root / ("long" * 30)),
                 "TMP": "parent-tmp",
                 "TEMP": "parent-temp",
-                "NCI_SI_DATA_DIR": str(caller),
+                "NCI_SI_DATA_DIR": str(caller / "legacy"),
+                "NCI_SI_EVS_LICENSE_KEY": "legacy-private-marker",
+                "NCI_SIP_DATA_DIR": str(caller),
+                "NCI_SIP_EVS_LICENSE_KEY": "current-private-marker",
                 "PYTHONDONTWRITEBYTECODE": "0",
                 "PATH": "/parent-search",
             }
             code = (
                 "import json, os, shutil, sys, example\nfrom pathlib import Path\n"
-                "data = Path(os.environ['NCI_SI_DATA_DIR'])\n"
+                "data = Path(os.environ['NCI_SIP_DATA_DIR'])\n"
                 "data.mkdir(parents=True, exist_ok=True)\n(data / 'written').write_text('owned')\n"
                 "print(json.dumps({'settings': {key: value for key, value in os.environ.items() "
                 "if key in ('TMPDIR', 'TMP', 'TEMP', 'PATH', 'PYTHONDONTWRITEBYTECODE') "
-                "or key.startswith('NCI_SI_') or key.endswith('__mutated')}, "
+                "or key.startswith(('NCI_SI_', 'NCI_SIP_')) or key.endswith('__mutated')}, "
                 "'python': shutil.which('python')}))\n"
             )
             for has_path in (True, False):
@@ -1520,13 +1570,16 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                         check=True,
                     )
                     observed = json.loads(child.stdout)
+                    self.assertNotIn("NCI_SI_EVS_LICENSE_KEY", observed["settings"])
+                    self.assertNotIn("NCI_SIP_EVS_LICENSE_KEY", observed["settings"])
+                    self.assertNotIn("NCI_SI_DATA_DIR", observed["settings"])
                     self.assertEqual(
                         observed["settings"],
                         {
                             "TMPDIR": tempfile.gettempdir(),
                             "TMP": tempfile.gettempdir(),
                             "TEMP": tempfile.gettempdir(),
-                            "NCI_SI_DATA_DIR": str(work / "data"),
+                            "NCI_SIP_DATA_DIR": str(work / "data"),
                             "PYTHONDONTWRITEBYTECODE": "1",
                             "PATH": str(Path(sys.executable).parent)
                             + os.pathsep
@@ -1549,7 +1602,7 @@ class MutationEvidenceContractsTest(unittest.TestCase):
             (root / "acceptance/tests/test_contract.py").write_text(
                 "import json, os\nfrom pathlib import Path\ndef test_settings():\n"
                 f"    Path({str(marker)!r}).write_text(json.dumps({{key: value for key, value "
-                "in os.environ.items() if key.startswith('NCI_SI_ACCEPTANCE_')}))\n"
+                "in os.environ.items() if key.startswith('NCI_SIP_ACCEPTANCE_')}))\n"
                 "    assert True\n"
             )
             result, _ = runner.run_domain(root, "fixture", [], 30)
@@ -1557,11 +1610,13 @@ class MutationEvidenceContractsTest(unittest.TestCase):
             self.assertEqual(
                 json.loads(marker.read_text()),
                 {
-                    "NCI_SI_ACCEPTANCE_MODE": "fixture",
-                    "NCI_SI_ACCEPTANCE_REGISTRY_RELEASE": "required",
-                    "NCI_SI_ACCEPTANCE_SECURITY_SERVER": "python ../scripts/permissions_fixture.py",
-                    "NCI_SI_ACCEPTANCE_PREPARE": (
-                        'nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")'
+                    "NCI_SIP_ACCEPTANCE_MODE": "fixture",
+                    "NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE": "required",
+                    "NCI_SIP_ACCEPTANCE_SECURITY_SERVER": (
+                        "python ../scripts/permissions_fixture.py"
+                    ),
+                    "NCI_SIP_ACCEPTANCE_PREPARE": (
+                        'nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")'
                     ),
                 },
             )
@@ -2270,14 +2325,14 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                 contract=(
                     "import os\n"
                     "    assert {key: os.environ.get(key) for key in "
-                    "('NCI_SI_ACCEPTANCE_MODE', 'NCI_SI_ACCEPTANCE_REGISTRY_RELEASE', "
-                    "'NCI_SI_ACCEPTANCE_SECURITY_SERVER', 'NCI_SI_ACCEPTANCE_PREPARE')} == "
-                    "{'NCI_SI_ACCEPTANCE_MODE': 'fixture', "
-                    "'NCI_SI_ACCEPTANCE_REGISTRY_RELEASE': 'required', "
-                    "'NCI_SI_ACCEPTANCE_SECURITY_SERVER': "
+                    "('NCI_SIP_ACCEPTANCE_MODE', 'NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE', "
+                    "'NCI_SIP_ACCEPTANCE_SECURITY_SERVER', 'NCI_SIP_ACCEPTANCE_PREPARE')} == "
+                    "{'NCI_SIP_ACCEPTANCE_MODE': 'fixture', "
+                    "'NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE': 'required', "
+                    "'NCI_SIP_ACCEPTANCE_SECURITY_SERVER': "
                     "'python ../scripts/permissions_fixture.py', "
-                    "'NCI_SI_ACCEPTANCE_PREPARE': "
-                    "'nci-si-mcp index-sample $(cat \"$NCI_SI_ACCEPTANCE_INDEX_CODES\")'}\n"
+                    "'NCI_SIP_ACCEPTANCE_PREPARE': "
+                    "'nci-sip-mcp index-sample $(cat \"$NCI_SIP_ACCEPTANCE_INDEX_CODES\")'}\n"
                     "    assert example.answer() is True"
                 ),
             )

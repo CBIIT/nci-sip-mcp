@@ -1,6 +1,6 @@
-# NCI SI MCP acceptance suite
+# NCI SIP MCP acceptance suite
 
-The behavioural acceptance suite for the NCI SI MCP tools, which tests the requirements of the
+The behavioural acceptance suite for the NCI SIP MCP tools, which tests the requirements of the
 [specification](../docs/specification.md), and the upstream fixture server it runs against. It tests the MCP
 tool surface of a command or remote fixture server. Managed live execution uses the furnished
 CLI and its verified transport integration; assertions remain at the public MCP boundary.
@@ -9,11 +9,11 @@ From the repository root:
 
 ```bash
 pdm run acceptance --report=fixture.json             # fixture mode; writes acceptance/fixture.json
-NCI_SI_ACCEPTANCE_MODE=live NCI_SI_ACCEPTANCE_ENVIRONMENT=evs-only pdm run acceptance --report=live.json
-NCI_SI_ACCEPTANCE_SERVER="..." pdm run acceptance    # another server (default: nci-si-mcp serve)
-NCI_SI_ACCEPTANCE_URL=https://... pdm run acceptance # a remote server over streamable HTTP (below)
-NCI_SI_ACCEPTANCE_PROFILE=evs NCI_SI_ACCEPTANCE_SERVER="..." pdm run acceptance  # a server of one profile (default: unified)
-pdm run python -m nci_si_acceptance.report acceptance/fixture.json --live acceptance/live.json
+NCI_SIP_ACCEPTANCE_MODE=live NCI_SIP_ACCEPTANCE_ENVIRONMENT=evs-only pdm run acceptance --report=live.json
+NCI_SIP_ACCEPTANCE_SERVER="..." pdm run acceptance    # another server (default: nci-sip-mcp serve)
+NCI_SIP_ACCEPTANCE_URL=https://... pdm run acceptance # a remote server over streamable HTTP (below)
+NCI_SIP_ACCEPTANCE_PROFILE=evs NCI_SIP_ACCEPTANCE_SERVER="..." pdm run acceptance  # a server of one profile (default: unified)
+pdm run python -m nci_sip_acceptance.report acceptance/fixture.json --live acceptance/live.json
 pdm run acceptance-index-codes                       # the index set, one code per line (remote server)
 pdm run acceptance -n 4 --dist worksteal --report=fixture.json  # four workers, stealing work; the same report
 pdm run acceptance-expected check acceptance/fixture.json   # a report against the expected outcomes
@@ -34,7 +34,7 @@ distribution's separate local identity utility. It does not label acceptance req
 
 ## Managed live environments
 
-Local live acceptance requires `NCI_SI_ACCEPTANCE_ENVIRONMENT=evs-only`, selecting the reviewed
+Local live acceptance requires `NCI_SIP_ACCEPTANCE_ENVIRONMENT=evs-only`, selecting the reviewed
 `fixtures/environments.yaml` policy. Historical manifest origins grant no permission. Only EVS
 REST/FHIR are enabled; caDSR (including anonymous/FTP/contracts), SSIS and SPARQL stay blocked.
 A caDSR-enabled map needs #448's reviewed bounded reader and separate access approval. These
@@ -45,7 +45,7 @@ no proxy and same-origin redirects. Custom commands, remote/fixture settings, up
 proxy/Python/native-loader injection and blocked-surface credentials fail before launch; later
 injection is filtered. This assumes a trusted installation, not an OS sandbox or recorder guard.
 
-Set live preparation to `NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample'`; the harness supplies
+Set live preparation to `NCI_SIP_ACCEPTANCE_PREPARE='nci-sip-mcp index-sample'`; the harness supplies
 validated argv without a shell. The shell-expanded fixture command below is rejected live.
 Selected origins reach item provenance; blocked surfaces use an owned non-forwarding refusal.
 Live caDSR citation comparison fails before transport with
@@ -110,16 +110,16 @@ The creator retains responsibility for private run directories and evidence clea
 
 ### Registry-release selection
 
-`NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=optional|required` is harness-only, defaults to
+`NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=optional|required` is harness-only, defaults to
 `optional`, and rejects every other value. Optional suspends exactly five retained cases:
 export-date discovery, published-release discovery, published-pin transport/attribution,
 and both registry cursor-binding directions. Each reports an ordinary skip with reason
-`registry-release requirement suspended pending sponsor decision (NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=optional)`.
+`registry-release requirement suspended pending sponsor decision (NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=optional)`.
 They remain ordinary skips in live mode too, never `not_live` or executed passes.
 Use `required` to run the existing assertions unchanged:
 
 ```bash
-NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required pdm run acceptance --report=required.json
+NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=required pdm run acceptance --report=required.json
 ```
 
 The marker `registry_release` selects only those cases. Explicit unpublished/unlisted-pin
@@ -220,11 +220,11 @@ re-recording, under change control) or the live service has changed: both are fi
 that passes live and fails against fixtures means the server behaves differently against
 different upstreams: a defect.
 
-A fixture run may begin with one operator-supplied prepare command, `NCI_SI_ACCEPTANCE_PREPARE`, a
+A fixture run may begin with one operator-supplied prepare command, `NCI_SIP_ACCEPTANCE_PREPARE`, a
 shell command line run once, before the first test that starts a server, in the server's
 environment against the ordinary fixtures: the same settings
-the server gets, its upstream base URLs and a fresh `NCI_SI_DATA_DIR`. The file that
-`NCI_SI_ACCEPTANCE_INDEX_CODES` names holds the index set, one code per line: every concept the
+the server gets, its upstream base URLs and a fresh `NCI_SIP_DATA_DIR`. The file that
+`NCI_SIP_ACCEPTANCE_INDEX_CODES` names holds the index set, one code per line: every concept the
 fixture set records at an include that holds its summary. Every server then
 starts from a copy of that data directory. A test marked `prepared` needs it and is NOT RUN
 without the command; a command that fails, or whose requests find no fixture, fails every
@@ -232,10 +232,10 @@ dependent test with its reason. Other tests continue, including on parallel work
 For this server it builds the interim NCIt index, in under a second and under a MB with the
 default hashing embedder:
 
-    NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")'
+    NCI_SIP_ACCEPTANCE_PREPARE='nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")'
 
 Run it only through the suite: the base URLs it is given name each surface of the fixture
-server (`NCI_SI_EVS_BASE_URL` ends in `/evs`, to which the server adds `/api/v1/…` as it does to
+server (`NCI_SIP_EVS_BASE_URL` ends in `/evs`, to which the server adds `/api/v1/…` as it does to
 the production host), and a command pointed at the fixture server's bare address finds no
 fixture. Every setting the suite gives a server, and its format, is in the specification's §5
 ([`spec/acceptance.md`](../spec/acceptance.md)).
@@ -254,21 +254,21 @@ Session-release cases marked `mcp_session` use handshake mode so they run in an 
 session. Other cases negotiate normally: native list/resource cache fields belong to the
 2026 protocol and are intentionally removed by the SDK on older protocols.
 
-The platform's server is remote: `NCI_SI_ACCEPTANCE_URL` names its streamable-HTTP endpoint in
-place of `NCI_SI_ACCEPTANCE_SERVER` (naming both stops the run). The harness starts nothing and
+The platform's server is remote: `NCI_SIP_ACCEPTANCE_URL` names its streamable-HTTP endpoint in
+place of `NCI_SIP_ACCEPTANCE_SERVER` (naming both stops the run). The harness starts nothing and
 cannot set the environment of a process it did not start, so the operator does three things the
 harness otherwise does: sets the server's upstream, changes its state for the tests that need a
 server of their own, and prepares its index. Run it in one process: xdist workers together with
-`NCI_SI_ACCEPTANCE_URL` are a usage error. The report records each run's transport, `stdio` or
+`NCI_SIP_ACCEPTANCE_URL` are a usage error. The report records each run's transport, `stdio` or
 `streamable-http`, in the JSON and in the rendered report.
 
 The settings of a run, the probe that precedes the first test, the state hook's contract and the
 index of a remote server are specified once, in the specification's §5
 ([Settings of a run](../spec/acceptance.md#settings-of-a-run) and the text after it); this README
 does not repeat them. What the operator needs at a glance: set the fixture server's base URLs and
-`NCI_SI_UPSTREAM_MODE` as the harness prints them, give the state hook for the tests that need a
+`NCI_SIP_UPSTREAM_MODE` as the harness prints them, give the state hook for the tests that need a
 server of their own (without it they count as not run, so their tool is never PASS), and prepare the
-index and declare it with `NCI_SI_ACCEPTANCE_PREPARED=1`. A failed initial probe or state change
+index and declare it with `NCI_SIP_ACCEPTANCE_PREPARED=1`. A failed initial probe or state change
 fails every dependent test; a failed scenario state change fails the test that needed it.
 The endpoint wait ends at once on an HTTP 401 or 403. Failures retain their diagnostic reason,
 with credentials withheld, rather than aborting the run or counting as `not_live`.
@@ -278,7 +278,7 @@ headers. Keep it local and use test credentials only; treat exported request log
 
 ## The report
 
-`--report` writes one JSON report per run; `nci_si_acceptance.report` renders it as the per-tool
+`--report` writes one JSON report per run; `nci_sip_acceptance.report` renders it as the per-tool
 table of the specification's §5. A tool is PASS, FAIL (a failed gate fails every tool), NO
 FIXTURE (a request lacked a fixture: a question for the fixture set), INCOMPLETE (the tests that
 ran passed but some could not run, or a gate could not run, shown as "gates not run": a
@@ -431,7 +431,7 @@ The older [Phase 5 evidence](../docs/evidence/phase-5/acceptance-live.json) stay
 
 ## Layout
 
-`src/nci_si_acceptance/` holds the harness: `client.py` starts the server or connects to it,
+`src/nci_sip_acceptance/` holds the harness: `client.py` starts the server or connects to it,
 `remote.py` probes a remote server and runs the operator's state hook, `tools.py` calls the
 required tools, `fixture_server.py` serves the fixtures (its docstring documents the format),
 `report.py` writes and renders the per-tool report, `suite_identity.py` digests the suite and
@@ -453,7 +453,7 @@ is; the fixture set is versioned apart, by its pinned release and recording date
 
 ## Change control
 
-The NCI SI MCP project coordinator is the code owner of `spec/` and `acceptance/`. From the
+The NCI SIP MCP project coordinator is the code owner of `spec/` and `acceptance/`. From the
 furnished tag, a change to `spec/` or to the suite needs the written approval of the branch chief
 or a delegate ([spec/acceptance.md](../spec/acceptance.md)); a report from a changed suite renders
 MODIFIED, because only the digests of approved releases, listed in
@@ -464,12 +464,12 @@ The digest covers `tests/`, `fixtures/` with the manifest, `request-forms/`, `sr
 (the pytest configuration and the dependency pins decide what runs) and `../spec/`; it leaves out
 the self-tests, `README.md`, `CHANGELOG.md` (a record that carries release digests), caches, editor
 and system litter, `approved.yaml` and the server under test, so one approved suite attests any
-server (`src/nci_si_acceptance/suite_identity.py` defines the set). A symbolic link among the
+server (`src/nci_sip_acceptance/suite_identity.py` defines the set). A symbolic link among the
 digested files, or a root that lacks any of them, is an error, never a partial digest.
 
 What the check is and is not:
 
-- It is a tripwire, not tamper-proofing. `approved.yaml` changes by review by the NCI SI MCP
+- It is a tripwire, not tamper-proofing. `approved.yaml` changes by review by the NCI SIP MCP
   project coordinator, and the report's identity block is self-stated.
 - Approval is attested on a clean checkout, since untracked files inside the digested paths count.
 - Reports are written outside the digested paths (as `--report=fixture.json` in `acceptance/`
@@ -480,15 +480,15 @@ What the check is and is not:
 
 ## Secured caller fixtures
 
-The additive X-25–X-28 cases use `NCI_SI_ACCEPTANCE_SECURITY_SERVER`, an operator-supplied
+The additive X-25–X-28 cases use `NCI_SIP_ACCEPTANCE_SECURITY_SERVER`, an operator-supplied
 command that starts a loopback HTTP server. This repository's CI and HTTP gate supply `scripts/permissions_fixture.py`. For a
-local fixture run set `NCI_SI_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py'`
+local fixture run set `NCI_SIP_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py'`
 alongside the preparation environment. Successors provide their own adapter;
 the suite imports no server code. Without an adapter these cases explicitly report NOT RUN.
 They are fixture-only, not evidence of production identity or revocation behavior.
 
-The adapter receives the normal fixture upstream environment plus `NCI_SI_TEST_HTTP_PORT`
-and `NCI_SI_TEST_AUTHORITY_FILE`. The JSON file contains generated `tokens` keyed by fixture
+The adapter receives the normal fixture upstream environment plus `NCI_SIP_TEST_HTTP_PORT`
+and `NCI_SIP_TEST_AUTHORITY_FILE`. The JSON file contains generated `tokens` keyed by fixture
 actor and `policies` containing each actor's `capabilities` (tool names) and Unix-second
 `expires_at`. Missing policy denies. The adapter authenticates tokens, reloads policy on each
 request, binds only loopback, and exposes `/mcp`, `/health` and `/ready`. A request to `/mcp`

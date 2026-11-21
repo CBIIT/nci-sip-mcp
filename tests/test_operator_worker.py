@@ -38,13 +38,13 @@ class OperatorEnvironmentTest(unittest.TestCase):
     def test_child_imports_come_from_the_owned_source_root(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            package = root / "src/nci_si_mcp"
+            package = root / "src/nci_sip_mcp"
             package.mkdir(parents=True)
             (package / "__init__.py").write_text("SOURCE_MARKER = 'owned snapshot'\n")
             with patch("scripts.operator_worker.acceptance_http.ROOT", root):
                 environment = clean_environment(root)
             result = subprocess.run(
-                [sys.executable, "-c", "import nci_si_mcp; print(nci_si_mcp.SOURCE_MARKER)"],
+                [sys.executable, "-c", "import nci_sip_mcp; print(nci_sip_mcp.SOURCE_MARKER)"],
                 env=environment,
                 capture_output=True,
                 text=True,
@@ -65,9 +65,9 @@ class OperatorEnvironmentTest(unittest.TestCase):
 
         with TemporaryDirectory() as directory:
             with (
-                patch("nci_si_acceptance.client.subprocess.Popen", side_effect=sleeping),
-                patch("nci_si_acceptance.client.time.monotonic", side_effect=(0, 16, 16)),
-                patch("nci_si_acceptance.client.socket.create_connection", side_effect=OSError),
+                patch("nci_sip_acceptance.client.subprocess.Popen", side_effect=sleeping),
+                patch("nci_sip_acceptance.client.time.monotonic", side_effect=(0, 16, 16)),
+                patch("nci_sip_acceptance.client.socket.create_connection", side_effect=OSError),
                 self.assertRaisesRegex(TimeoutError, "did not become ready"),
                 _server(Path(directory), {}),
             ):
@@ -79,7 +79,7 @@ class OperatorEnvironmentTest(unittest.TestCase):
         environments = []
         listens = (
             "import os, socket, time; listener = socket.socket(); "
-            "listener.bind(('127.0.0.1', int(os.environ['NCI_SI_HTTP_PORT']))); "
+            "listener.bind(('127.0.0.1', int(os.environ['NCI_SIP_HTTP_PORT']))); "
             "listener.listen(); time.sleep(300)"
         )
 
@@ -89,11 +89,11 @@ class OperatorEnvironmentTest(unittest.TestCase):
 
         with (
             TemporaryDirectory() as directory,
-            patch("nci_si_acceptance.client.subprocess.Popen", side_effect=listening),
+            patch("nci_sip_acceptance.client.subprocess.Popen", side_effect=listening),
             _server(Path(directory), {}),
         ):
             pass
-        self.assertEqual(environments[0]["NCI_SI_HTTP_REQUIRE_INDEX"], "0")
+        self.assertEqual(environments[0]["NCI_SIP_HTTP_REQUIRE_INDEX"], "0")
 
     def test_sigterm_ends_a_running_worker_and_reaps_its_owned_server(self):
         with TemporaryDirectory() as directory:
@@ -178,7 +178,7 @@ class OperatorEnvironmentTest(unittest.TestCase):
                 patch.dict(
                     "os.environ",
                     {
-                        "NCI_SI_DATA_DIR": "/production/index",
+                        "NCI_SIP_DATA_DIR": "/production/index",
                         "AWS_SECRET_ACCESS_KEY": "PRIVATE-CANARY",
                     },
                 ),
@@ -207,8 +207,8 @@ class OperatorEnvironmentTest(unittest.TestCase):
             "LANG": "en_US.UTF-8",
             "AWS_SECRET_ACCESS_KEY": "PRIVATE-CANARY",
             "HTTPS_PROXY": "http://proxy",
-            "NCI_SI_DATA_DIR": "/production/index",
-            "NCI_SI_CADSR_API_KEY": "PRIVATE-CANARY",
+            "NCI_SIP_DATA_DIR": "/production/index",
+            "NCI_SIP_CADSR_API_KEY": "PRIVATE-CANARY",
             "PYTHONPATH": "/untrusted/imports",
             "SSH_AUTH_SOCK": "/agent/socket",
         }
@@ -222,4 +222,4 @@ class OperatorEnvironmentTest(unittest.TestCase):
         self.assertNotIn("HTTPS_PROXY", environment)
         self.assertNotIn("/untrusted/imports", environment.get("PYTHONPATH", ""))
         self.assertNotIn("SSH_AUTH_SOCK", environment)
-        self.assertNotIn("NCI_SI_DATA_DIR", environment)
+        self.assertNotIn("NCI_SIP_DATA_DIR", environment)

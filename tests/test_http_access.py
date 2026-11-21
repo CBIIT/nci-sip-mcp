@@ -13,11 +13,11 @@ from starlette.applications import Starlette
 from starlette.responses import Response
 from starlette.routing import Route
 
-from nci_si_mcp.audit import compact, hashed
-from nci_si_mcp.config import Settings
-from nci_si_mcp.http_auth import HTTPAuthIntegration, configured_auth
-from nci_si_mcp.permissions import Authority, Principal
-from nci_si_mcp.transport import create_http_app
+from nci_sip_mcp.audit import compact, hashed
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.http_auth import HTTPAuthIntegration, configured_auth
+from nci_sip_mcp.permissions import Authority, Principal
+from nci_sip_mcp.transport import create_http_app
 from test_audit import captured, records
 from test_release_selection import initialize_http
 from test_server import ServerFixture
@@ -211,7 +211,7 @@ class OAuthDiscoveryTest(GovernedFixture):
 
     def test_bare_forbidden_response_is_not_logged_as_authentication_refusal(self):
         logging.disable(logging.NOTSET)
-        with self.assertNoLogs("nci_si_mcp.transport", level="WARNING"):
+        with self.assertNoLogs("nci_sip_mcp.transport", level="WARNING"):
             response = asyncio.run(self.boundary_reply(403, {}))
         self.assertEqual(response.status_code, 403)
 
@@ -295,8 +295,8 @@ class RequiredAccessTest(GovernedFixture):
         with patch.dict(
             os.environ,
             {
-                "NCI_SI_HTTP_AUTH_MODE": "required",
-                "NCI_SI_HTTP_AUTH_FACTORY": "test_http_access:integration",
+                "NCI_SIP_HTTP_AUTH_MODE": "required",
+                "NCI_SIP_HTTP_AUTH_FACTORY": "test_http_access:integration",
             },
         ):
             settings = Settings.from_env()

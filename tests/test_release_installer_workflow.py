@@ -1,3 +1,4 @@
+import importlib.metadata
 import json
 import os
 import re
@@ -15,8 +16,10 @@ ROOT = Path(__file__).parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "local-installer.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 DOCUMENT = ROOT / "docs" / "installer-targets.md"
+BASE = "f49b766bf33c67ae42afd9bbda18be8ce4f65b06"
+OLD_RELEASE_TAG = "v0.39.2"
 STDIO_CAPTURE = (
-    'STDIO_CLIENT="$("$INSTALLER_VENV/bin/nci-si-install" start '
+    'STDIO_CLIENT="$("$INSTALLER_VENV/bin/nci-sip-install" start '
     '--target local --transport stdio --data-dir "$STDIO_ROOT")"'
 )
 CI_BOOTSTRAP_NOTE = (
@@ -36,9 +39,9 @@ strategy:
   fail-fast: false
   matrix: {os: [macos-latest, ubuntu-24.04]}
 env:
-  NCI_SI_CADSR_BASE_URL: http://127.0.0.1:8767/cadsr
-  NCI_SI_CADSR_FTP_URL: http://127.0.0.1:8767/cadsr-ftp
-  NCI_SI_SSIS_SPARQL_URL: http://127.0.0.1:8767/ssis-sparql
+  NCI_SIP_CADSR_BASE_URL: http://127.0.0.1:8767/cadsr
+  NCI_SIP_CADSR_FTP_URL: http://127.0.0.1:8767/cadsr-ftp
+  NCI_SIP_SSIS_SPARQL_URL: http://127.0.0.1:8767/ssis-sparql
   no_proxy: 127.0.0.1,localhost,::1,cadsrapi.cancer.gov,cadsrapi-stage.cancer.gov,cadsr.nci.nih.gov,shared.semantics.cancer.gov
 steps:
   - name: Resolve prohibited caDSR and Shared SI hosts to loopback (CI only)
@@ -77,7 +80,7 @@ steps:
       PYTHON: ${{ steps.python.outputs.python-path }}
     run: |
       "$PYTHON" -m venv "$INSTALLER_VENV"
-      "$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${INSTALL_REF}"
+      "$INSTALLER_VENV/bin/python" -m pip install "nci-sip-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${INSTALL_REF}"
   - name: Install the acceptance suite (CI only)
     env: {PYTHON: '${{ steps.python.outputs.python-path }}'}
     run: |
@@ -110,8 +113,8 @@ steps:
           netstat -anv -p tcp | grep '\.8000 ' || true
         fi
         if [ -f "$HTTP_ROOT/installer-state.json" ]; then
-          "$INSTALLER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT" || cleanup_status=$?
-          "$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT" || cleanup_status=$?
+          "$INSTALLER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT" || cleanup_status=$?
+          "$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT" || cleanup_status=$?
         fi
         if [ -n "$original_tag" ]; then
           git -C "$GITHUB_WORKSPACE" tag -f "$RELEASE_TAG" "$original_tag" || cleanup_status=$?
@@ -140,21 +143,21 @@ steps:
       export HTTP_REQUIRED_TESTS="test_a_resolved_release_is_never_cached test_a_discovered_release_identifies_the_concept_and_its_provenance"
       mkdir -p "$STDIO_ROOT"
       touch "$STDIO_ROOT/unowned"
-      "$INSTALLER_VENV/bin/nci-si-install" check --target local
-      "$INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
-      "$INSTALLER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
-      STDIO_CLIENT="$("$INSTALLER_VENV/bin/nci-si-install" start --target local --transport stdio --data-dir "$STDIO_ROOT")"
+      "$INSTALLER_VENV/bin/nci-sip-install" check --target local
+      "$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive
+      "$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"
+      STDIO_CLIENT="$("$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport stdio --data-dir "$STDIO_ROOT")"
       STDIO_SERVER="$(printf '%s' "$STDIO_CLIENT" | "$ACCEPTANCE_VENV/bin/python" -c 'import json,shlex,sys; r=json.load(sys.stdin); print(shlex.join(["env", *(f"{k}={v}" for k,v in r["env"].items()), r["command"], *r["args"]]))')"
-      NCI_SI_ACCEPTANCE_MODE=fixture NCI_SI_ACCEPTANCE_SERVER="$STDIO_SERVER" "$ACCEPTANCE_VENV/bin/pytest" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_resolved_release_is_never_cached" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_an_index_mode_without_an_index_is_unavailable" --report="$RUNNER_TEMP/stdio.json"
-      "$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
+      NCI_SIP_ACCEPTANCE_MODE=fixture NCI_SIP_ACCEPTANCE_SERVER="$STDIO_SERVER" "$ACCEPTANCE_VENV/bin/pytest" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_resolved_release_is_never_cached" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_an_index_mode_without_an_index_is_unavailable" --report="$RUNNER_TEMP/stdio.json"
+      "$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"
       test -f "$STDIO_ROOT/unowned"
       test ! -e "$STDIO_ROOT/venv"
       test ! -e "$STDIO_ROOT/installer-state.json"
       mkdir -p "$HTTP_ROOT"
       touch "$HTTP_ROOT/unowned"
-      "$INSTALLER_VENV/bin/nci-si-install" check --target local
-      "$INSTALLER_VENV/bin/nci-si-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
-      "$INSTALLER_VENV/bin/nci-si-install" status --target local --transport http --data-dir "$HTTP_ROOT"
+      "$INSTALLER_VENV/bin/nci-sip-install" check --target local
+      "$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive
+      "$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport http --data-dir "$HTTP_ROOT"
       kill "$recorder"
       wait "$recorder" || [ $? -eq 143 ]
       recorder=""
@@ -174,23 +177,23 @@ steps:
       assert ("GET", "/cadsr", "404") in records, records
       print("loopback requests:", records)
       PY
-      if "$INSTALLER_VENV/bin/nci-si-install" check --target local > "$RUNNER_TEMP/unreachable.json"; then unreachable=0; else unreachable=$?; fi
+      if "$INSTALLER_VENV/bin/nci-sip-install" check --target local > "$RUNNER_TEMP/unreachable.json"; then unreachable=0; else unreachable=$?; fi
       [ "$unreachable" -eq 1 ] || { echo "::error::check against the stopped recorder exited $unreachable, not 1."; exit 1; }
       python3 - "$RUNNER_TEMP/unreachable.json" <<'PY'
       import json, sys
       record = json.load(open(sys.argv[1], encoding="utf-8"))
-      assert record == {"target": "local", "components": ["server"], "status": "failed", "results": [{"name": "supported_os", "status": "passed"}, {"name": "git", "status": "passed"}, {"name": "python", "status": "passed"}, {"name": "evs_reachable", "status": "passed"}, {"name": "cadsr_reachable", "status": "failed", "fix": "Restore network access to NCI_SI_CADSR_BASE_URL."}]}, record
+      assert record == {"target": "local", "components": ["server"], "status": "failed", "results": [{"name": "supported_os", "status": "passed"}, {"name": "git", "status": "passed"}, {"name": "python", "status": "passed"}, {"name": "evs_reachable", "status": "passed"}, {"name": "cadsr_reachable", "status": "failed", "fix": "Restore network access to NCI_SIP_CADSR_BASE_URL."}]}, record
       PY
-      export NCI_SI_UPSTREAM_MODE=fixture
-      export NCI_SI_EVS_BASE_URL=http://127.0.0.1:8766/evs
-      export NCI_SI_EVS_FHIR_BASE_URL=http://127.0.0.1:8766/evs-fhir
-      export NCI_SI_CADSR_BASE_URL=http://127.0.0.1:8766/cadsr
-      export NCI_SI_CADSR_FTP_URL=http://127.0.0.1:8766/cadsr-ftp
-      export NCI_SI_SSIS_SPARQL_URL=http://127.0.0.1:8766/ssis-sparql
-      "$INSTALLER_VENV/bin/nci-si-install" start --target local --transport http --data-dir "$HTTP_ROOT"
-      NCI_SI_ACCEPTANCE_URL=http://127.0.0.1:8000/mcp NCI_SI_ACCEPTANCE_FIXTURE_BIND=127.0.0.1:8766 NCI_SI_ACCEPTANCE_FIXTURE_URL=http://127.0.0.1:8766 "$ACCEPTANCE_VENV/bin/pytest" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_resolved_release_is_never_cached" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance" --report="$RUNNER_TEMP/http.json"
-      "$INSTALLER_VENV/bin/nci-si-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
-      "$INSTALLER_VENV/bin/nci-si-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
+      export NCI_SIP_UPSTREAM_MODE=fixture
+      export NCI_SIP_EVS_BASE_URL=http://127.0.0.1:8766/evs
+      export NCI_SIP_EVS_FHIR_BASE_URL=http://127.0.0.1:8766/evs-fhir
+      export NCI_SIP_CADSR_BASE_URL=http://127.0.0.1:8766/cadsr
+      export NCI_SIP_CADSR_FTP_URL=http://127.0.0.1:8766/cadsr-ftp
+      export NCI_SIP_SSIS_SPARQL_URL=http://127.0.0.1:8766/ssis-sparql
+      "$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport http --data-dir "$HTTP_ROOT"
+      NCI_SIP_ACCEPTANCE_URL=http://127.0.0.1:8000/mcp NCI_SIP_ACCEPTANCE_FIXTURE_BIND=127.0.0.1:8766 NCI_SIP_ACCEPTANCE_FIXTURE_URL=http://127.0.0.1:8766 "$ACCEPTANCE_VENV/bin/pytest" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_resolved_release_is_never_cached" "$GITHUB_WORKSPACE/acceptance/tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance" --report="$RUNNER_TEMP/http.json"
+      "$INSTALLER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT"
+      "$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"
       test -f "$HTTP_ROOT/unowned"
       test ! -e "$HTTP_ROOT/venv"
       test ! -e "$HTTP_ROOT/installer-state.json"
@@ -207,12 +210,12 @@ steps:
           assert set(actual.values()) == {"passed"}, (name, actual)
           assert actual == {key: expected[key] for key in actual}, (name, actual)
       PY
-      export NCI_SI_UPSTREAM_MODE=fixture
-      export NCI_SI_EVS_BASE_URL=http://127.0.0.1:8767/evs
-      export NCI_SI_EVS_FHIR_BASE_URL=http://127.0.0.1:8767/evs-fhir
-      export NCI_SI_CADSR_BASE_URL=http://127.0.0.1:8767/cadsr
-      export NCI_SI_CADSR_FTP_URL=http://127.0.0.1:8767/cadsr-ftp
-      export NCI_SI_SSIS_SPARQL_URL=http://127.0.0.1:8767/ssis-sparql
+      export NCI_SIP_UPSTREAM_MODE=fixture
+      export NCI_SIP_EVS_BASE_URL=http://127.0.0.1:8767/evs
+      export NCI_SIP_EVS_FHIR_BASE_URL=http://127.0.0.1:8767/evs-fhir
+      export NCI_SIP_CADSR_BASE_URL=http://127.0.0.1:8767/cadsr
+      export NCI_SIP_CADSR_FTP_URL=http://127.0.0.1:8767/cadsr-ftp
+      export NCI_SIP_SSIS_SPARQL_URL=http://127.0.0.1:8767/ssis-sparql
       python3 -m http.server 8767 --bind 127.0.0.1 --directory "$RUNNER_TEMP/upstream-recorder" < /dev/null > "$RUNNER_TEMP/negative-upstream.out" 2> "$RUNNER_TEMP/negative-upstream.log" &
       recorder=$!
       for attempt in $(seq 1 100); do
@@ -222,13 +225,13 @@ steps:
         sleep 0.1
       done
       "$PYTHON" -m venv "$NEGATIVE_INSTALLER_VENV"
-      "$NEGATIVE_INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${INSTALL_REF}"
+      "$NEGATIVE_INSTALLER_VENV/bin/python" -m pip install "nci-sip-mcp @ git+https://github.com/CBIIT/nci-sip-mcp@${INSTALL_REF}"
       git config --file "$RUNNER_TEMP/moved-tag.gitconfig" --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-si-mcp
       git config --file "$RUNNER_TEMP/moved-tag.gitconfig" --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-sip-mcp
       original_tag="$(git -C "$GITHUB_WORKSPACE" rev-parse "$RELEASE_TAG^{commit}")"
       expected_commit="$original_tag"
       git -C "$GITHUB_WORKSPACE" tag -f "$RELEASE_TAG" "$original_tag^"
-      if GIT_CONFIG_GLOBAL="$RUNNER_TEMP/moved-tag.gitconfig" "$NEGATIVE_INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$MOVED_TAG_ROOT" --non-interactive > "$RUNNER_TEMP/moved-tag.json" 2> "$RUNNER_TEMP/moved-tag.err"; then moved_status=0; else moved_status=$?; fi
+      if GIT_CONFIG_GLOBAL="$RUNNER_TEMP/moved-tag.gitconfig" "$NEGATIVE_INSTALLER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$MOVED_TAG_ROOT" --non-interactive > "$RUNNER_TEMP/moved-tag.json" 2> "$RUNNER_TEMP/moved-tag.err"; then moved_status=0; else moved_status=$?; fi
       git -C "$GITHUB_WORKSPACE" tag -f "$RELEASE_TAG" "$original_tag"
       original_tag=""
       [ "$moved_status" -eq 1 ] || { echo "::error::moved-tag run exited $moved_status, not 1."; exit 1; }
@@ -241,7 +244,7 @@ steps:
       assert re.fullmatch(r"[0-9a-f]{40}", sys.argv[3]), sys.argv[3]
       assert "release tag may have moved" in error and sys.argv[3] in error, error
       PY
-      lock="$NEGATIVE_INSTALLER_VENV/lib/python3.14/site-packages/nci_si_mcp/server-requirements.txt"
+      lock="$NEGATIVE_INSTALLER_VENV/lib/python3.14/site-packages/nci_sip_mcp/server-requirements.txt"
       cp "$lock" "$RUNNER_TEMP/server-requirements.txt"
       python3 - "$lock" <<'PY'
       import re, sys
@@ -250,7 +253,7 @@ steps:
       text = re.sub(r"--hash=sha256:[0-9a-f]{64}", "--hash=sha256:" + "0" * 64, text)
       open(path, "w", encoding="utf-8").write(text)
       PY
-      if "$NEGATIVE_INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$TAMPERED_HASH_ROOT" --non-interactive > "$RUNNER_TEMP/tampered-hash.json"; then hash_status=0; else hash_status=$?; fi
+      if "$NEGATIVE_INSTALLER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$TAMPERED_HASH_ROOT" --non-interactive > "$RUNNER_TEMP/tampered-hash.json"; then hash_status=0; else hash_status=$?; fi
       cp "$RUNNER_TEMP/server-requirements.txt" "$lock"
       lock=""
       [ "$hash_status" -eq 1 ] || { echo "::error::tampered-hash run exited $hash_status, not 1."; exit 1; }
@@ -327,6 +330,13 @@ steps:
         git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
         git merge-base --is-ancestor "$ref" refs/remotes/origin/main
       fi
+      if [ "$EVENT_NAME" = "schedule" ] || [ -n "$INPUT_REF" ]; then
+        distribution="$(git show "$ref:pyproject.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["name"])')"
+        if [ "$distribution" != "nci-sip-mcp" ]; then
+          echo "::error::Selected release $tag provides $distribution; no compatible NCI SIP release is available, so released SIP verification was not performed."
+          exit 1
+        fi
+      fi
       echo "ref=$ref" >> "$GITHUB_OUTPUT"
       echo "tag=$tag" >> "$GITHUB_OUTPUT"
 """)
@@ -357,7 +367,7 @@ def workflow_operator_lines(run):
     selected = [
         line
         for line in lines
-        if line.startswith('"$INSTALLER_VENV/bin/nci-si-install"') or line == STDIO_CAPTURE
+        if line.startswith('"$INSTALLER_VENV/bin/nci-sip-install"') or line == STDIO_CAPTURE
     ]
     return [line for line in selected if "|| cleanup_status=$?" not in line]
 
@@ -374,7 +384,244 @@ def moved_tag_verdict():
     return run[start:].split("\nPY\n", 1)[0]
 
 
+def local_git(repository, *arguments):
+    result = subprocess.run(  # noqa: S603 - fixed Git commands in a temporary local clone
+        ["git", "-C", str(repository), *arguments],  # noqa: S607
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def source_checkout_on_main(parent: Path, candidate_sha: str) -> Path:
+    source = parent / "source-main"
+    subprocess.run(  # noqa: S603 - local clone of this repository into an owned temporary source.
+        ["git", "clone", "--quiet", "--shared", str(ROOT), str(source)],  # noqa: S607
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    local_git(source, "switch", "--quiet", "--force-create", "main", candidate_sha)
+    return source
+
+
+def clone_release_fixture(parent: Path, source_root: Path = ROOT) -> Path:
+    candidate_sha = local_git(source_root, "rev-parse", "HEAD")
+    repository = parent / "release-era-repo"
+    subprocess.run(  # noqa: S603 - local clone of this repository into a temporary directory
+        ["git", "clone", "--quiet", "--shared", str(source_root), str(repository)],  # noqa: S607
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    local_git(repository, "checkout", "--quiet", "--detach", candidate_sha)
+    local_git(repository, "update-ref", "refs/heads/main", BASE)
+    local_git(repository, "remote", "set-url", "origin", str(repository))
+    return repository
+
+
+def run_local_run_source_selection(repository, scratch, event, source_root: Path = ROOT):
+    workflow = yaml.safe_load((source_root / ".github/workflows/local-run.yml").read_text())
+    step = next(
+        item
+        for item in workflow["jobs"]["local-run"]["steps"]
+        if item.get("name") == "Select release or candidate index source (CI only)"
+    )
+    environment = os.environ | {
+        "EVENT_NAME": event,
+        "GITHUB_WORKSPACE": str(repository),
+        "GITHUB_ENV": str(scratch / f"local-run-{event}.env"),
+        "GIT_CONFIG_GLOBAL": str(scratch / "local-run.gitconfig"),
+        "HOME": str(scratch),
+        "PATH": os.environ["PATH"],
+    }
+    result = subprocess.run(  # noqa: S603 - runs a repository-owned workflow step in a temp clone
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],  # noqa: S607
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return result
+
+
+def run_installer_source_selection(
+    repository,
+    scratch,
+    event,
+    release_tag=None,
+    input_ref="",
+    input_tag="",
+    source_root: Path = ROOT,
+):
+    workflow_data = yaml.safe_load(
+        (source_root / ".github/workflows/local-installer.yml").read_text()
+    )
+    step = next(
+        item
+        for item in workflow_data["jobs"]["prepare"]["steps"]
+        if item.get("name") == "Select exact source"
+    )
+    binary = scratch / "bin"
+    binary.mkdir(exist_ok=True)
+    environment = os.environ | {
+        "DISPATCH_REF": local_git(repository, "rev-parse", "HEAD"),
+        "EVENT_NAME": event,
+        "GH_TOKEN": "fixture",
+        "GITHUB_OUTPUT": str(scratch / f"installer-{event}.output"),
+        "GIT_CONFIG_GLOBAL": str(scratch / "installer.gitconfig"),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_ALLOW_PROTOCOL": "file",
+        "HOME": str(scratch),
+        "INPUT_REF": input_ref,
+        "INPUT_TAG": input_tag,
+        "PATH": os.environ["PATH"],
+        "PR_REF": "",
+    }
+    if release_tag is not None:
+        gh = binary / "gh"
+        gh.write_text(
+            "#!/bin/sh\n"
+            '[ "$*" = "release view --json tagName --jq .tagName" ] || exit 2\n'
+            'printf "%s\\n" "$RELEASE_TAG_FIXTURE"\n',
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+        environment["PATH"] = str(binary) + os.pathsep + environment["PATH"]
+        environment["RELEASE_TAG_FIXTURE"] = release_tag
+    result = subprocess.run(  # noqa: S603 - runs a repository-owned workflow step in a temp clone
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],  # noqa: S607
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return result, Path(environment["GITHUB_OUTPUT"])
+
+
+def install_local_git_requirement(repository, ref, distribution, target):
+    environment = os.environ | {
+        "GIT_ALLOW_PROTOCOL": "file",
+        "GIT_CONFIG_GLOBAL": str(target.parent / "gitconfig"),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "HOME": str(target.parent),
+        "PIP_CACHE_DIR": str(target.parent / "pip-cache"),
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PIP_NO_INDEX": "1",
+    }
+    requirement = f"{distribution} @ git+{repository.as_uri()}@{ref}"
+    return subprocess.run(  # noqa: S603 - installs this repository's local Git source only
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-build-isolation",
+            "--target",
+            str(target),
+            requirement,
+        ],
+        check=False,
+        capture_output=True,
+        env=environment,
+        text=True,
+    )
+
+
+def installed_distribution_and_help(target, command):
+    distributions = {
+        item.metadata["Name"] for item in importlib.metadata.distributions(path=[str(target)])
+    }
+    result = subprocess.run(  # noqa: S603 - executes the locally installed release command
+        [str(target / "bin" / command), "--help"],
+        env=os.environ | {"PYTHONPATH": str(target)},
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return distributions, result
+
+
+def installed_source_commit(target: Path, distribution_name: str) -> str:
+    distribution = next(
+        item
+        for item in importlib.metadata.distributions(path=[str(target)])
+        if item.metadata["Name"] == distribution_name
+    )
+    direct_url = json.loads(distribution.read_text("direct_url.json"))
+    return direct_url["vcs_info"]["commit_id"]
+
+
 class ReleaseInstallerWorkflowTest(unittest.TestCase):
+    def test_scheduled_release_preflight_rejects_old_distribution_and_installs_both_eras(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original_candidate_sha = local_git(ROOT, "rev-parse", "HEAD")
+            source_root = source_checkout_on_main(root, original_candidate_sha)
+            self.assertEqual(local_git(source_root, "symbolic-ref", "--short", "HEAD"), "main")
+            self.assertEqual(local_git(source_root, "rev-parse", "HEAD"), original_candidate_sha)
+            repository = clone_release_fixture(root, source_root)
+            candidate_sha = local_git(repository, "rev-parse", "HEAD")
+            self.assertEqual(candidate_sha, original_candidate_sha)
+            local_git(repository, "checkout", "--quiet", "--detach", OLD_RELEASE_TAG)
+            old_run = run_local_run_source_selection(repository, root, "schedule", source_root)
+            old_prepare, old_prepare_output = run_installer_source_selection(
+                repository, root, "schedule", OLD_RELEASE_TAG, source_root=source_root
+            )
+            old_install = install_local_git_requirement(
+                repository, OLD_RELEASE_TAG, "nci-si-mcp", root / "old-installed"
+            )
+            self.assertEqual(old_install.returncode, 0, old_install.stderr)
+            old_distributions, old_help = installed_distribution_and_help(
+                root / "old-installed", "nci-si-install"
+            )
+            old_prepare_output_contents = (
+                old_prepare_output.read_text(encoding="utf-8")
+                if old_prepare_output.exists()
+                else None
+            )
+
+            local_git(repository, "checkout", "--quiet", "--detach", candidate_sha)
+            candidate_run = run_local_run_source_selection(
+                repository, root, "workflow_dispatch", source_root
+            )
+            candidate_prepare, candidate_output = run_installer_source_selection(
+                repository,
+                root,
+                "workflow_dispatch",
+                source_root=source_root,
+            )
+            candidate_install = install_local_git_requirement(
+                repository, candidate_sha, "nci-sip-mcp", root / "candidate-installed"
+            )
+            self.assertEqual(candidate_install.returncode, 0, candidate_install.stderr)
+            candidate_distributions, candidate_help = installed_distribution_and_help(
+                root / "candidate-installed", "nci-sip-install"
+            )
+            candidate_install_sha = installed_source_commit(
+                root / "candidate-installed", "nci-sip-mcp"
+            )
+            candidate_output_contents = candidate_output.read_text(encoding="utf-8")
+
+        old_diagnostic = old_run.stdout + old_run.stderr + old_prepare.stdout + old_prepare.stderr
+        self.assertEqual(old_run.returncode, 1, old_diagnostic)
+        self.assertEqual(old_prepare.returncode, 1, old_diagnostic)
+        self.assertIn(f"{OLD_RELEASE_TAG} provides nci-si-mcp", old_diagnostic)
+        self.assertIn("released SIP verification was not performed", old_diagnostic)
+        self.assertIsNone(old_prepare_output_contents)
+        self.assertEqual(old_distributions, {"nci-si-mcp"})
+        self.assertEqual(old_help.returncode, 0, old_help.stderr)
+        self.assertEqual(candidate_run.returncode, 0, candidate_run.stderr)
+        self.assertEqual(candidate_prepare.returncode, 0, candidate_prepare.stderr)
+        self.assertIn(f"ref={original_candidate_sha}\ntag=v0.0.0\n", candidate_output_contents)
+        self.assertEqual(candidate_distributions, {"nci-sip-mcp"})
+        self.assertEqual(candidate_install_sha, original_candidate_sha)
+        self.assertEqual(candidate_help.returncode, 0, candidate_help.stderr)
+
     def test_both_origin_rewrites_resolve_the_selected_local_commit(self):
         local_run = yaml.safe_load((WORKFLOW.parent / "local-run.yml").read_text())
         scripts = [step["run"] for step in named_steps() if "run" in step]
@@ -475,14 +722,34 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
         install = steps["Install the selected installer source"]
         self.assertEqual(install["working-directory"], "${{ runner.temp }}")
         procedures = documented_procedures()
-        self.assertEqual(len(procedures), 2)
+        self.assertEqual(len(procedures), 3)
         public = procedures[0]
         self.assertEqual(
             public,
             [
                 '"$PYTHON" -m venv "$INSTALLER_VENV"',
-                '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ '
+                '"$INSTALLER_VENV/bin/python" -m pip install "nci-sip-mcp @ '
                 'git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" check --target local',
+                '"$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive',
+                '"$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport stdio --data-dir "$STDIO_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport stdio --data-dir "$STDIO_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" check --target local',
+                '"$INSTALLER_VENV/bin/nci-sip-install" run --target local --transport http --data-dir "$HTTP_ROOT" --non-interactive',
+                '"$INSTALLER_VENV/bin/nci-sip-install" status --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" stop --target local --transport http --data-dir "$HTTP_ROOT"',
+                '"$INSTALLER_VENV/bin/nci-sip-install" uninstall --target local --transport http --data-dir "$HTTP_ROOT"',
+            ],
+        )
+        self.assertEqual(
+            procedures[1],
+            [
+                "PRE_SIP_TAG=v0.39.2",
+                '"$PYTHON" -m venv "$INSTALLER_VENV"',
+                '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ '
+                'git+https://github.com/CBIIT/nci-sip-mcp@${PRE_SIP_TAG}"',
                 '"$INSTALLER_VENV/bin/nci-si-install" check --target local',
                 '"$INSTALLER_VENV/bin/nci-si-install" run --target local --transport stdio --data-dir "$STDIO_ROOT" --non-interactive',
                 '"$INSTALLER_VENV/bin/nci-si-install" status --target local --transport stdio --data-dir "$STDIO_ROOT"',
@@ -504,7 +771,7 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
         lifecycle = steps["Verify stdio and HTTP installer lifecycles"]
         self.assertEqual(lifecycle["working-directory"], "${{ runner.temp }}")
         stdio_start = (
-            '"$INSTALLER_VENV/bin/nci-si-install" start --target local --transport stdio '
+            '"$INSTALLER_VENV/bin/nci-sip-install" start --target local --transport stdio '
             '--data-dir "$STDIO_ROOT"'
         )
         expected = [STDIO_CAPTURE if line == stdio_start else line for line in public[2:]]
@@ -515,9 +782,9 @@ class ReleaseInstallerWorkflowTest(unittest.TestCase):
 
     def test_legacy_installer_keeps_its_separate_complete_old_origin_procedure(self):
         procedures = documented_procedures()
-        self.assertEqual(len(procedures), 2)
+        self.assertEqual(len(procedures), 3)
         self.assertEqual(
-            procedures[1],
+            procedures[2],
             [
                 '"$PYTHON" -m venv "$INSTALLER_VENV"',
                 '"$INSTALLER_VENV/bin/python" -m pip install "nci-si-mcp @ '

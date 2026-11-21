@@ -25,8 +25,8 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from nci_si_mcp import installer
-from nci_si_mcp.config import BASE_URL_VARIABLES, DEFAULT_EVS_BASE_URL, PRODUCTION_BASE_URLS
+from nci_sip_mcp import installer
+from nci_sip_mcp.config import BASE_URL_VARIABLES, DEFAULT_EVS_BASE_URL, PRODUCTION_BASE_URLS
 
 ROOT = Path(__file__).parent.parent
 JOBS = {"local-installer.yml": "local-installer", "local-run.yml": "local-run"}
@@ -205,7 +205,7 @@ class WorkflowContainmentTest(unittest.TestCase):
         # test fall back to the production caDSR default.
         environment = {
             "no_proxy": "127.0.0.1",
-            "NCI_SI_UPSTREAM_MODE": "live",
+            "NCI_SIP_UPSTREAM_MODE": "live",
             BASE_URL_VARIABLES["evs_base_url"]: f"http://127.0.0.1:{evs.server_address[1]}/evs",
             BASE_URL_VARIABLES["cadsr_base_url"]: f"http://127.0.0.1:{closed}/cadsr",
         }

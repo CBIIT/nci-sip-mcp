@@ -111,7 +111,7 @@ class CompanionSmokeTest(unittest.TestCase):
         environment = dict(
             command[i + 1].split("=", 1) for i, arg in enumerate(command) if arg == "-e"
         )
-        self.assertEqual(environment.get("NCI_SI_HTTP_AUTH_MODE"), "trusted-local")
+        self.assertEqual(environment.get("NCI_SIP_HTTP_AUTH_MODE"), "trusted-local")
 
     def test_cleanup_failure_is_reported_after_other_owned_resources_are_removed(self):
         resources = {"container": {"owned-serving"}, "network": {"owned-network"}}

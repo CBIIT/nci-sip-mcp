@@ -128,7 +128,7 @@ X-22:
     require an explicit release (invalid_request naming release). CLI invocations and requests
     without a session resolve per call; no process-wide default is kept. HTTP requests on
     sessionless protocol versions (2026-07-28 and later) are requests without a session,
-    regardless of NCI_SI_HTTP_SESSIONS; stdio retains its connection-local pin in both eras.
+    regardless of NCI_SIP_HTTP_SESSIONS; stdio retains its connection-local pin in both eras.
     Cursors bind the
     effective release. Completion audit records whether the release was explicit, session-held
     or freshly-resolved. Implicit NCIt calls carry ttlMs 0 and cacheScope private (M2.2);

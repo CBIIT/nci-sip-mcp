@@ -19,7 +19,7 @@ import httpx2
 import pytest
 from mcp.shared.exceptions import MCPError
 
-from nci_si_acceptance.client import (
+from nci_sip_acceptance.client import (
     ADAPTER_AUTHORITY_VARIABLE,
     ADAPTER_PORT_VARIABLE,
     open_remote_session,

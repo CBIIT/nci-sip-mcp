@@ -1,6 +1,6 @@
 # Operations and authorization evidence
 
-The NCI Semantic Infrastructure MCP server is built to production standards and is likely
+The NCI Semantic Infrastructure Program MCP server is built to production standards and is likely
 to become the production codebase. This is an operator handoff and a source of inputs to
 an authorization to operate (ATO), not an ATO, a compliance determination or evidence of
 an approved deployment. Cloud One/AWS integration remains [issue #292](https://github.com/CBIIT/nci-si-mcp/issues/292).
@@ -53,16 +53,16 @@ Every setting named on this page appears in this table.
 
 | Setting | Default | Operational effect |
 | --- | --- | --- |
-| `NCI_SI_LOG_LEVEL` | `"INFO"` | Diagnostic verbosity; required completion audit remains enabled. |
-| `NCI_SI_TIMEOUT_SECONDS` | `30.0` | General upstream request timeout. |
-| `NCI_SI_MATCH_TIMEOUT_SECONDS` | `45.0` | Match request timeout. |
-| `NCI_SI_EVS_MAX_ATTEMPTS` | `3` | Maximum EVS REST/FHIR attempts. |
-| `NCI_SI_EVS_RETRY_BACKOFF_SECONDS` | `0.25` | EVS REST/FHIR retry backoff base; the shared client caps the wait. |
-| `NCI_SI_EVS_MAX_RESPONSE_BYTES` | `10485760` | EVS REST/FHIR response size bound. |
-| `NCI_SI_HTTP_REQUIRE_INDEX` | `false` | Whether readiness requires an active local index. |
-| `NCI_SI_HTTP_MAX_REQUEST_BYTES` | `4194304` | HTTP request body size bound. |
-| `NCI_SI_HTTP_AUTH_MODE` | `"trusted-local"` | Local trust default; hosted identity integration must select an approved mode. |
-| `NCI_SI_HTTP_AUTH_FACTORY` | `null` | Installed provider integration, unset by default; required mode fails closed without one. |
+| `NCI_SIP_LOG_LEVEL` | `"INFO"` | Diagnostic verbosity; required completion audit remains enabled. |
+| `NCI_SIP_TIMEOUT_SECONDS` | `30.0` | General upstream request timeout. |
+| `NCI_SIP_MATCH_TIMEOUT_SECONDS` | `45.0` | Match request timeout. |
+| `NCI_SIP_EVS_MAX_ATTEMPTS` | `3` | Maximum EVS REST/FHIR attempts. |
+| `NCI_SIP_EVS_RETRY_BACKOFF_SECONDS` | `0.25` | EVS REST/FHIR retry backoff base; the shared client caps the wait. |
+| `NCI_SIP_EVS_MAX_RESPONSE_BYTES` | `10485760` | EVS REST/FHIR response size bound. |
+| `NCI_SIP_HTTP_REQUIRE_INDEX` | `false` | Whether readiness requires an active local index. |
+| `NCI_SIP_HTTP_MAX_REQUEST_BYTES` | `4194304` | HTTP request body size bound. |
+| `NCI_SIP_HTTP_AUTH_MODE` | `"trusted-local"` | Local trust default; hosted identity integration must select an approved mode. |
+| `NCI_SIP_HTTP_AUTH_FACTORY` | `null` | Installed provider integration, unset by default; required mode fails closed without one. |
 
 caDSR and Shared SI use fixed policies: three attempts, 0.25-second backoff and a 10 MiB
 response bound. The EVS-specific settings above do not change those clients.

@@ -9,10 +9,10 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from fakes import concept
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.evaluation import evaluate_build
-from nci_si_mcp.evaluation_sets import GoldQuery, MetricFloor, parse_set
-from nci_si_mcp.index_adapter import manifest_record
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evaluation import evaluate_build
+from nci_sip_mcp.evaluation_sets import GoldQuery, MetricFloor, parse_set
+from nci_sip_mcp.index_adapter import manifest_record
 from ncit_index import index as index_module
 from ncit_index.embeddings import EmbeddingProvider, HashingEmbeddingProvider
 from ncit_index.errors import IndexBuildError

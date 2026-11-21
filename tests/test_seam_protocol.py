@@ -7,13 +7,13 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from fakes import FakeSSIS, primary_element
-from nci_si_mcp.cli import build_parser
-from nci_si_mcp.evs import EVSClient
+from nci_sip_mcp.cli import build_parser
+from nci_sip_mcp.evs import EVSClient
 from test_seam import NCIT, element, gdc_map
 from test_server import ServerFixture
 
 
-@patch("nci_si_mcp.server.configure_logging")
+@patch("nci_sip_mcp.server.configure_logging")
 class SeamProtocolTest(ServerFixture):
     def test_bound_value_without_a_crdc_field_name_is_an_upstream_error(self, _):
         # Given a valid value before an unnamed bound value, neither route returns partial content.
@@ -184,7 +184,7 @@ class SeamProtocolTest(ServerFixture):
         )
 
 
-@patch("nci_si_mcp.server.configure_logging")
+@patch("nci_sip_mcp.server.configure_logging")
 class CrossDomainRecordSchemaTest(ServerFixture):
     def setUp(self):
         super().setUp()

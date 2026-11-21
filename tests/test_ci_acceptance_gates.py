@@ -17,9 +17,11 @@ FIXTURE_STEP = "Run the suite against the fixtures"
 # The permission gates (X-25 to X-28) run only with a security server; without one they are
 # unrun, and an unrun gate leaves every tool INCOMPLETE (#265).
 FIXTURE_ENV = {
-    "NCI_SI_ACCEPTANCE_REGISTRY_RELEASE": "required",
-    "NCI_SI_ACCEPTANCE_SECURITY_SERVER": "python ../scripts/permissions_fixture.py",
-    "NCI_SI_ACCEPTANCE_PREPARE": 'nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")',
+    "NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE": "required",
+    "NCI_SIP_ACCEPTANCE_SECURITY_SERVER": "python ../scripts/permissions_fixture.py",
+    "NCI_SIP_ACCEPTANCE_PREPARE": (
+        'nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")'
+    ),
 }
 
 
@@ -223,10 +225,10 @@ class AcceptanceGateWorkflowTest(unittest.TestCase):
         self.assertEqual(
             live["env"],
             {
-                "NCI_SI_ACCEPTANCE_MODE": "live",
-                "NCI_SI_ACCEPTANCE_PREPARE": FIXTURE_ENV["NCI_SI_ACCEPTANCE_PREPARE"],
-                "NCI_SI_EVS_LICENSE_KEY": "${{ secrets.NCI_SI_EVS_LICENSE_KEY }}",
-                "NCI_SI_CADSR_CREDENTIAL": "${{ secrets.NCI_SI_CADSR_CREDENTIAL }}",
+                "NCI_SIP_ACCEPTANCE_MODE": "live",
+                "NCI_SIP_ACCEPTANCE_PREPARE": FIXTURE_ENV["NCI_SIP_ACCEPTANCE_PREPARE"],
+                "NCI_SIP_EVS_LICENSE_KEY": "${{ secrets.NCI_SIP_EVS_LICENSE_KEY }}",
+                "NCI_SIP_CADSR_CREDENTIAL": "${{ secrets.NCI_SIP_CADSR_CREDENTIAL }}",
                 "CREDENTIAL_PLACEHOLDER": module.PLACEHOLDER,
             },
         )
@@ -235,14 +237,14 @@ class AcceptanceGateWorkflowTest(unittest.TestCase):
             {
                 "name": LIVE_STEP,
                 "env": {
-                    "NCI_SI_ACCEPTANCE_MODE": "live",
-                    "NCI_SI_ACCEPTANCE_PREPARE": FIXTURE_ENV["NCI_SI_ACCEPTANCE_PREPARE"],
-                    "NCI_SI_EVS_LICENSE_KEY": "${{ secrets.NCI_SI_EVS_LICENSE_KEY }}",
-                    "NCI_SI_CADSR_CREDENTIAL": "${{ secrets.NCI_SI_CADSR_CREDENTIAL }}",
-                    "CREDENTIAL_PLACEHOLDER": "NCI_SI_CONFIGURE_ME",
+                    "NCI_SIP_ACCEPTANCE_MODE": "live",
+                    "NCI_SIP_ACCEPTANCE_PREPARE": FIXTURE_ENV["NCI_SIP_ACCEPTANCE_PREPARE"],
+                    "NCI_SIP_EVS_LICENSE_KEY": "${{ secrets.NCI_SIP_EVS_LICENSE_KEY }}",
+                    "NCI_SIP_CADSR_CREDENTIAL": "${{ secrets.NCI_SIP_CADSR_CREDENTIAL }}",
+                    "CREDENTIAL_PLACEHOLDER": "NCI_SIP_CONFIGURE_ME",
                 },
                 "run": 'absent=""\n'
-                "for name in NCI_SI_EVS_LICENSE_KEY NCI_SI_CADSR_CREDENTIAL; do\n"
+                "for name in NCI_SIP_EVS_LICENSE_KEY NCI_SIP_CADSR_CREDENTIAL; do\n"
                 '  if [ -z "${!name}" ] || [ "${!name}" = "$CREDENTIAL_PLACEHOLDER" ]; then\n'
                 '    absent="$absent $name"\n    unset "$name"\n  fi\ndone\n'
                 'echo "- Credentials absent from the live run:${absent:- none}" '
@@ -253,7 +255,7 @@ class AcceptanceGateWorkflowTest(unittest.TestCase):
                 '  echo "::error title=The live run did not finish::'
                 'exit status ${status}, or no report."\n'
                 "  exit 1\nfi\n"
-                "pdm run python -m nci_si_acceptance.report acceptance/live.json "
+                "pdm run python -m nci_sip_acceptance.report acceptance/live.json "
                 "--check-complete live\n",
             },
         )
@@ -277,7 +279,7 @@ import json, os, sys
 from pathlib import Path
 if sys.argv[1:3] == ["run", "acceptance"]:
     Path("seen.json").write_text(json.dumps({k:v for k,v in os.environ.items() if k in
-        ("NCI_SI_EVS_LICENSE_KEY", "NCI_SI_CADSR_CREDENTIAL")}))
+        ("NCI_SIP_EVS_LICENSE_KEY", "NCI_SIP_CADSR_CREDENTIAL")}))
     Path("acceptance/live.json").write_text("{}")
 """
         )
@@ -286,8 +288,8 @@ if sys.argv[1:3] == ["run", "acceptance"]:
             "PATH": str(root) + os.pathsep + os.environ["PATH"],
             "GITHUB_STEP_SUMMARY": str(root / "summary"),
             "CREDENTIAL_PLACEHOLDER": live["env"]["CREDENTIAL_PLACEHOLDER"],
-            "NCI_SI_EVS_LICENSE_KEY": supplied[0],
-            "NCI_SI_CADSR_CREDENTIAL": supplied[1],
+            "NCI_SIP_EVS_LICENSE_KEY": supplied[0],
+            "NCI_SIP_CADSR_CREDENTIAL": supplied[1],
         }
         result = subprocess.run(  # noqa: S603 - repository step with an owned fake acceptance CLI.
             ["bash", "-c", live["run"]],  # noqa: S607
@@ -299,7 +301,7 @@ if sys.argv[1:3] == ["run", "acceptance"]:
             timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        names = ("NCI_SI_EVS_LICENSE_KEY", "NCI_SI_CADSR_CREDENTIAL")
+        names = ("NCI_SIP_EVS_LICENSE_KEY", "NCI_SIP_CADSR_CREDENTIAL")
         expected = {
             name: value
             for name, value in zip(names, supplied, strict=True)

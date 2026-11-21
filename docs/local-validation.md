@@ -99,7 +99,7 @@ pdm run portal serve --allow-remote --remote-target https://approved.example/mcp
 ```
 
 Replace the example with the exact approved HTTPS endpoint. If needed, provide its authorization
-header through `NCI_SI_BENCHMARK_AUTHORIZATION`, never through a URL or command argument. It is
+header through `NCI_SIP_BENCHMARK_AUTHORIZATION`, never through a URL or command argument. It is
 passed only to the explicitly enabled remote worker, not fixture workers or inventory collection.
 The browser cannot supply targets, credentials, commands or state-changing hooks. This enables
 a local operator to probe that endpoint; it does not enable deployed UAT/PROD administration.
@@ -111,7 +111,7 @@ The **Configuration** page reads an explicitly selected local target's startup s
 Start the target and companion in separate terminals, using the same **new** file:
 
 ```bash
-pdm run nci-si-mcp serve --configuration-snapshot tmp/local-target.json
+pdm run nci-sip-mcp serve --configuration-snapshot tmp/local-target.json
 pdm run portal serve --configuration-snapshot tmp/local-target.json
 ```
 

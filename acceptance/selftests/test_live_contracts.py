@@ -264,11 +264,11 @@ def live_suite(compliant, monkeypatch):
         destination = compliant.path / "fixtures/recorded" / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(SUITE.parent / "fixtures/recorded" / relative, destination)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "live")
-    monkeypatch.delenv("NCI_SI_ACCEPTANCE_PREPARE", raising=False)
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "live")
+    monkeypatch.delenv("NCI_SIP_ACCEPTANCE_PREPARE", raising=False)
     server = Path(__file__).with_name("live_content_server.py")
     monkeypatch.setenv(
-        "NCI_SI_ACCEPTANCE_SERVER",
+        "NCI_SIP_ACCEPTANCE_SERVER",
         shlex.join([sys.executable, str(server), str(compliant.path / "replies.json")]),
     )
     return compliant
