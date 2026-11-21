@@ -118,12 +118,17 @@ def canonical_file(name: str) -> bool:
     return not path.is_absolute() and ".." not in path.parts and str(path) == name
 
 
+def valid_line_number(line: object) -> bool:
+    number = str(line)
+    return number.isascii() and number.isdecimal() and int(number) >= 1
+
+
 def validate_lines(lines: object, domain: str) -> None:
     if not isinstance(lines, dict):
         raise ValueError("Invalid coverage line mapping")
     prefix = {"unit": "tests/", "selftest": "selftests/", "fixture": "tests/"}[domain]
     for line, contexts in lines.items():
-        if not str(line).isdigit() or int(line) < 1 or not isinstance(contexts, list):
+        if not valid_line_number(line) or not isinstance(contexts, list):
             raise ValueError("Invalid coverage line/context shape")
         validate_contexts(contexts, prefix)
 
