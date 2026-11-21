@@ -62,9 +62,9 @@ a diagnosis of the underlying TLS failure.
 | `pdm run quickstart-tools` | Regenerate the table of tools in [QUICKSTART.md](QUICKSTART.md) from `spec/tools.yaml`; `--check` verifies it |
 | `pandoc -f gfm docs/specification.md -o specification.docx` | The Word copy of the specification, a build product: never committed or edited |
 
-CI runs the complete changed-site mutation catalogue as three stable-key hash partitions, each with two
-workers and a 300-minute timeout: `--shard 1/3 -n 2`, `--shard 2/3 -n 2` and
-`--shard 3/3 -n 2`. All three must pass; a job timeout fails. Shard JSON lines report
+CI runs the complete changed-site mutation catalogue as six stable-key hash partitions, each with two
+workers and a 300-minute timeout: `--shard 1/6 -n 2` through
+`--shard 6/6 -n 2`. All six must pass; a job timeout fails. Shard JSON lines report
 full/selected counts and a final outcome/kill-kind summary with elapsed seconds. An empty
 partition reports `EMPTY`; allowlist freshness is checked before partitioning. CI mutates the
 default PR merge checkout relative to the event's base SHA, just as the suite producers test it.
