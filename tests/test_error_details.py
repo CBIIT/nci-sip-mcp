@@ -14,12 +14,12 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from fakes import terminology_row
-from nci_si_acceptance.spec import RECORDS
-from nci_si_mcp import invocation as invocation_module
-from nci_si_mcp.errors import ErrorCode
-from nci_si_mcp.evs import EVSClient, verify_release
-from nci_si_mcp.permissions import authority_scope
-from nci_si_mcp.registry import invoke
+from nci_sip_acceptance.spec import RECORDS
+from nci_sip_mcp import invocation as invocation_module
+from nci_sip_mcp.errors import ErrorCode
+from nci_sip_mcp.evs import EVSClient, verify_release
+from nci_sip_mcp.permissions import authority_scope
+from nci_sip_mcp.registry import invoke
 from test_docs import QUICKSTART, section
 from test_evs_client import FakeResponse
 from test_handlers import NEOPLASM, HandlerTestCase, release
@@ -40,8 +40,8 @@ def from_the_client(answer, call=lambda client: client.get_api_version()):
     """The code and details of the error that an EVS request answered with `answer` raises."""
 
     with (
-        patch("nci_si_mcp.http_client._open", side_effect=[answer]),
-        patch("nci_si_mcp.http_client.time.sleep"),
+        patch("nci_sip_mcp.http_client._open", side_effect=[answer]),
+        patch("nci_sip_mcp.http_client.time.sleep"),
     ):
         client = EVSClient("https://example.invalid", max_attempts=1, max_response_bytes=5)
         try:

@@ -15,9 +15,9 @@ from scripts.benchmark_records import Conditions, SelectedCase
 from scripts.benchmark_report import Selection, fingerprint
 from scripts.inventory_records import Attribution, Catalogue, Snapshots
 
-from nci_si_acceptance.spec import REQUIRED_TOOLS
-from nci_si_acceptance.stories import ROOT, Collection, cases_of, collect, load_stories, validate
-from nci_si_acceptance.suite_identity import suite_digest
+from nci_sip_acceptance.spec import REQUIRED_TOOLS
+from nci_sip_acceptance.stories import ROOT, Collection, cases_of, collect, load_stories, validate
+from nci_sip_acceptance.suite_identity import suite_digest
 
 
 class Inventory(Collection):

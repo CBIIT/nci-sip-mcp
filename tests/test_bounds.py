@@ -4,8 +4,8 @@ from threading import Barrier
 from unittest.mock import patch
 
 from fakes import FakeEVS, concept
-from nci_si_acceptance.spec import TOOLS
-from nci_si_mcp.bounds import (
+from nci_sip_acceptance.spec import TOOLS
+from nci_sip_mcp.bounds import (
     DEFAULT_MAX_DEPTH,
     DEFAULT_MAX_EDGES,
     DEFAULT_MAX_NODES,
@@ -19,9 +19,9 @@ from nci_si_mcp.bounds import (
     budgeted,
     current_budget,
 )
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.evs import EVSNotFoundError
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import EVSNotFoundError
+from nci_sip_mcp.registry import invoke
 from test_handlers import HandlerTestCase
 from test_http_client import Reply, ServerTestCase
 from test_traversal import HubEVS, child, codes, complete_graph, descendant, related, walk
@@ -323,7 +323,7 @@ class BoundPrecedenceTest(unittest.TestCase):
         self.assertEqual(codes(result), ["C1"])
 
     def test_partial_starts_report_requests_without_any_relation_reads(self):
-        with patch("nci_si_mcp.traversal.BATCH_SIZE", 1):
+        with patch("nci_sip_mcp.traversal.BATCH_SIZE", 1):
             result = walk(
                 BudgetEVS([concept("C1"), concept("C2")]),
                 start_codes=["C1", "C2"],
@@ -410,7 +410,7 @@ class TraversalBudgetTest(unittest.TestCase):
 
     def test_a_later_batch_cannot_discard_the_start_nodes_already_read(self):
         client = BudgetEVS([concept("C1"), concept("C2")])
-        with patch("nci_si_mcp.traversal.BATCH_SIZE", 1):
+        with patch("nci_sip_mcp.traversal.BATCH_SIZE", 1):
             result = walk(client, start_codes=["C1", "C2"], max_depth=1, requests=1)
         self.assertEqual(codes(result), ["C1"])
         self.assertEqual(result.truncation.bound, "requests")
@@ -420,7 +420,7 @@ class TraversalBudgetTest(unittest.TestCase):
 
     def test_start_codes_left_unread_by_the_budget_are_reported_for_inverse_only_walks(self):
         client = BudgetEVS([concept("C1"), concept("C2")])
-        with patch("nci_si_mcp.traversal.INVERSE_BATCH_SIZE", 1):
+        with patch("nci_sip_mcp.traversal.INVERSE_BATCH_SIZE", 1):
             result = walk(
                 client,
                 start_codes=["C1", "C2"],
@@ -436,7 +436,7 @@ class TraversalBudgetTest(unittest.TestCase):
     def test_request_exhaustion_does_not_hide_an_already_confirmed_missing_start(self):
         client = BudgetEVS([concept("C2")])
         with (
-            patch("nci_si_mcp.traversal.BATCH_SIZE", 1),
+            patch("nci_sip_mcp.traversal.BATCH_SIZE", 1),
             self.assertRaises(EVSNotFoundError) as raised,
         ):
             walk(client, start_codes=["C1", "C2"], requests=1)
@@ -502,7 +502,7 @@ class TraversalBudgetTest(unittest.TestCase):
                 concept("C4"),
             ]
         )
-        with patch("nci_si_mcp.traversal.BATCH_SIZE", 1):
+        with patch("nci_sip_mcp.traversal.BATCH_SIZE", 1):
             result = walk(client, budget_per_kind=1, requests=2, max_depth=2)
         self.assertEqual(result.truncation.bound, "requests")
 
@@ -618,7 +618,7 @@ class ServiceBudgetTest(HandlerTestCase):
 
     def test_release_discovery_spends_the_same_budget_as_the_start_concepts(self):
         self.context.evs = BudgetEVS([concept("C1")])
-        with patch("nci_si_mcp.handlers.Budget", return_value=Budget(requests=1)):
+        with patch("nci_sip_mcp.handlers.Budget", return_value=Budget(requests=1)):
             result = invoke(self.context, "traverse", ["C1"])
         self.assertEqual(result["error"]["code"], "bound_exceeded")
         self.assertIn("fewer start codes", result["error"]["message"])

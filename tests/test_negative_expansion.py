@@ -3,8 +3,8 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from fakes import concept
-from nci_si_mcp.bounds import Budget, current_budget
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.bounds import Budget, current_budget
+from nci_sip_mcp.registry import invoke
 from test_server import ServerFixture
 
 
@@ -119,7 +119,7 @@ class NegativeExpansionTest(ServerFixture):
             return fetch(*args, **kwargs)
 
         with (
-            patch("nci_si_mcp.content.Budget", return_value=Budget(requests=1)),
+            patch("nci_sip_mcp.content.Budget", return_value=Budget(requests=1)),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=counted),
         ):
             result = self.walk()

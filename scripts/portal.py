@@ -15,7 +15,7 @@ from scripts.portal_http import create_server
 from scripts.portal_jobs import JobController
 from scripts.portal_store import MAX_BUNDLE_BYTES, EvidenceStore, load_bundle
 
-from nci_si_mcp.config import configure_logging
+from nci_sip_mcp.config import configure_logging
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -20,13 +20,13 @@ from mcp.client import Client
 from mcp.shared.exceptions import MCPError
 from scripts.assisted_scoring import assess, summarize, validate_plan
 
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
-from nci_si_acceptance.suite import unmatched_requests
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.permissions import Authority, Principal
-from nci_si_mcp.registry import SPECS
-from nci_si_mcp.server import create_mcp
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_sip_acceptance.suite import unmatched_requests
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.permissions import Authority, Principal
+from nci_sip_mcp.registry import SPECS
+from nci_sip_mcp.server import create_mcp
 
 ROOT = Path(__file__).resolve().parents[1]
 TASKS = ROOT / "evaluation/assisted-tasks.yaml"
@@ -88,7 +88,7 @@ def fixture_settings(upstream: FixtureServer, task: dict[str, Any], directory: P
         cadsr_base_url=upstream.base_url("cadsr"),
         cadsr_ftp_url=upstream.base_url("cadsr-ftp"),
         ssis_sparql_url=upstream.base_url("ssis-sparql"),
-        cadsr_credential=scenario_settings.get("NCI_SI_CADSR_CREDENTIAL"),
+        cadsr_credential=scenario_settings.get("NCI_SIP_CADSR_CREDENTIAL"),
         evs_max_attempts=1,
         timeout_seconds=5,
     )

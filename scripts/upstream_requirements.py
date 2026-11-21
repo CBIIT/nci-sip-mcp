@@ -11,8 +11,8 @@ from typing import Any
 
 import yaml
 
-from nci_si_acceptance.report import FAILED, FIXTURE_ONLY, combine
-from nci_si_acceptance.requirements import repo_path
+from nci_sip_acceptance.report import FAILED, FIXTURE_ONLY, combine
+from nci_sip_acceptance.requirements import repo_path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORY = Path("docs/upstream")
@@ -260,7 +260,7 @@ def ssis_dependencies(root: Path) -> str:
     ]
     for entry in register["queries"]:
         evidence = (
-            "../../acceptance/src/nci_si_acceptance/craft.py"
+            "../../acceptance/src/nci_sip_acceptance/craft.py"
             if entry["evidence"].startswith("crafted/ssis-public-id/")
             else f"../../acceptance/fixtures/{entry['evidence']}"
         )

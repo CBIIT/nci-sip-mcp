@@ -50,11 +50,11 @@ jobs:
       # Status 1 may mean failed tests or an early stop; completion comes from the report.
       - name: Run the suite against the fixtures
         env:
-          NCI_SI_ACCEPTANCE_REGISTRY_RELEASE: required
+          NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE: required
           # The permission gates run as in CI's fixture run; without them every tool would be
           # INCOMPLETE. The step gets no secret.
-          NCI_SI_ACCEPTANCE_SECURITY_SERVER: python ../scripts/permissions_fixture.py
-          NCI_SI_ACCEPTANCE_PREPARE: 'nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")'
+          NCI_SIP_ACCEPTANCE_SECURITY_SERVER: python ../scripts/permissions_fixture.py
+          NCI_SIP_ACCEPTANCE_PREPARE: 'nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")'
         run: |
           status=0
           pdm run acceptance -n 4 --dist worksteal --report=fixture.json || status=$?
@@ -62,21 +62,21 @@ jobs:
             echo "::error title=The fixture run did not finish::exit status ${status}, or no report."
             exit 1
           fi
-          pdm run python -m nci_si_acceptance.report acceptance/fixture.json --check-complete fixture
+          pdm run python -m nci_sip_acceptance.report acceptance/fixture.json --check-complete fixture
       # Credentials reach only this step, then the preparation command and server processes in
-      # live mode. The harness removes inherited NCI_SI_* settings before adding its own settings.
+      # live mode. The harness removes inherited NCI_SIP_* settings before adding its own settings.
       # Empty and setup-placeholder values are unset before the suite sees them.
       # The summary names only absent credentials, never their values.
       - name: Run the suite against the live services
         env:
-          NCI_SI_ACCEPTANCE_MODE: live
-          NCI_SI_ACCEPTANCE_PREPARE: 'nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")'
-          NCI_SI_EVS_LICENSE_KEY: ${{ secrets.NCI_SI_EVS_LICENSE_KEY }}
-          NCI_SI_CADSR_CREDENTIAL: ${{ secrets.NCI_SI_CADSR_CREDENTIAL }}
-          CREDENTIAL_PLACEHOLDER: NCI_SI_CONFIGURE_ME
+          NCI_SIP_ACCEPTANCE_MODE: live
+          NCI_SIP_ACCEPTANCE_PREPARE: 'nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")'
+          NCI_SIP_EVS_LICENSE_KEY: ${{ secrets.NCI_SIP_EVS_LICENSE_KEY }}
+          NCI_SIP_CADSR_CREDENTIAL: ${{ secrets.NCI_SIP_CADSR_CREDENTIAL }}
+          CREDENTIAL_PLACEHOLDER: NCI_SIP_CONFIGURE_ME
         run: |
           absent=""
-          for name in NCI_SI_EVS_LICENSE_KEY NCI_SI_CADSR_CREDENTIAL; do
+          for name in NCI_SIP_EVS_LICENSE_KEY NCI_SIP_CADSR_CREDENTIAL; do
             if [ -z "${!name}" ] || [ "${!name}" = "$CREDENTIAL_PLACEHOLDER" ]; then
               absent="$absent $name"
               unset "$name"
@@ -89,13 +89,13 @@ jobs:
             echo "::error title=The live run did not finish::exit status ${status}, or no report."
             exit 1
           fi
-          pdm run python -m nci_si_acceptance.report acceptance/live.json --check-complete live
+          pdm run python -m nci_sip_acceptance.report acceptance/live.json --check-complete live
       # Drift: a test that passes on the fixtures and fails live. A test that cannot run live
       # (not_live) or is skipped there is no drift.
       - name: Compare the live outcomes with the fixture outcomes
         run: |
           status=0
-          pdm run python -m nci_si_acceptance.report acceptance/fixture.json --live acceptance/live.json --drift > acceptance/drift.md || status=$?
+          pdm run python -m nci_sip_acceptance.report acceptance/fixture.json --live acceptance/live.json --drift > acceptance/drift.md || status=$?
           { echo "### Upstream drift"; echo; cat acceptance/drift.md; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Check every anonymous Shared SI query contract
@@ -112,7 +112,7 @@ jobs:
             echo "::warning title=No combined report::a run wrote no report."
             exit 0
           fi
-          pdm run python -m nci_si_acceptance.report acceptance/fixture.json --live acceptance/live.json > acceptance/report.md
+          pdm run python -m nci_sip_acceptance.report acceptance/fixture.json --live acceptance/live.json > acceptance/report.md
           { echo "### Per-tool report (fixture and live)"; echo; cat acceptance/report.md; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()

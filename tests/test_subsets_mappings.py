@@ -4,8 +4,8 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from fakes import concept
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.registry import invoke
 from test_audit import captured, records
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
@@ -33,7 +33,7 @@ class SubsetsMappingsTest(ServerFixture):
 
     def reply(self, kind, **arguments):
         with patch(
-            "nci_si_mcp.http_client._open",
+            "nci_sip_mcp.http_client._open",
             return_value=FakeResponse(json.dumps(self.raw).encode()),
         ) as opened:
             result = self.invoke_tool(kind, **arguments)
@@ -206,7 +206,7 @@ class SubsetsMappingsTest(ServerFixture):
 
     def test_invalid_code_is_rejected_before_network(self):
         for kind in ("subsets", "mappings"):
-            with self.subTest(kind=kind), patch("nci_si_mcp.http_client._open") as opened:
+            with self.subTest(kind=kind), patch("nci_sip_mcp.http_client._open") as opened:
                 result = self.invoke_tool(kind, code="C0")
                 self.assertEqual(result["error"]["code"], "invalid_request")
                 self.assertEqual(opened.call_count, 0)
@@ -228,7 +228,7 @@ class SubsetsMappingsTest(ServerFixture):
             with (
                 self.subTest(kind=kind),
                 patch(
-                    "nci_si_mcp.http_client._open",
+                    "nci_sip_mcp.http_client._open",
                     side_effect=http_error(503, b'{"message":"Unavailable"}'),
                 ),
             ):

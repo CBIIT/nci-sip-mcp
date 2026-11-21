@@ -1,1 +1,1 @@
-"""Tests for nci-si-mcp."""
+"""Tests for nci-sip-mcp."""

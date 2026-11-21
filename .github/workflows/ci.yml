@@ -384,18 +384,18 @@ jobs:
           shards=(unit-coverage/unit-coverage-*)
           test "${#shards[@]}" -eq 4
           pdm run coverage combine unit-coverage/unit-coverage-{0,1,2,3}/.coverage
-          pdm run coverage report --include='*/src/nci_si_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=95
-          pdm run coverage report --include='*/src/nci_si_mcp/*,*/src/ncit_index/*' --fail-under=95
+          pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=95
+          pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*' --fail-under=95
       # Falling short of the aim is reported, not enforced (CONTRIBUTING.md, standard 3).
       - name: Report coverage against the aim
         run: |
-          total="$(pdm run coverage report --include='*/src/nci_si_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=0 --format=total)"
+          total="$(pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=0 --format=total)"
           echo "Coverage ${total}% (the aim is above 98%)" >> "$GITHUB_STEP_SUMMARY"
           if awk -v total="$total" 'BEGIN { exit !(total <= 98) }'; then
             echo "::warning title=Coverage is not above 98%::${total}%. Cover the untested behaviour; do not pad."
           fi
       - name: Export measured server coverage
-        run: pdm run coverage json --include='*/src/nci_si_mcp/*,*/src/ncit_index/*' -o tmp/coverage/server.json
+        run: pdm run coverage json --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*' -o tmp/coverage/server.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: badge-coverage-server
@@ -432,10 +432,10 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
           COVERAGE_PROCESS_START: ${{ github.workspace }}/tmp/mutation-config/.coveragerc
-          NCI_SI_ACCEPTANCE_REGISTRY_RELEASE: required
-          NCI_SI_ACCEPTANCE_SECURITY_SERVER: python ../scripts/permissions_fixture.py
+          NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE: required
+          NCI_SIP_ACCEPTANCE_SECURITY_SERVER: python ../scripts/permissions_fixture.py
           # The README's prepare step: it builds the interim NCIt index every server starts from.
-          NCI_SI_ACCEPTANCE_PREPARE: 'nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")'
+          NCI_SIP_ACCEPTANCE_PREPARE: 'nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")'
         run: |
           status=0
           started="$(date +%s)"
@@ -491,7 +491,7 @@ jobs:
       - name: Render the per-tool report
         if: ${{ always() && hashFiles('acceptance/fixture.json') != '' }}
         run: |
-          pdm run python -m nci_si_acceptance.report acceptance/fixture.json > acceptance/report.md
+          pdm run python -m nci_sip_acceptance.report acceptance/fixture.json > acceptance/report.md
           { echo "### Per-tool report (fixture mode)"; echo; cat acceptance/report.md; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: ${{ always() && hashFiles('acceptance/fixture.json') != '' }}

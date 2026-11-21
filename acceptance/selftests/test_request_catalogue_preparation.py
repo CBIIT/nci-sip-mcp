@@ -5,14 +5,14 @@ from dataclasses import replace
 import pytest
 from http_receiver import WireReceiver
 
-from nci_si_acceptance.environments import SURFACES, Environment
-from nci_si_acceptance.request_authorization import Authorization, RequestGrant
-from nci_si_acceptance.request_catalogue import compile_policy
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.http_client import HttpClient, RequestPolicyError
-from nci_si_mcp.invocation import call
+from nci_sip_acceptance.environments import SURFACES, Environment
+from nci_sip_acceptance.request_authorization import Authorization, RequestGrant
+from nci_sip_acceptance.request_catalogue import compile_policy
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_acceptance.request_transport import ControlledHttpPolicy
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.http_client import HttpClient, RequestPolicyError
+from nci_sip_mcp.invocation import call
 
 
 def test_catalogue_preparation_preserves_exact_grant_admission(tmp_path):

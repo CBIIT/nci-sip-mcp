@@ -143,7 +143,7 @@ def measure(
         if result["outcome"] == "NO_TESTS":
             continue
         if result["outcome"] != "SURVIVED":
-            return {**result, "confirmation": confirmation, "domains": timings}
+            return terminal_measurement(result, domain, confirmation, timings)
         last_survivor = result
     result = {**result, **last_survivor}
     return {**result, "confirmation": confirmation, "domains": timings}
@@ -172,6 +172,13 @@ def measure_domain(
     if measurement_confirms_fixture(domain, result["outcome"]):
         confirmation = "fixture"
     return result, timing, confirmation
+
+
+def terminal_measurement(result: dict, domain: str, confirmation: str, timings: list[dict]) -> dict:
+    terminal = {**result, "domains": timings}
+    if domain == "fixture":
+        terminal["confirmation"] = confirmation
+    return terminal
 
 
 def collect(root: Path, selected: dict) -> tuple[list[Mutant], list[dict]]:

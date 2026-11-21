@@ -3,12 +3,12 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from fakes import catalogue_rows, concept, release
-from nci_si_mcp import content
-from nci_si_mcp.bounds import Budget, current_budget
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.traversal import traverse_ncit
+from nci_sip_mcp import content
+from nci_sip_mcp.bounds import Budget, current_budget
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traversal import traverse_ncit
 from test_bounds import BudgetHub
 from test_index import normalized
 from test_server import ServerFixture, pinned
@@ -431,7 +431,7 @@ class ContentTest(ServerFixture):
             return original(*args, **kwargs)
 
         with (
-            patch("nci_si_mcp.content.Budget", return_value=Budget(depth=1, nodes=2, requests=1)),
+            patch("nci_sip_mcp.content.Budget", return_value=Budget(depth=1, nodes=2, requests=1)),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=counted),
         ):
             result = self.content("get_concept_neighborhood", code="C1", kinds=["child"])
@@ -451,7 +451,7 @@ class ContentTest(ServerFixture):
 
         kinds = ["child", "role", "association"]
         with (
-            patch("nci_si_mcp.content.Budget", return_value=Budget(depth=1, requests=1)),
+            patch("nci_sip_mcp.content.Budget", return_value=Budget(depth=1, requests=1)),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=counted),
         ):
             result = self.content("get_concept_neighborhood", code="C1", kinds=kinds)
@@ -472,7 +472,7 @@ class ContentTest(ServerFixture):
             return original(*args, **kwargs)
 
         with (
-            patch("nci_si_mcp.content.Budget", return_value=Budget(depth=1, nodes=3, requests=1)),
+            patch("nci_sip_mcp.content.Budget", return_value=Budget(depth=1, nodes=3, requests=1)),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=counted),
         ):
             result = self.content(
@@ -509,7 +509,7 @@ class ContentTest(ServerFixture):
             return original(*args, **kwargs)
 
         with (
-            patch("nci_si_mcp.content.Budget", return_value=Budget(depth=1, requests=1)),
+            patch("nci_sip_mcp.content.Budget", return_value=Budget(depth=1, requests=1)),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=counted),
         ):
             result = self.content("get_concept_neighborhood", code="C1", kinds=["child"])
@@ -626,7 +626,7 @@ class NeighborhoodLimitsTest(ServerFixture):
             return original(*args, **kwargs)
 
         with (
-            patch("nci_si_mcp.content.Budget", return_value=Budget(depth=1, nodes=3, requests=1)),
+            patch("nci_sip_mcp.content.Budget", return_value=Budget(depth=1, nodes=3, requests=1)),
             patch.object(self.evs, "get_concepts_by_codes", side_effect=counted),
         ):
             result = self.content("get_concept_neighborhood", code="C1", kinds=["child", "role"])

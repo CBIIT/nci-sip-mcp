@@ -3,7 +3,7 @@ description: Build one amd64 CPU image, exercise external assets and retain its 
 outputs:
   image:
     description: Local image name
-    value: nci-si-mcp:verified
+    value: nci-sip-mcp:verified
 runs:
   using: composite
   steps:
@@ -20,12 +20,12 @@ runs:
         REPOSITORY: ${{ github.repository }}
       run: |
         mkdir -p tmp/image
-        version="$(pdm run python -c 'from importlib.metadata import version; print(version("nci-si-mcp"))')"
-        docker build --platform linux/amd64 --load --build-arg "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" --build-arg "VERSION=$version" --build-arg "REVISION=$(git rev-parse HEAD)" --build-arg "SOURCE=https://github.com/$REPOSITORY" -t nci-si-mcp:verified .
-        docker save --output tmp/image/image.tar nci-si-mcp:verified
+        version="$(pdm run python -c 'from importlib.metadata import version; print(version("nci-sip-mcp"))')"
+        docker build --platform linux/amd64 --load --build-arg "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" --build-arg "VERSION=$version" --build-arg "REVISION=$(git rev-parse HEAD)" --build-arg "SOURCE=https://github.com/$REPOSITORY" -t nci-sip-mcp:verified .
+        docker save --output tmp/image/image.tar nci-sip-mcp:verified
     - name: Exercise the built image
       shell: bash
-      run: pdm run python -m scripts.container_smoke nci-si-mcp:verified
+      run: pdm run python -m scripts.container_smoke nci-sip-mcp:verified
     - name: Produce complete vulnerability report and SBOM
       shell: bash
       run: |

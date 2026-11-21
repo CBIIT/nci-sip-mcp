@@ -1,5 +1,5 @@
 # Approved: #479 comment 6876550791; exact S1-R24; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._wait"
   operator: "return:None"
   site: "/body/0/handlers/1/body/1"
@@ -8,7 +8,7 @@
   mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
   reason: "The broad exception handler appends the actual failure before returning. Its False/None result is consumed only by negative-truthiness escalation or the final all-based receipt check; the error and actual wait/signal receipts remain unchanged. This is not the separately approved timeout-handler site. Reassess if a supported consumer distinguishes return identity/type."
 # Approved: #479 comment 6876550791; exact S1-R78; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_children.py"
+- file: "acceptance/src/nci_sip_acceptance/request_children.py"
   qualname: "CompletionToken"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -17,7 +17,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Removing slots retains frozen fields and identity equality. Functional token authority uses exact type, identity/dict membership and declared fields, not layout reflection. This does not claim layout, weak-reference, memory-use or object-bypass equivalence; reassess if a supported custody consumer begins depending on them."
 # Approved: #479 comment 6876550791; exact S1-R79; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._wait"
   operator: "return:True"
   site: "/body/0/body/2"
@@ -26,7 +26,7 @@
   mutated: "4d40361fc85c2c1588359b7bbefb67ffbd5ed15730fe3cec6085464279212055"
   reason: "For the supported AnyIO asyncio Process collaborator, successful wait returns the same settled underlying returncode read by its property. The prior nonzero-status/sent-signal execution classification remains. This fresh exact-key decision is not an old-context waiver; reassess on backend or supported process-contract changes."
 # Approved: #479 comment 6876550791; exact S1-R93; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._stdin"
   operator: "boolean:literal"
   site: "/body/2/body/0/body/0/value/0/keywords/0/value/0"
@@ -35,7 +35,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "The installed MCP JSON-RPC envelope models and nested ErrorData have no aliases, and SDK request parameters are already alias-serialized mappings. Changing only the envelope by_alias flag therefore preserves the supported wire contract. Reassess on SDK/model or supported message-producer changes; arbitrary aliased custom models are not covered."
 # Approved: #479 comment 6876550791; exact S1-R96; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._cleanup_process"
   operator: "call:remove"
   site: "/body/3"
@@ -44,7 +44,7 @@
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Individually omitting this cleanup stop signal preserves outside finish's stop path, inner-session client stop, and spontaneous task-failure propagation/cancellation with the first-error latch. Functional equivalence depends on those cooperating paths. No combined stop-site deletion or new cancellation source is approved; reassess if orchestration changes."
 # Approved: #479 comment 6876550791; exact S1-R140; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._deliver"
   operator: "boolean:literal"
   site: "/body/0/body/0/value/0/args/0/keywords/0/value/0"
@@ -53,7 +53,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "The installed MCP JSON-RPC envelope union and nested ErrorData have no validation aliases; accepting field names adds no supported envelope spelling. This is bound to the installed envelope models and SDK-produced mappings, not arbitrary custom models. Reassess when the SDK, models or supported wire producer changes."
 # Approved: #479 comment 6876550791; exact S1-R155; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun._remaining"
   operator: "boolean:drop:1"
   site: "/body/0/test/0"
@@ -62,7 +62,7 @@
   mutated: "ccddcadc719010718fc95f86d8289368500076b3b7547b038cc86a0b34743b7e"
   reason: "Shared-mode observer joins and child waits reach this helper only after cleanup_deadline capture; failed deadline acquisition still installs the exhausted sentinel. The legacy-mode operand remains. This guard is redundant under that lifecycle, not as a standalone private-helper promise; reassess if shared-mode call ordering changes."
 # Approved: #479 comment 6876550791; exact S1-R166; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StderrTransfer.finish"
   operator: "boolean:drop:0"
   site: "/body/2/test/0"
@@ -71,7 +71,7 @@
   mutated: "ef483b64b358d95bd211b09bc36efbc9f6b65221da735862f3329103604f7fc0"
   reason: "Production acceptance stores the actual resource Thread before accepted=True under the lock also used by finish. An accepted/None writer is outside that custody contract; the ident guard still refuses an unstarted real writer. Reassess if supported acceptance can omit its writer; private-state corruption or passing None as a Thread is not covered."
 # Approved: #479 comment 6876550791; exact S2-R15; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun.snapshot"
   operator: "boolean:drop:2"
   site: "/body/1/body/0/value/0/keywords/0/value/0"
@@ -80,7 +80,7 @@
   mutated: "85307be4427d3891dcca28ba74ca8b1e9373e71aeb2f1c574a4976fbed764e1a"
   reason: "With the initial resources guard false, successful real child/token settlement removes custody before resources_complete becomes true, and registration is sealed before that assignment. Removing this pending-owner conjunct alone preserves supported public completeness, including intermediate snapshots. Do not combine with removal of resource/error/seal guards; the non-equivalent initializer-True mutant is not covered."
 # Approved: #479 comment 6876550791; exact S2-R25; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_native.py"
+- file: "acceptance/src/nci_sip_acceptance/request_native.py"
   qualname: "NativeRun._finish_controller"
   operator: "comparison:0"
   site: "/body/3/value/0/args/0/elts/0/body/0/args/0/test/0"
@@ -89,7 +89,7 @@
   mutated: "167d3fceea7fb8b110f2c6c47df7d9f47825003c64d19b4939e355d62b839eb2"
   reason: "The actual NativeRun controller is SupervisedRun, whose __exit__ ignores kind/traceback and forwards the unchanged error to _finish. Only the unused kind argument changes; completion, errors and custody are unchanged. Reassess if that callee consumes kind or a supported alternative owner is introduced; this does not remove any lifecycle guard."
 # Approved: #479 comment 6876550791; exact S2-R74; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._cleanup_process"
   operator: "call:remove"
   site: "/body/2"
@@ -98,7 +98,7 @@
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Individually omitting cleanup's client-stop retains outside finish's signals, controlled-session inner stop, and structured task cancellation on spontaneous failure. The first initiating event remains latched. This functional decision requires the cooperating paths and does not approve their combined deletion, removal of the distinct inner stop, or an invented cancellation source."
 # Approved: #479 comment 6876550791; exact S2-R78; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner.finish"
   operator: "call:remove"
   site: "/body/0"
@@ -107,7 +107,7 @@
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Individually omitting finish's client-stop retains finish's main stop signal, which enters cleanup and sets client-stop; controlled-session inner exit and spontaneous failure cancellation also remain. This is functional equivalence of one site only, not combined signal deletion or approval of removing the distinct inner-session stop. Reassess when orchestration changes."
 # Approved: #479 comment 6876550791; exact S2-R86; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._main"
   operator: "boolean:literal"
   site: "/body/0/body/0/body/0/items/0/context_expr/0/keywords/0/value/0"
@@ -116,7 +116,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Under current orchestration the portal is unpublished and client/pump tasks have not started before process acquisition returns. Outside cleanup signals/joins rather than cancelling this AnyIO scope, so no supported ancestor-cancellation source reaches the shielded interval. Reassess before moving acquisition into a shared/exposed cancellation scope; no arbitrary cancellation equivalence is asserted."
 # Approved: #479 comment 6876550791; exact S2-R139; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_children.py"
+- file: "acceptance/src/nci_sip_acceptance/request_children.py"
   qualname: "CleanupDeadline"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -125,7 +125,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Removing slots retains the deadline's frozen declared fields. Functional consumers use end/remaining, not layout reflection or dynamic attributes. No layout, weak-reference, memory-use or object-bypass guarantee is asserted. Reassess if a supported deadline consumer relies on those distinctions; frozen enforcement is not removed by this key."
 # Approved: #479 comment 6876550791; exact S2-R146; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._step"
   operator: "return:None"
   site: "/body/1"
@@ -134,7 +134,7 @@
   mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
   reason: "The actual _step failure remains retained. False and None are both falsy for endpoint all-aggregation; other close callers ignore this private return. No outward successful settlement or allowance changes. Reassess if a supported consumer exposes return identity/type; this exact _step key is not a transferred _wait waiver."
 # Approved: #479 comment 6876550791; exact S2-R162; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._step"
   operator: "boolean:literal"
   site: "/body/1/value/0"
@@ -143,16 +143,16 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "This failure return can change the internal endpoint flag, but the actual cleanup error remains in self.errors and finish raises it before _settled. Completions therefore cannot release the token. This is outward functional-settlement equivalence only: internal receipts are not equal, and removing the cooperating error/custody guards is not approved."
 # Approved: #479 comment 6876550791; exact S2-R191; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_native.py"
+- file: "acceptance/src/nci_sip_acceptance/request_native.py"
   qualname: "_furnished"
   operator: "boolean:drop:1"
   site: "/body/3/body/2/test/0"
-  context: "870195a3f3d469448a21b08833330531560f7325e7c4b7a3bd418fcc60cc9f00"
+  context: "0d4f769c1737aecdbf1020b852d2184bab6fdfb59023fc3037980792b54eebf5"
   original: "ee3984ce55dae6ab1c159cb4146d8f2c8019a376d48e808a7c267f6ad53114c6"
   mutated: "673fc1fa9a6d92e4c7f2265b492d47b4ead75bab71399396f68de17dfcbb88d6"
   reason: "The file-backed furnished installation contract uses the fixed functions from its checkout/.venv. Ordinary foreign file-backed origins and module=None functions still refuse. A locationless replacement of these bindings requires an unsupported loader/rebinding arrangement. This does not say arbitrary loader origins are safe or Path(None) harmless; reassess before supporting locationless, frozen or custom-loaded bindings."
 # Approved: #479 comment 6876550791; exact S3-R0; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._deliver"
   operator: "boolean:literal"
   site: "/body/1/handlers/0/body/0/value/0"
@@ -161,7 +161,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "Functional closed-consumer equivalence only: the sole caller drains the owned pipe, and neither branch delivers later messages after the memory consumer closes. True adds parsing/send attempts. This explicitly excludes CPU, allocation, throughput and deadline-margin equivalence; it is not performance assurance or permission to remove the drain optimization. Reassess if the supported functional consumer contract changes."
 # Approved: #479 comment 6876550791; exact S3-R8; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_native.py"
+- file: "acceptance/src/nci_sip_acceptance/request_native.py"
   qualname: "NativeRun.__init__"
   operator: "boolean:drop:0"
   site: "/body/9/test/0"
@@ -170,7 +170,7 @@
   mutated: "40e7d11e9d6afba7214e7f5f752cbdae1ff8ce0f6c4a9056de2d734b2aac3881"
   reason: "The actual pytest CLI/config producer supplies a string option or absence; empty-string rejection remains. Dropping this isinstance operand preserves that supported furnished entry contract. A fabricated Config returning a truthy non-string is outside it. Reassess if a supported non-CLI producer can supply typed objects."
 # Approved: #479 comment 6876550791; exact S3-R49; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_native.py"
+- file: "acceptance/src/nci_sip_acceptance/request_native.py"
   qualname: "NativeRun.before_teardown"
   operator: "boolean:drop:1"
   site: "/body/0/test/0"
@@ -179,7 +179,7 @@
   mutated: "c3ea0c71685c264ca37fffd39ad3f121d042518ef779f50580ddd3908db96c08"
   reason: "Native startup stores its actual controller before successful entry sets entered, and no supported path clears it. The entered guard remains, preserving refusal for the distinct failed-entry/controller-present state. Reassess if the supported lifecycle can clear the controller after entry; this does not waive other entered-guard mutations."
 # Approved: #479 comment 6876550791; exact S3-R73; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_children.py"
+- file: "acceptance/src/nci_sip_acceptance/request_children.py"
   qualname: "CleanupDeadline.remaining"
   operator: "return:False"
   site: "/body/0/body/0"
@@ -188,7 +188,7 @@
   mutated: "f5536f3bcd07de6521df23e5ac1e0ad1b443ac79485b5f4ed71373fd170b3670"
   reason: "For exhausted deadlines, 0.0 and False are numeric zero in existing min/division/thread/future timeout and AnyIO deadline consumers; no allowance is gained. This is functional numeric-timeout equivalence, not identity/type/serialization equality. Reassess if a supported consumer serializes the value or rejects bool distinctly."
 # Approved: #479 comment 6876550791; exact S3-R97; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._step"
   operator: "return:True"
   site: "/body/1"
@@ -197,7 +197,7 @@
   mutated: "4d40361fc85c2c1588359b7bbefb67ffbd5ed15730fe3cec6085464279212055"
   reason: "The failure return may make an internal endpoint receipt true, but the actual error remains in self.errors and finish raises before _settled, preventing token release. Functional outward settlement is unchanged with cooperating error/custody guards intact. Internal receipts are not claimed equal and combined guard deletion is not approved."
 # Approved: #479 comment 6871906743; unchanged key verified6876550791; exact A-timeout; source-based functional equivalence, not an observed kill.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._wait"
   operator: "return:None"
   site: "/body/0/handlers/0/body/0"
@@ -206,7 +206,7 @@
   mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
   reason: "The timeout-handler False/None return is consumed only by the two negative-truthiness escalation checks or self.waited used by all. Actual wait, timeout, signal provenance, execution failure and resource receipts are unchanged. Supported return identity/type consumers would require reassessment. This exact timeout-handler key is distinct from the broad-handler and normal-return decisions."
 # Approved: #479 comment 6869389232; exact raw SURVIVED in stopped 050cb04 shard1, source-based callee proof only.
-- file: "acceptance/src/nci_si_acceptance/request_native.py"
+- file: "acceptance/src/nci_sip_acceptance/request_native.py"
   qualname: "NativeRun._finish_controller"
   operator: "comparison:negate"
   site: "/body/3/value/0/args/0/elts/0/body/0/args/0/test/0"
@@ -215,7 +215,7 @@
   mutated: "7ee5990dcdaabf7f382d70aaccda0437609864164321ca52a1e6f7af768f325c"
   reason: "The actual NativeRun controller is SupervisedRun. This condition changes only its __exit__ kind argument; the identical initiating error and traceback argument still reach the callee. SupervisedRun.__exit__ ignores kind and traceback and calls _finish(error), so completion, errors and custody are unchanged. Type/identity evaluation has no side effect here. Reviewed from the retained exact raw survivor and actual call chain, without a new kind-argument spy or replay. Reassess if the callee consumes kind or another supported owner implementation is introduced."
 # Approved: #479 comment 6864302547; official SURVIVED at 6bf6bbc, independently confirmed with closed-consumer controls.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._deliver"
   operator: "return:None"
   site: "/body/1/handlers/0/body/0"
@@ -224,7 +224,7 @@
   mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
   reason: "The sole tracked supported caller of this private return is _stdout, which consumes it as discard = not await self._deliver(line). False and None select the same drain/discard branch; the successful True path, parsing and error delivery remain. Independent actual-pipe backpressure/closed-consumer controls pass on original, exact mutant and restored source. Reassess if a caller inspects identity/type instead of truthiness."
 # Approved: #288 comments 6552697326 and 6552816917; fresh SURVIVED at 53ab0e8.
-- file: "src/nci_si_mcp/bounds.py"
+- file: "src/nci_sip_mcp/bounds.py"
   qualname: "Deadline"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/0/value/0"
@@ -233,7 +233,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Consumers read/set declared invocation timing, attempt and surface fields. No production layout reflection, serialization or dynamic fields consume slots; captured error figures do not change that layout-only equivalence."
 # Approved: #288 comment 6552697326; fresh SURVIVED at 53ab0e8.
-- file: "src/nci_si_mcp/models.py"
+- file: "src/nci_sip_mcp/models.py"
   qualname: "TraversalResult"
   operator: "boolean:literal"
   site: "/body/8/value/0"
@@ -242,7 +242,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "The sole production constructor explicitly supplies walk.deadline_exhausted; dataclass.replace retains or explicitly replaces it. No production caller consumes the default, while actual deadline/continuation behavior remains independently tested."
 # Approved: #288 comment 6554671330; fresh SURVIVED at 53ab0e8.
-- file: "src/nci_si_mcp/registry.py"
+- file: "src/nci_sip_mcp/registry.py"
   qualname: "<module>"
   operator: "boolean:literal"
   site: "/value/0/elts/39/args/3"
@@ -251,7 +251,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "index_build is CLI-only with no MCP name. invocation_policy computes the resolution hint, but CLI emits only the payload and no production caller consumes this operation's cache hint. Deadline and operator exposure contracts are unchanged."
 # Approved: #288 comment 6554671330; fresh SURVIVED at 53ab0e8.
-- file: "src/nci_si_mcp/registry.py"
+- file: "src/nci_sip_mcp/registry.py"
   qualname: "<module>"
   operator: "boolean:literal"
   site: "/value/0/elts/40/args/3"
@@ -520,7 +520,7 @@
   mutated: "e982e1646ac11e074c7dffd12765e2e0f9985e851cd588ef98b42b816c2a51b9"
   reason: "A missing exception defaults to text that does not start with SystemExit, before and after the mutation; the conjunct is True either way, so classification is identical for every row."
 # Approved: #403 comment 6589430951; original SURVIVED in run-hp79p0_j JSONL line 35. Statically re-identified at e61a25a after adjacent approval validation changed only the context hash; file, qualname, operator, site and source digests still match exactly.
-- file: "acceptance/src/nci_si_acceptance/expected.py"
+- file: "acceptance/src/nci_sip_acceptance/expected.py"
   qualname: "Approval"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/0/value/0"
@@ -529,7 +529,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Approval records are constructed during strict YAML validation and only read afterward. No caller mutates or hashes them, so removing frozen assignment protection changes no approval decision or diagnostic."
 # Approved: #403 comment 6589430951; original SURVIVED in run-hp79p0_j JSONL line 36. Statically re-identified at e61a25a after adjacent approval validation changed only the context hash; file, qualname, operator, site and source digests still match exactly.
-- file: "acceptance/src/nci_si_acceptance/expected.py"
+- file: "acceptance/src/nci_sip_acceptance/expected.py"
   qualname: "Approval"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -538,7 +538,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Approval consumers read named fields and do not inspect record layout, serialize __dict__, add attributes or use weak references. Removing slots changes storage only."
 # Approved: #403 comment 6619698122; raw SURVIVED in run-2gw4joa9, retained output line 10.
-- file: "acceptance/src/nci_si_acceptance/expected.py"
+- file: "acceptance/src/nci_sip_acceptance/expected.py"
   qualname: "Approval"
   operator: "string:key-mode-setting"
   site: "/body/3/annotation/0/slice/0"
@@ -547,7 +547,7 @@
   mutated: "c32de60e8a048f7ce1806471608538d6762b3a0e231aa0862210b9b07e7b083e"
   reason: "The mutation changes only the static Approval.before annotation. The production _approval parser rejects every before value except passed; no production caller constructs Approval directly or reflects its annotations. Equivalence is limited to runtime behavior; the mutation would change static type checking."
 # Approved: #403 comment 6589430951; original SURVIVED in run-hp79p0_j JSONL line 135.
-- file: "acceptance/src/nci_si_acceptance/expected.py"
+- file: "acceptance/src/nci_sip_acceptance/expected.py"
   qualname: "_difference_line"
   operator: "return:False"
   site: "/body/0/body/0"
@@ -556,7 +556,7 @@
   mutated: "f5536f3bcd07de6521df23e5ac1e0ad1b443ac79485b5f4ed71373fd170b3670"
   reason: "The private helper's empty result is consumed only by filter(None, ...). None and False both omit the line, and neither value leaves historical_check."
 # Approved: #403 comment 6589430951; original SURVIVED in run-hp79p0_j JSONL line 198.
-- file: "acceptance/src/nci_si_acceptance/expected.py"
+- file: "acceptance/src/nci_sip_acceptance/expected.py"
   qualname: "_run_update"
   operator: "return:False"
   site: "/body/3"
@@ -565,7 +565,7 @@
   mutated: "f5536f3bcd07de6521df23e5ac1e0ad1b443ac79485b5f4ed71373fd170b3670"
   reason: "main() returns the private update result unchanged. Direct callers compare main() with zero, while the CLI passes it to sys.exit; False and 0 behave identically in both paths and preserve file and stdout effects."
 # Approved: #403 comment 6589430951; original SURVIVED in run-hp79p0_j JSONL line 210.
-- file: "src/nci_si_mcp/installer.py"
+- file: "src/nci_sip_mcp/installer.py"
   qualname: "ReleaseIdentity"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/0/value/0"
@@ -574,7 +574,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Release identities are validated once, then consumers only read their three fields. No caller mutates or hashes the record, so assignment protection does not change installation selection or verification."
 # Approved: #403 comment 6589430951; original SURVIVED in run-hp79p0_j JSONL line 211.
-- file: "src/nci_si_mcp/installer.py"
+- file: "src/nci_sip_mcp/installer.py"
   qualname: "ReleaseIdentity"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -594,7 +594,7 @@
   reason: "Supported stdio producers/parsers retain environment with either metadata key; HTTP producers leave Absent.FIELD, excluded independently by serialization, and HTTP imports carrying environment are rejected by _environment before shape handling. Historical omission independently removes the required field. No supported caller depends on excluding a manually constructed invalid HTTP record."
 
 # Approved: #463 comment 6716541345; observed SURVIVED at 6daf80a, partition2.
-- file: "src/nci_si_mcp/request_policy.py"
+- file: "src/nci_sip_mcp/request_policy.py"
   qualname: "Exchange"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -603,7 +603,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Current consumers construct/read declared fields, copy/normalize headers and use private repr; no instance-layout reflection, dynamic attributes, weak references or instance-dictionary serialization is supported. Removing slots preserves frozen field assignment, read-only headers and repr; same-process reflection is outside this private record contract. Reviewer #463 comment 6716541345."
 # Approved: #464 comment 6723165906; eight exact diagnostic survivals at fe60c17.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "Limits"
   operator: "boolean:literal"
   site: "/decorator_list/1/keywords/1/value/0"
@@ -611,7 +611,7 @@
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Limits consumers read declared immutable values; no runtime consumer uses layout reflection or dynamic fields. Frozen enforcement, equality, declared-field binding and private-record conversion remain unchanged when slots is false."
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "RequestGrant"
   operator: "boolean:literal"
   site: "/decorator_list/1/keywords/1/value/0"
@@ -619,7 +619,7 @@
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "RequestGrant consumers read declared immutable values; no runtime consumer uses layout reflection or dynamic fields. Frozen enforcement, equality, declared-field binding and private-record conversion remain unchanged when slots is false."
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "RequestGrant"
   operator: "boolean:literal"
   site: "/decorator_list/1/keywords/2/value/0"
@@ -627,7 +627,7 @@
   original: "bfdbc42f821a1db381d3e9bdb4df55b131e34807d7bcc9c647bdccb5708365a9"
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "RequestGrant defines its own complete __init__. The installed dataclasses implementation never overwrites that constructor when init is true; tuple snapshots, validation and exact admission therefore still execute unchanged."
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "Authorization"
   operator: "boolean:literal"
   site: "/body/0/value/0/keywords/0/value/0"
@@ -635,7 +635,7 @@
   original: "bfdbc42f821a1db381d3e9bdb4df55b131e34807d7bcc9c647bdccb5708365a9"
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "Authorization grants repr suppression is defense in depth for the declared private request fields: RequestGrant already omits URL, headers, body and credential_origin from its repr. Showing a tuple of those grant reprs does not disclose those fields; retain the outer suppression intentionally."
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "Authorization.binding"
   operator: "boolean:literal"
   site: "/body/4/value/0/func/0/value/0/keywords/2/value/0"
@@ -643,7 +643,7 @@
   original: "bfdbc42f821a1db381d3e9bdb4df55b131e34807d7bcc9c647bdccb5708365a9"
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "Explicit family and request records bind declared string scalars, base64 bytes or null bodies, finite normalized seconds, bounded integers, exact booleans, validated string tuples and optional closed release-target fields. Scalar dataclass attachments are not traversed. No supported declared value serializes as a nonfinite float; retain strict JSON as defense in depth."
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "Authorization"
   operator: "boolean:literal"
   site: "/decorator_list/1/keywords/1/value/0"
@@ -651,7 +651,7 @@
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Authorization consumers read declared immutable values; no runtime consumer uses layout reflection or dynamic fields. Frozen enforcement, equality, declared-field binding and private-record conversion remain unchanged when slots is false."
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "Authorization"
   operator: "boolean:literal"
   site: "/decorator_list/1/keywords/2/value/0"
@@ -659,7 +659,7 @@
   original: "bfdbc42f821a1db381d3e9bdb4df55b131e34807d7bcc9c647bdccb5708365a9"
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "Authorization defines its own complete __init__. The installed dataclasses implementation never overwrites that constructor when init is true; tuple snapshots, validation and exact admission therefore still execute unchanged."
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "RunDescriptor"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -669,7 +669,7 @@
   reason: "Declared private descriptor consumers read run/policy identities and serialize its directory explicitly. No current runtime consumer uses layout reflection or dynamic attributes; frozen behavior and to_record/from_record conversion do not depend on slots."
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "LedgerSnapshot"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -681,7 +681,7 @@
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
 # Reviewed #474 rekey: issuecomment-6780656194; historical SURVIVED retained.
 # Reviewed #507 rekey: issuecomment-6958389395; unchanged predicate and invariant.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun.snapshot"
   operator: "boolean:drop:0"
   site: "/body/1/body/5/value/0/keywords/11/value/0"
@@ -691,7 +691,7 @@
   reason: "Every returned snapshot satisfies pending_receipts <= active. Hence active == 0 implies pending == 0; dropping the pending conjunct cannot change a returned completion flag. Corrupt pending > active is refused by the independently tested cross-field bound."
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._count"
   operator: "boolean:drop:0"
   site: "/body/0/test/0"
@@ -702,7 +702,7 @@
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
 # Reviewed #507 rekey: issuecomment-6958389395; only the existing host-conditional URI site.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._connection"
   operator: "boolean:literal"
   site: "/body/1/body/1/value/0/keywords/0/value/0"
@@ -713,7 +713,7 @@
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
 # Reviewed #474 rekey: issuecomment-6780656194; historical SURVIVED retained.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "AttemptLease._row"
   operator: "call:remove"
   site: "/body/1/body/0"
@@ -724,7 +724,7 @@
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
 # Reviewed #474 rekey: issuecomment-6780656194; historical SURVIVED retained.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._identity"
   operator: "boolean:drop:0"
   site: "/body/6/test/0"
@@ -734,7 +734,7 @@
   reason: "Authorization duration is finite positive. A nonfinite recorded origin necessarily produces a nonfinite origin-plus-duration, so the remaining finite-sum guard rejects it. Finite-origin sum overflow still refuses; separate controls protect that independent bound."
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._count"
   operator: "boolean:drop:1"
   site: "/body/0/test/0"
@@ -744,7 +744,7 @@
   reason: "SQLite INTEGER/count(*) returns int, never bool; STRICT storage and the fixed sqlite3.Row factory own that type boundary. Removing the bool branch changes no reachable stored counter or terminal accounting refusal, including NULL. Retain the explicit production guard for clarity."
 
 # Reviewer-approved #467 conditional equivalents: issuecomment-6756044103; SURVIVED at16c21fd.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "OwnedChild"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/0/value/0"
@@ -753,7 +753,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Conditional equivalence under the documented supervisor API: it creates and retains OwnedChild internally, never writes its fields or hashes the record, and returns no record from register_child. Removing frozen changes generated setters/hash for direct record users but no declared admission, custody, snapshot or cleanup behavior. Keep frozen=True as the static design safeguard; public mutable-record exposure would invalidate this rationale."
 
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "OwnedChild"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -763,7 +763,7 @@
   reason: "Layout-only change to the internally retained child record. The supervisor reads only process, participant and role; no declared API observes a record dictionary, slots, weak references, dynamic attributes or pickle layout. Frozen fields and all admission, custody and cleanup behavior remain unchanged. Keep slots=True in production."
 
 # Approved: #467 comment 6760836237; exact S01 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._supervision"
   operator: "boolean:drop:0"
   site: "/body/3/test/0"
@@ -772,7 +772,7 @@
   mutated: "7db6e50262d0f77a988e5a10d837a6ed23741c96ec3ec26290839334b20dded9"
   reason: "Equivalent only under the privately generated STRICT INTEGER supervision schema: persisted discriminator values are plain int or NULL, and remaining membership validation rejects every invalid value. No arbitrary replacement-schema API exists. Preserve the exact-type defense; new schemas/producers require reevaluation."
 # Approved: #467 comment 6760836237; exact S06 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._heartbeat_value"
   operator: "return:False"
   site: "/body/0/body/1"
@@ -781,7 +781,7 @@
   mutated: "f5536f3bcd07de6521df23e5ac1e0ad1b443ac79485b5f4ed71373fd170b3670"
   reason: "The validated disabled-mode heartbeat sentinel is discarded by identity/enrollment/owner operations or short-circuited by enabled=0 in freshness. It is never persisted or published; return False changes no current consumer. Keep the nullable defense; a new sentinel consumer invalidates this equivalence."
 # Approved: #467 comment 6760836237; exact S07 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._heartbeat_value"
   operator: "return:True"
   site: "/body/0/body/1"
@@ -790,7 +790,7 @@
   mutated: "4d40361fc85c2c1588359b7bbefb67ffbd5ed15730fe3cec6085464279212055"
   reason: "The validated disabled-mode heartbeat sentinel is discarded by identity/enrollment/owner operations or short-circuited by enabled=0 in freshness. It is never persisted or published; return True changes no current consumer. Keep the nullable defense; a new sentinel consumer invalidates this equivalence."
 # Approved: #467 comment 6760836237; exact S08 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._heartbeat_value"
   operator: "boolean:drop:0"
   site: "/body/1/test/0"
@@ -799,7 +799,7 @@
   mutated: "c4397ebc108b2f57e4b5fe98d86fe66362802e3876ee3cd2bf4c4072029f085b"
   reason: "Equivalent only under the generated STRICT REAL schema and current connection sanitation: actual heartbeat rows return float or NULL, remaining finite validation rejects nonfinite values, and NULL TypeError is sanitized to the same accounting/first-failure behavior. Keep exact-float validation; new schema/producer or sanitation changes require reevaluation."
 # Approved: #467 comment 6760836237; exact S09 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._fresh"
   operator: "boolean:drop:0"
   site: "/body/1/test/0/values/1"
@@ -808,7 +808,7 @@
   mutated: "69e9b8aeae3457b8a05c591db4f8dbb5ec5db51bd5f60e12466bda93adf6adf4"
   reason: "Every freshness caller obtains its tuple from supervision validation: enabled mode cannot return None, while disabled mode short-circuits before the nullable expression. Preserve nullable defense/type narrowing; a helper contract or consumer change requires reevaluation."
 # Approved: #467 comment 6760836237; exact S22 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_summary.py"
+- file: "acceptance/src/nci_sip_acceptance/request_summary.py"
   qualname: "_limits"
   operator: "boolean:drop:0"
   site: "/body/2/test/0"
@@ -817,7 +817,7 @@
   mutated: "967d87746774a7aa014f4e4da2e16f5fd9815488fbdb1495fc7cbb462503824b"
   reason: "Malformed serialized seconds still meet Limits validation and the public reader normalizes policy failures to accounting. The only internal project producer supplies genuine validated Limits; internal validation helpers are not an arbitrary-input error-reason API. Keep numeric guards; new producers/exposure require reevaluation."
 # Approved: #467 comment 6760836237; exact S23 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_summary.py"
+- file: "acceptance/src/nci_sip_acceptance/request_summary.py"
   qualname: "_limits"
   operator: "boolean:drop:1"
   site: "/body/2/test/0"
@@ -826,7 +826,7 @@
   mutated: "867cdbd17f8b759036a18c7221c20be210cfb0f8e7a166c0850caa45af7764bf"
   reason: "Malformed serialized bool seconds still fail Limits validation and the public reader normalizes policy failures to accounting. Internal project supplies genuine validated Limits; helpers have no independent arbitrary-input error-reason API. Preserve the bool defense; new producers/exposure require reevaluation."
 # Approved: #467 comment 6760836237; exact S24 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_summary.py"
+- file: "acceptance/src/nci_sip_acceptance/request_summary.py"
   qualname: "_limits"
   operator: "boolean:swap"
   site: "/body/2/test/0"
@@ -835,7 +835,7 @@
   mutated: "5c768d6cb574508d993d96bd5ed20b3cd1ab40efe4376758a602c09c09757588"
   reason: "Malformed serialized seconds still meet Limits validation and the public reader normalizes policy failures to accounting. The only internal project producer supplies genuine validated Limits; internal validation helpers are not an arbitrary-input error-reason API. Keep numeric/bool guards; new producers/exposure require reevaluation."
 # Approved: #467 comment 6760836237; exact S25 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_summary.py"
+- file: "acceptance/src/nci_sip_acceptance/request_summary.py"
   qualname: "_limits"
   operator: "raise:remove"
   site: "/body/2/body/0"
@@ -844,7 +844,7 @@
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Removing this defensive raise still sends malformed serialized seconds to Limits validation and reader accounting normalization; internal project supplies genuine validated Limits. No independent arbitrary-input helper error API exists. Preserve the raise; new producers/exposure require reevaluation."
 # Approved: #467 comment 6760836237; exact S29 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_summary.py"
+- file: "acceptance/src/nci_sip_acceptance/request_summary.py"
   qualname: "publish"
   operator: "boolean:literal"
   site: "/body/2/body/0/body/1/value/0/keywords/0/value/0"
@@ -853,7 +853,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "The private atomic writer is called only with validated snapshot/project records: seconds is finite and all counters are bounded integers before serialization. Preserve allow_nan=False. Publishing arbitrary summaries is not an API; writer exposure or a new producer invalidates this conditional equivalence."
 # Approved: #467 comment 6760836237; exact S30 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_summary.py"
+- file: "acceptance/src/nci_sip_acceptance/request_summary.py"
   qualname: "publish"
   operator: "raise:remove"
   site: "/body/2/handlers/1/body/1"
@@ -862,7 +862,7 @@
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Mandatory finally rethrows the same recorded BaseException or ordered aggregate, including explicit cleanup interruptions/groups. A bare re-raise in the handler is superseded without changing identity/order; final-source owning cases and the separate cleanup red/green verify this. Preserve the defensive re-raise."
 # Approved: #467 comment 6760836237; exact S36 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun.register_child"
   operator: "raise:remove"
   site: "/body/3/body/0"
@@ -871,7 +871,7 @@
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Unique participant insertion precedes both versions. Same-name offers fail there; weakened early process refusal still meets canonical accepted-prefix process dedup and identity-based rejection without custody transfer. Preserve the early defense and positive/race/custody tests; producer or canonical prefix changes invalidate equivalence."
 # Approved: #467 comment 6760836237; exact S37 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun._children"
   operator: "boolean:drop:1"
   site: "/body/1/body/1/test/0/operand/0/args/0/elt/0"
@@ -880,7 +880,7 @@
   mutated: "f1431f71781d3f9e2b35d82b8a9a37f6114811e07c12ddcca0cb3ec689b7b481"
   reason: "Serialized unique-name insertion is the sole offer producer and names are never deleted or reused. Canonical process dedup and the atomic seal remain intact; removing only participant dedup changes no accepted prefix/custody. Preserve this defense; new producers or name reuse require reevaluation."
 # Approved: #467 comment 6760836237; exact S40 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun._registered"
   operator: "return:False"
   site: "/body/0"
@@ -889,7 +889,7 @@
   mutated: "f5536f3bcd07de6521df23e5ac1e0ad1b443ac79485b5f4ed71373fd170b3670"
   reason: "The private return is consumed only by an if condition. Unique participant insertion precedes registration; false early detection still meets canonical accepted-prefix process dedup and identity-based rejection without custody transfer. Keep early defenses and positive/race/custody tests; producer/prefix changes require reevaluation."
 # Approved: #467 comment 6760836237; exact S41 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun._registered"
   operator: "return:None"
   site: "/body/0"
@@ -898,7 +898,7 @@
   mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
   reason: "The private return is consumed only by truthiness, so None versus False is not exposed. Unique participant insertion precedes registration; canonical accepted-prefix process dedup and identity rejection still prevent custody transfer. Keep defenses/tests; new consumers or producer/prefix changes invalidate equivalence."
 # Approved: #467 comment 6760836237; exact S42 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun._registered"
   operator: "boolean:drop:0"
   site: "/body/0/value/0/args/0/elt/0"
@@ -907,7 +907,7 @@
   mutated: "56176af39526fc91d59d962c110b27a954e2cb1c13de1483e05aa234c4982e05"
   reason: "Unique participant insertion precedes both versions; removing early process detection still meets canonical accepted-prefix process dedup and identity-based rejection without custody transfer. Same-name offers already fail insertion. Preserve early defense and distinct positive/race/custody tests; producer/prefix changes require reevaluation."
 # Approved: #467 comment 6760836237; exact S43 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun._registered"
   operator: "boolean:drop:1"
   site: "/body/0/value/0/args/0/elt/0"
@@ -916,7 +916,7 @@
   mutated: "8cb1b3273cb45d491f581d965d24fc9fa27362845b44f7b6ba95faf1c4a63982"
   reason: "Unique participant insertion precedes both versions and rejects same-name offers before this early check. Canonical accepted-prefix process dedup and identity-based rejection remain intact with no extra custody transfer. Preserve defense and positive/race/custody tests; name reuse or producer/prefix changes invalidate equivalence."
 # Approved: #467 comment 6760836237; exact S44 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun._registered"
   operator: "boolean:swap"
   site: "/body/0/value/0/args/0/elt/0"
@@ -925,7 +925,7 @@
   mutated: "62468be33c128c01b8449529cd5e3269ca76fd3d8534dbdaee5696c520a3f8c6"
   reason: "Unique participant insertion precedes both versions; weakening the early OR still meets canonical accepted-prefix process dedup and identity-based rejection without custody transfer. Preserve all defenses and positive/race/custody tests; new producers, name reuse or prefix changes invalidate equivalence."
 # Approved: #467 comment 6760836237; exact S49 at 14c5d89, conditional producer/consumer proof in 6760788287.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun._inspection_failed"
   operator: "call:remove"
   site: "/body/2"
@@ -935,7 +935,7 @@
   reason: "Under supported heartbeat/storage failure routes, the retained local/shared first failure makes the next pulse refuse before child inspection or timestamp renewal; its policy refusal stops observation without replacing the event. Shutdown independently sets stop and performs the same bounded join. Preserve immediate stop; no arbitrary replacement-heartbeat exception API is implied."
 
 # Reviewer-approved #474 layout equivalence: issuecomment-6781799196; canonical SURVIVED at aba1c34.
-- file: "src/nci_si_mcp/http_client.py"
+- file: "src/nci_sip_mcp/http_client.py"
   qualname: "_TransportStart"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -945,7 +945,7 @@
   reason: "Layout-only slots change: supported cooperating callers use the private callback's callable/invoke/refusal-witness interface and frozen declared fields; dynamic attributes, layout reflection and pickle are not contracts. Admission order, witness reset, receipts, exception behavior and legacy calls are unchanged."
 
 # Reviewer-approved #474 private-field equivalence: issuecomment-6783035710; canonical SURVIVED at 24495de.
-- file: "src/nci_si_mcp/http_client.py"
+- file: "src/nci_sip_mcp/http_client.py"
   qualname: "_TransportStart"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/0/value/0"
@@ -954,7 +954,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Supported consumers receive the private callback's callable/invoke/read-only refusal-witness Protocol, not assignment, hashing or serialization of its declared fields. Removing frozen does not change those contracts; the witness property remains read-only. Preserve production frozen=True. This equivalence does not cover public immutable snapshots or any admission, deadline, witness-default or receipt guard."
 # Approved: #465 comment 6787240675; fresh SURVIVED at ee5f272.
-- file: "acceptance/src/nci_si_acceptance/request_transport.py"
+- file: "acceptance/src/nci_sip_acceptance/request_transport.py"
   qualname: "_Request"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/0/value/0"
@@ -963,7 +963,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Supported consumers use ControlledRequest operations and read the independently frozen admitted RequestGrant; none writes or reflects private _Request fields. This defensive flag does not change wire values, accounting, errors or summaries."
 # Approved: #465 comment 6787240675; fresh SURVIVED at ee5f272.
-- file: "acceptance/src/nci_si_acceptance/request_transport.py"
+- file: "acceptance/src/nci_sip_acceptance/request_transport.py"
   qualname: "_Request"
   operator: "boolean:literal"
   site: "/body/2/value/0/keywords/0/value/0"
@@ -972,7 +972,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "RequestGrant independently suppresses URL, headers, body and credential_origin; nesting its repr adds only method. The private wrapper repr is not emitted in native records and changes no transport or accounting result."
 # Approved: #465 comment 6787240675; fresh SURVIVED at ee5f272.
-- file: "acceptance/src/nci_si_acceptance/request_transport.py"
+- file: "acceptance/src/nci_sip_acceptance/request_transport.py"
   qualname: "_Request"
   operator: "boolean:literal"
   site: "/body/0/value/0/keywords/0/value/0"
@@ -981,7 +981,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "ControlledRun retains default object repr. The private wrapper repr is not logged or projected into public records; enabling this field adds object identity, not ledger paths, grants, credentials or transport behavior."
 # Approved: #465 comment 6787240675; fresh SURVIVED at ee5f272.
-- file: "acceptance/src/nci_si_acceptance/request_transport.py"
+- file: "acceptance/src/nci_sip_acceptance/request_transport.py"
   qualname: "_Request"
   operator: "boolean:literal"
   site: "/body/1/value/0/keywords/0/value/0"
@@ -990,7 +990,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "LogicalRequest retains default object repr. The private wrapper repr is not a report/error/summary output; enabling this field adds object identity, not admitted wire values or accounting results."
 # Approved: #465 comment 6787240675; fresh SURVIVED at ee5f272.
-- file: "acceptance/src/nci_si_acceptance/request_transport.py"
+- file: "acceptance/src/nci_sip_acceptance/request_transport.py"
   qualname: "_Request"
   operator: "boolean:literal"
   site: "/decorator_list/0/keywords/1/value/0"
@@ -1000,7 +1000,7 @@
   reason: "Private request consumers use declared run/logical/grant fields and ControlledRequest operations. No production layout reflection, dynamic-field or serialization consumer exists; dropping slots changes allocation layout only."
 
 # Approved: #465 comment 6788596797; canonical c983 SURVIVED and focused prior-reason controls.
-- file: "acceptance/src/nci_si_acceptance/request_transport.py"
+- file: "acceptance/src/nci_sip_acceptance/request_transport.py"
   qualname: "_latch_cleanup"
   operator: "boolean:drop:1"
   site: "/body/2/body/0/value/0"
@@ -1010,7 +1010,7 @@
   reason: "The first-reason latch is set before publication; _failure returns that nonempty local/shared reason or raises. The removed fallback cannot select a reachable different caller result after _mark_failed; observation/publication failures remain separately preserved. No empty private state is fabricated. Keep the production fallback."
 
 # Approved: #465 comment 6788596797; canonical c983 SURVIVED and focused prior-reason controls.
-- file: "acceptance/src/nci_si_acceptance/request_transport.py"
+- file: "acceptance/src/nci_sip_acceptance/request_transport.py"
   qualname: "ControlledHttpPolicy._grant"
   operator: "boolean:drop:0"
   site: "/body/2/test/0"
@@ -1018,7 +1018,7 @@
   original: "df9cf24eee7689e3659b9c6f1a21e1b1ba655a61b1d802047822612ecaa42f03"
   mutated: "2d690834b8f150ab1310b1a4af7a1aa5dbe3371f7ba2737e5dfa7d70afde6772"
   reason: "Shared Authorization._headers rejects duplicate canonical header names before either exact-grant or family matching. Removing only this early duplicate check still reaches run.refuse with the prior terminal reason preserved, before logical admission or contact. Retain the production early guard intentionally."
-- file: "acceptance/src/nci_si_acceptance/request_catalogue.py"
+- file: "acceptance/src/nci_sip_acceptance/request_catalogue.py"
   qualname: "_scalar"
   operator: "boolean:drop:0"
   site: "/body/0/test/0"
@@ -1028,7 +1028,7 @@
   reason: "Approved #478 comment6808269966; native SURVIVED at b0d8afb. Both production callers use closed string choices: version1 and canonical true/false. YAML MappingNode/SequenceNode values are lists and fail membership even under a matching explicit tag; dropping only ScalarNode detection cannot authorize a new declaration. Retain the defense and type narrowing."
 
 # Approved: #478 comment 6811510028; full native24ec result60 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_catalogue.py"
+- file: "acceptance/src/nci_sip_acceptance/request_catalogue.py"
   qualname: "_reference"
   operator: "boolean:drop:0"
   site: "/body/1/value/0/generators/0/ifs/0"
@@ -1037,7 +1037,7 @@
   mutated: "52e3d58c36928e47088bb82766d817c2ba6c46a0f62c9cd5d7806c5886313716"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result60. Composed non-Scalar mapping-key values are lists and cannot equal fixture. Unchanged selected-item mapping validation still refuses malformed selected rows; no custom Node input is supported. Retain the key-kind defense."
 # Approved: #478 comment 6811510028; full native24ec result126 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "_batch_matches"
   operator: "string:key-mode-setting"
   site: "/body/0/value/0/func/0/value/0/args/1"
@@ -1046,7 +1046,7 @@
   mutated: "e982e1646ac11e074c7dffd12765e2e0f9985e851cd588ef98b42b816c2a51b9"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result126. Absent list still fails exact query-key validation, independent of the fallback string; present list values are unchanged. No new request is admitted."
 # Approved: #478 comment 6811510028; full native24ec result196 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_catalogue.py"
+- file: "acceptance/src/nci_sip_acceptance/request_catalogue.py"
   qualname: "_values"
   operator: "boolean:drop:0"
   site: "/body/0/test/0"
@@ -1055,7 +1055,7 @@
   mutated: "b424459fa9d40e59115aa659cb071dc72732cd4444759b352518dbe27a7418f5"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result196. With the nonempty check retained, composed scalar text iterates characters and mapping values iterate node pairs; neither is accepted by the unchanged per-item ScalarNode/text boundary. Empty shapes still refuse. Retain the outer-kind check."
 # Approved: #478 comment 6811510028; full native24ec result205 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "ExactRequestFamily"
   operator: "boolean:literal"
   site: "/decorator_list/1/keywords/1/value/0"
@@ -1064,7 +1064,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result205. Dropping only slots changes allocation layout; declared supported fields, validation, frozen assignment, equality/hash and explicit authorization/binding remain unchanged. No supported layout reflection or dynamic-field consumer exists. Retain production slots."
 # Approved: #478 comment 6811510028; full native24ec result216 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "_concept_tail"
   operator: "return:None"
   site: "/body/0/body/0"
@@ -1073,7 +1073,7 @@
   mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result216. False and None are consumed only by the private packet decline if-not-matches branch; public admission rejects the same unknown concept with the same sanitized refusal."
 # Approved: #478 comment 6812961428; exact native03bfe686 focused native-0 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "ConceptRequestFamily"
   operator: "boolean:literal"
   site: "/decorator_list/1/keywords/1/value/0"
@@ -1082,7 +1082,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Approved #478 comment6812961428; exact native focused SURVIVED at 03bfe686/native-0 with 225-call original/restored controls (478-canonical-code-sensitivity-data-02), not full mapped-route execution. Dropping only slots changes allocation layout; supported fields, canonical validation, frozen assignment and explicit binding/admission remain unchanged. No supported layout-reflection or dynamic-field consumer. Retain production slots."
 # Approved: #478 comment 6811510028; full native24ec result259 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_budget.py"
+- file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._require_release"
   operator: "boolean:drop:0"
   site: "/body/2/body/1/test/0"
@@ -1091,7 +1091,7 @@
   mutated: "79753cfd8010d370a0bfea44be93ca05be0c75dfed028eef293ee1868e3e5a03"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result259. Within the same immediate transaction, identity verification checks complete declared release keys/cardinality/MACs before this query; every requested declared channel row exists and concurrent deletion cannot intervene. Retain the defensive row check."
 # Approved: #478 comment 6811510028; full native24ec result281 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "Authorization"
   operator: "boolean:literal"
   site: "/body/1/value/0/keywords/2/value/0"
@@ -1100,7 +1100,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result281. Family reprs expose public finite labels only. Nested request fields and RequestGrant URL/header/body/credential-origin exclusions retain private bytes. Explicit binding/admission and supported record fields do not consume repr format."
 # Approved: #478 comment 6810767131; full native24ec result289 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "ExactRequestFamily"
   operator: "boolean:literal"
   site: "/body/0/value/0/keywords/0/value/0"
@@ -1109,7 +1109,7 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "Approved #478 comment6810767131; full native SURVIVED at 24ec9dd/result289. Including this nested RequestGrant repr adds only its public method; unchanged URL/header/body/credential-origin exclusions preserve private bytes. Admission and binding use explicit fields, and no complete repr format is promised. Retain the exclusion."
 # Approved: #478 comment 6811510028; full native24ec result319 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "_query"
   operator: "boolean:literal"
   site: "/body/0/value/0/keywords/0/value/0"
@@ -1118,7 +1118,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result319. Dropping explicit blank query values fails the unchanged canonical urlencode equality; the original finite concept key/value checks also refuse those blanks. Nonblank queries are unchanged. Exact-row blank parameters are a separate protected contract."
 # Approved: #478 comment 6811510028; full native24ec result381 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_catalogue.py"
+- file: "acceptance/src/nci_sip_acceptance/request_catalogue.py"
   qualname: "_rows"
   operator: "raise:remove"
   site: "/body/0/body/0"
@@ -1127,7 +1127,7 @@
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Approved #478 comment6811510028; full native SURVIVED at 24ec9dd/result381. Production callers validate nonempty composed items through unchanged reference/mapping boundaries and require complete nonempty reference/registered-ID membership. Wrong outer scalar/mapping shapes refuse there; empty shapes fail required membership. Keep the outer-kind guard; this does not exempt the distinct nested-row guard."
 # Approved: #478 comment 6812961428; exact native03bfe686 focused native-1 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "ConceptRequestFamily"
   operator: "boolean:literal"
   site: "/body/0/value/0/keywords/0/value/0"
@@ -1136,16 +1136,16 @@
   mutated: "2c4b51b48bd846ef19ff209e364104e29b4db9ffa231ee6cd53705f223b7c1a6"
   reason: "Approved #478 comment6812961428; exact native focused SURVIVED at 03bfe686/native-1 with 225-call original/restored controls (478-canonical-code-sensitivity-data-02), not full mapped-route execution. Including the nested RequestGrant representation exposes only its public method; its own URL/header/body/credential exclusions remain. No complete repr format is promised; explicit binding/admission is unchanged. Retain the production exclusion."
 # Approved: #478 comment 6811810793; full native24ec result400 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_catalogue.py"
+- file: "acceptance/src/nci_sip_acceptance/request_catalogue.py"
   qualname: "compile_policy"
   operator: "boolean:literal"
   site: "/body/17/value/0/func/0/value/0/args/0/left/0/left/0/left/0/left/0/left/0/left/0/func/0/value/0/keywords/0/value/0"
-  context: "7709c72c1cecc6fe19daf224cba23fc8d7368eb7325ecade4ff98ae17fcb9776"
+  context: "c650210c5e405a06b3b66fa88e00dbc9d566d14adcfd1bd9b718fc310da18d25"
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Approved #478 comment6811810793; full native SURVIVED at 24ec9dd/result400. The alternate JSON member order remains deterministic: environment_record fixes field and SURFACES order independently of caller mapping order. Both encodings bind all normalized nonsecret inputs and all three raw reviewed documents; credentials remain excluded and privately bound. This new compiler digest has no external encoding/vector contract. Keep production sorting and the established Authorization HMAC vectors."
 # Approved: #478 comment 6810767131; full native24ec result417 SURVIVED.
-- file: "acceptance/src/nci_si_acceptance/request_authorization.py"
+- file: "acceptance/src/nci_sip_acceptance/request_authorization.py"
   qualname: "ReleaseTarget"
   operator: "boolean:literal"
   site: "/decorator_list/1/keywords/1/value/0"
@@ -1154,7 +1154,7 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Approved #478 comment6810767131; full native SURVIVED at 24ec9dd/result417. Dropping only slots changes allocation layout; declared supported fields, validation, frozen assignment, equality/hash and explicit authorization/binding remain unchanged. No supported layout reflection or dynamic-field consumer exists. Retain production slots."
 # Approved: #495 comment 6896703526 / #479 comment 6896697491; exact attempt2 S3/154.
-- file: "acceptance/src/nci_si_acceptance/request_native.py"
+- file: "acceptance/src/nci_sip_acceptance/request_native.py"
   qualname: "NativeRun._finish_controller"
   operator: "boolean:drop:0"
   site: "/body/1/test/0"
@@ -1163,7 +1163,7 @@
   mutated: "4607b19206e10256291b395e453a9530afe154b883a9654b0f74704004a6cc13"
   reason: "Supported NativeRun.start stores the controller before setting entered=True, and no supported lifecycle clears that owner. Thus entered=True implies owner is not None; entered=False returns unchanged in both forms. External internal-attribute mutation is not a supported lifecycle. This is the exact recorded S3/154 static proof, not an observed kill. Reassess if the owner/entered lifecycle changes."
 # Approved: #495 comment 6898485881 / #479 comment 6898489268; exact attempt2 S3/170.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._settled"
   operator: "boolean:drop:1"
   site: "/body/1/value/0"
@@ -1172,7 +1172,7 @@
   mutated: "41edbb58d13d7fe9779576d467867922063d7cd28e4ae22a415b9eaf4dd4bd21"
   reason: "Concrete AnyIO asyncio/CPython lifecycle only: finish first joins and rejects recorded errors. Missing process/stream-close receipts imply a recorded failure; final wait uses the full remaining shared monotonic deadline and returns the immutable process returncode. A final timeout exhausts that deadline, so following checkpointing pipe closes record accounting failure before endpoint closure. No-process paths already settle. This static exact-key proof is not a kill or permission to remove defensive receipts. Reassess backend, clock, final-wait budget, pipe-close checkpoints or cleanup order."
 # Approved: #495 comment 6898485881 / #479 comment 6898489268; exact attempt2 S3/156.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._client"
   operator: "boolean:drop:0"
   site: "/body/1/handlers/0/body/1/test/0/operand/0"
@@ -1181,7 +1181,7 @@
   mutated: "99396645330e6fdc8cf97c4a74fcfcd5bcea2b94f6c3bc0c2e0b73a34e0a754c"
   reason: "Closed furnished SDK lifetime only: no client task handle or caller-supplied callback is exposed. Normal owner/group cancellation follows stop; earlier pump failures latch before rethrow. SDK request cancellation stays in its own scope; non-cancellation child failures propagate as groups. Runner shutdown cancels main too, which sets stop before checkpointing client teardown, or a live pump latches first. No supported unlatched pre-stop client-only cancellation is lost. Foreign Task.cancel/private rebinding is excluded. Reassess SDK callbacks, task exposure, cancellation sources or stop/latch ordering."
 # Approved: #495 comment 6898485881 / #479 comment 6898489268; exact attempt2 S3/190.
-- file: "acceptance/src/nci_si_acceptance/request_supervision.py"
+- file: "acceptance/src/nci_sip_acceptance/request_supervision.py"
   qualname: "SupervisedRun._finish_child"
   operator: "call:remove"
   site: "/body/3"
@@ -1190,7 +1190,7 @@
   mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
   reason: "Ordinary CPython Thread custody only: limbo/active strongly retains the executing thread and its target closure through cleanup, independently of this extra list. Real child registrations, pending name, start/join/is_alive, captured errors and summary remain. No supported production cleanup/retry consumer reads the list; its test-owned final-join reader is not a runtime custody API. No layout, finalizer, Thread subclass or future-backend promise is made. Preserve runtime retention here; reassess a real consumer, subclass/finalizer or different runtime ownership model."
 # Approved contract disposition: #495 comment 6898485881 / #479 comment 6898489268; exact attempt2 S3/177.
-- file: "acceptance/src/nci_si_acceptance/request_stdio.py"
+- file: "acceptance/src/nci_sip_acceptance/request_stdio.py"
   qualname: "StdioOwner._deliver"
   operator: "return:True"
   site: "/body/1/handlers/0/body/0"
@@ -1198,3 +1198,56 @@
   original: "dd863ea504e8543d2fb185a820aa7e2cf2d0ceddec9c835185a3510fc2ab463d"
   mutated: "4d40361fc85c2c1588359b7bbefb67ffbd5ed15730fe3cec6085464279212055"
   reason: "Explicit functional contract disposition only: after consumer closure no further wire delivery occurs, and enforced deadline/fail-closed custody guards remain. Extra JSON parsing and failed-send checkpoints genuinely differ; this is NOT timing, CPU, throughput, scheduler identity or successful drain for every finite output equivalence. The narrow finite comparison does not prove those properties. Keep the discard optimization in production. Reassess if a stronger approved resource-use/draining contract or supported delivery/custody consumer is introduced."
+# Approved: #513 review pass 3; equivalent SURVIVED, source-based.
+- file: "scripts/validation/mutation_source.py"
+  qualname: "_is_default_empty_list"
+  operator: "return:None"
+  site: "/body/0/body/0"
+  context: "2ddd9422e4683d3a73e6659baad51ef65d8efe27e224a77a137be22879eee7fc"
+  original: "dd863ea504e8543d2fb185a820aa7e2cf2d0ceddec9c835185a3510fc2ab463d"
+  mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
+  reason: "Equivalent: the only caller tests the result for truthiness, so None and False give the same fingerprint (#513 review pass 3). Reassess if a caller distinguishes None from False."
+# Approved: #513 review pass 3; equivalent SURVIVED, source-based.
+- file: "scripts/validation/mutation_source.py"
+  qualname: "_is_default_empty_list"
+  operator: "return:None"
+  site: "/body/2/body/0"
+  context: "2ddd9422e4683d3a73e6659baad51ef65d8efe27e224a77a137be22879eee7fc"
+  original: "dd863ea504e8543d2fb185a820aa7e2cf2d0ceddec9c835185a3510fc2ab463d"
+  mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
+  reason: "Equivalent: the only caller tests the result for truthiness, so None and False give the same fingerprint (#513 review pass 3). Reassess if a caller distinguishes None from False."
+# Approved: #509 sample comment 7050016388; equivalent SURVIVED, source-based.
+- file: "scripts/validation/mutation_source.py"
+  qualname: "Hunk"
+  operator: "boolean:literal"
+  site: "/decorator_list/0/keywords/0/value/0"
+  context: "536a622481b6c2234ce390c22750a588f6c3be97c21d459f2c61a995c5b1c351"
+  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
+  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
+  reason: "Equivalent: no code assigns to a Hunk after construction; the instance is read-only by use. Reassess if a consumer mutates or hashes Hunk."
+# Approved: #509 sample comment 7050016388; equivalent SURVIVED, source-based.
+- file: "scripts/validation/mutation_source.py"
+  qualname: "Hunk"
+  operator: "boolean:literal"
+  site: "/decorator_list/0/keywords/1/value/0"
+  context: "536a622481b6c2234ce390c22750a588f6c3be97c21d459f2c61a995c5b1c351"
+  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
+  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
+  reason: "Equivalent: no consumer relies on layout, weak references or dynamic attributes. Reassess if one does."
+# Approved: #509 PR #521 CI run 44821828753 attempt 2; equivalent SURVIVED, source-based.
+- file: "scripts/validation/mutation_source.py"
+  qualname: "file_name"
+  operator: "return:False"
+  site: "/body/0/body/0"
+  context: "0f444c1c569966e725638f7d856cb7c1069f3ffffe71bb7bbcdb2c51686991b1"
+  original: "913516a7f8b9956c78bcdbf93a921d7ce3bad087aabe73a90f95910d3305d832"
+  mutated: "f5536f3bcd07de6521df23e5ac1e0ad1b443ac79485b5f4ed71373fd170b3670"
+  reason: "Equivalent: every consumer treats the reset file name only as falsy ('Hunk without a file name' still raises); \"\", False and None behave the same. Reassess if a consumer compares the name with \"\"."
+- file: "scripts/validation/mutation_source.py"
+  qualname: "file_name"
+  operator: "return:None"
+  site: "/body/0/body/0"
+  context: "0f444c1c569966e725638f7d856cb7c1069f3ffffe71bb7bbcdb2c51686991b1"
+  original: "913516a7f8b9956c78bcdbf93a921d7ce3bad087aabe73a90f95910d3305d832"
+  mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
+  reason: "Equivalent: every consumer treats the reset file name only as falsy ('Hunk without a file name' still raises); \"\", False and None behave the same. Reassess if a consumer compares the name with \"\"."

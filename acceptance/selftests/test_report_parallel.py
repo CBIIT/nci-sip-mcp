@@ -45,7 +45,7 @@ def test_live_skip_reasons_cross_two_worker_boundary_without_an_upstream_call(
     compliant, monkeypatch
 ):
     synthetic_live(compliant)
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "live")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "live")
     (compliant.path / "tests" / "test_reasons.py").write_text(
         'import pytest\npytestmark = pytest.mark.tool("get_form")\n'
         'def test_fixture_only():\n    pytest.fail("must not execute")\n'

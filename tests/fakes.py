@@ -3,10 +3,10 @@
 from copy import deepcopy
 from urllib.parse import urlencode
 
-from nci_si_mcp.config import DEFAULT_EXCLUSION_ROLE_CODES
-from nci_si_mcp.evs import INDEX_INCLUDE, LOOKUP_INCLUDE, EVSNotFoundError, verify_content
-from nci_si_mcp.release import ReleaseContext
-from nci_si_mcp.ssis import CADSR_GRAPH, NCIT_GRAPH, SSISClient
+from nci_sip_mcp.config import DEFAULT_EXCLUSION_ROLE_CODES
+from nci_sip_mcp.evs import INDEX_INCLUDE, LOOKUP_INCLUDE, EVSNotFoundError, verify_content
+from nci_sip_mcp.release import ReleaseContext
+from nci_sip_mcp.ssis import CADSR_GRAPH, NCIT_GRAPH, SSISClient
 
 
 class FakeIndex:

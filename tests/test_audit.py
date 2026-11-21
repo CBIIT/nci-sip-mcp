@@ -20,15 +20,15 @@ from mcp.types import JSONRPCMessage
 from pydantic import TypeAdapter
 
 from fakes import FakeSSIS, catalogue_rows, concept
-from nci_si_mcp.audit import JsonFormatter, audited, compact, emit, hashed, secrets
-from nci_si_mcp.bounds import Budget, RequestBudgetError, budgeted
-from nci_si_mcp.config import Settings, configure_logging
-from nci_si_mcp.context import Context
-from nci_si_mcp.errors import current_correlation_id
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.registry import SPECS, invoke
-from nci_si_mcp.server import _audit_tools, _validate_inputs
+from nci_sip_mcp.audit import JsonFormatter, audited, compact, emit, hashed, secrets
+from nci_sip_mcp.bounds import Budget, RequestBudgetError, budgeted
+from nci_sip_mcp.config import Settings, configure_logging
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.errors import current_correlation_id
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.registry import SPECS, invoke
+from nci_sip_mcp.server import _audit_tools, _validate_inputs
 from test_evs_client import FakeResponse, http_error
 from test_http_client import Reply, ServerTestCase
 from test_index import normalized
@@ -42,7 +42,7 @@ def captured():
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.setFormatter(JsonFormatter())
-    logger = logging.getLogger("nci_si_mcp")
+    logger = logging.getLogger("nci_sip_mcp")
     level, disabled = logger.level, logging.root.manager.disable
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
@@ -71,11 +71,11 @@ class AuditRecordTest(unittest.TestCase):
         self.assertEqual(json.loads(compact(value)), {"numbers": ["inf", "-inf", "nan", 1.5]})
 
     def test_diagnostic_verbosity_does_not_disable_audit_records(self):
-        logger = logging.getLogger("nci_si_mcp.audit")
+        logger = logging.getLogger("nci_sip_mcp.audit")
         self.addCleanup(logger.setLevel, logger.level)
-        with captured() as stream, patch("nci_si_mcp.config.logging.basicConfig"):
+        with captured() as stream, patch("nci_sip_mcp.config.logging.basicConfig"):
             configure_logging("ERROR")
-            logging.getLogger("nci_si_mcp").setLevel(logging.ERROR)
+            logging.getLogger("nci_sip_mcp").setLevel(logging.ERROR)
             with audited("lookup", {}, {}, ()) as record:
                 record.result = {}
 
@@ -85,7 +85,7 @@ class AuditRecordTest(unittest.TestCase):
     def test_latency_is_reported_in_milliseconds(self):
         with (
             captured() as stream,
-            patch("nci_si_mcp.audit.time.perf_counter", return_value=10.25),
+            patch("nci_sip_mcp.audit.time.perf_counter", return_value=10.25),
             audited("lookup", {}, {}, ()) as record,
         ):
             record.started = 10
@@ -134,12 +134,12 @@ class AuditRecordTest(unittest.TestCase):
                 "truncation": {"perKind": {key: [basic]}},
             }
             emit(
-                logging.getLogger("nci_si_mcp.test"),
+                logging.getLogger("nci_sip_mcp.test"),
                 logging.WARNING,
                 "diagnostic",
                 details={key: [credential, basic]},
             )
-            logging.getLogger("nci_si_mcp.external").warning("external canary")
+            logging.getLogger("nci_sip_mcp.external").warning("external canary")
 
         for secret in (key, credential, basic, "audit-password-canary"):
             self.assertNotIn(secret, stream.getvalue())
@@ -153,7 +153,7 @@ class AuditRecordTest(unittest.TestCase):
             try:
                 raise RuntimeError("exception canary")
             except RuntimeError:
-                logging.getLogger("nci_si_mcp.external").exception("caller query canary")
+                logging.getLogger("nci_sip_mcp.external").exception("caller query canary")
 
         (result,) = records(stream, "diagnostic")
         self.assertEqual(result["messageHash"], hashed("caller query canary")["sha256"])
@@ -579,7 +579,7 @@ class AuditDiagnosticPrivacyTest(unittest.TestCase):
         with (
             captured() as stream,
             patch(
-                "nci_si_mcp.http_client._open", side_effect=[http_error(503), FakeResponse(b"{}")]
+                "nci_sip_mcp.http_client._open", side_effect=[http_error(503), FakeResponse(b"{}")]
             ),
         ):
             self.assertEqual(client.get_json(path), {})
@@ -593,7 +593,7 @@ class AuditDiagnosticPrivacyTest(unittest.TestCase):
 
     def test_password_alone_is_redacted_from_a_diagnostic(self):
         with captured() as stream, audited("lookup", {}, {}, secrets(None, "user:pw123")):
-            emit(logging.getLogger("nci_si_mcp.test"), logging.WARNING, "canary", value="pw123")
+            emit(logging.getLogger("nci_sip_mcp.test"), logging.WARNING, "canary", value="pw123")
         self.assertEqual(records(stream, "canary")[0]["value"], "[redacted]")
         self.assertNotIn("pw123", stream.getvalue())
 
@@ -639,7 +639,7 @@ class IndexActivationAuditTest(ServerFixture):
         self.assertEqual(self.context.index.get_active_manifest().release_version, "26.07a")
 
 
-@patch("nci_si_mcp.server.configure_logging")
+@patch("nci_sip_mcp.server.configure_logging")
 class CrossDomainAuditPrivacyTest(ServerFixture):
     def setUp(self):
         super().setUp()

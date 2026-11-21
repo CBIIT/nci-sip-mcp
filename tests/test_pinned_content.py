@@ -4,8 +4,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fakes import concept, release
-from nci_si_mcp.evs import EVSClient, EVSReleaseMismatchError, EVSResponseError
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.evs import EVSClient, EVSReleaseMismatchError, EVSResponseError
+from nci_sip_mcp.registry import invoke
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
 
@@ -27,7 +27,7 @@ class PinnedClientTest(unittest.TestCase):
         payload = concept(code, terminology="mdr", version="29_0")
         client = EVSClient("https://example.invalid")
         with patch(
-            "nci_si_mcp.http_client._open",
+            "nci_sip_mcp.http_client._open",
             return_value=FakeResponse(json.dumps(payload).encode()),
         ) as opened:
             actual = client.get_concept(code, selected, include="minimal")
@@ -83,7 +83,7 @@ class PinnedClientTest(unittest.TestCase):
         client = EVSClient("https://example.invalid")
         raw = concept(" A/B ", terminology="other", version="old")
         with patch(
-            "nci_si_mcp.http_client._open",
+            "nci_sip_mcp.http_client._open",
             return_value=FakeResponse(json.dumps([raw]).encode()),
         ) as request:
             actual = client.get_concepts_by_codes(

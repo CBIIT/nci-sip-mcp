@@ -10,7 +10,7 @@ from scripts.portal_configuration import LocalConfiguration
 from scripts.portal_store import EvidenceStore
 from scripts.processes import exit_on_sigterm
 
-from nci_si_mcp.config import configure_logging
+from nci_sip_mcp.config import configure_logging
 
 
 def main() -> None:

@@ -71,14 +71,14 @@ def entry_point(environment):
         port = free_port()
         controlled = environment | {
             "PATH": os.environ["PATH"],
-            "NCI_SI_DATA_DIR": directory,
-            "NCI_SI_EMBEDDING_PROVIDER": "hashing",
-            "NCI_SI_EMBEDDING_MODEL": "hashing",
-            "NCI_SI_HTTP_PORT": str(port),
+            "NCI_SIP_DATA_DIR": directory,
+            "NCI_SIP_EMBEDDING_PROVIDER": "hashing",
+            "NCI_SIP_EMBEDDING_MODEL": "hashing",
+            "NCI_SIP_HTTP_PORT": str(port),
         }
         with Path(directory, "stderr").open("w+") as stderr:
             process = subprocess.Popen(
-                [sys.executable, "-m", "nci_si_mcp.container_entry"],
+                [sys.executable, "-m", "nci_sip_mcp.container_entry"],
                 env=controlled,
                 stdout=subprocess.DEVNULL,
                 stderr=stderr,
@@ -114,7 +114,7 @@ class ImageStartupTest(unittest.TestCase):
         self.assertTrue(all(port.startswith("127.0.0.1:") for port in compose["ports"]))
         for consumer in (compose["environment"], smoke):
             with self.subTest(consumer=consumer):
-                self.assertEqual(consumer.get("NCI_SI_HTTP_AUTH_MODE"), "trusted-local")
+                self.assertEqual(consumer.get("NCI_SIP_HTTP_AUTH_MODE"), "trusted-local")
                 with entry_point(image_environment() | consumer) as (process, port, stderr):
                     stderr.seek(0)
                     self.assertIsNone(process.poll(), stderr.read())
@@ -246,7 +246,7 @@ class ImageProbeTest(unittest.TestCase):
     def probe(command, port):
         environment = {"PATH": os.environ["PATH"]}
         if port is not None:
-            environment["NCI_SI_HTTP_PORT"] = str(port)
+            environment["NCI_SIP_HTTP_PORT"] = str(port)
         return subprocess.run(  # noqa: S603 - declared local probe with this interpreter
             [sys.executable, *command[1:]],
             env=environment,

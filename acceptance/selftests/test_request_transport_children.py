@@ -12,11 +12,11 @@ import pytest
 from http_receiver import WireReceiver
 from request_failure_observation import snapshot as observed_snapshot
 
-import nci_si_acceptance
-import nci_si_mcp
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_mcp.http_client import RequestPolicyError
+import nci_sip_acceptance
+import nci_sip_mcp
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_mcp.http_client import RequestPolicyError
 
 # The first scripted fragment is independently seven bytes before the remaining five.
 FRAGMENT_BYTES = 7
@@ -25,11 +25,11 @@ CHILD = """
 import json,sys
 from pathlib import Path
 sys.path[:0]=sys.argv[1:3]
-import nci_si_acceptance,nci_si_mcp
-from nci_si_acceptance.request_authorization import Authorization,Limits,RequestGrant,RunDescriptor
-from nci_si_acceptance.request_budget import ControlledRun
-from nci_si_acceptance.request_transport import ControlledHttpPolicy
-from nci_si_mcp.http_client import HttpClient,RequestPolicyError
+import nci_sip_acceptance,nci_sip_mcp
+from nci_sip_acceptance.request_authorization import Authorization,Limits,RequestGrant,RunDescriptor
+from nci_sip_acceptance.request_budget import ControlledRun
+from nci_sip_acceptance.request_transport import ControlledHttpPolicy
+from nci_sip_mcp.http_client import HttpClient,RequestPolicyError
 if sys.stdin.buffer.read(1)!=b'x':
     sys.exit(2)
 descriptor=RunDescriptor.from_record(json.loads(Path(sys.argv[3]).read_text()))
@@ -46,7 +46,7 @@ except RequestPolicyError as error:
     reason=error.reason
 report=Path(destination)
 pending=report.with_suffix(".pending")
-pending.write_text(json.dumps(dict(reason=reason,core=nci_si_mcp.__file__,harness=nci_si_acceptance.__file__)))
+pending.write_text(json.dumps(dict(reason=reason,core=nci_sip_mcp.__file__,harness=nci_sip_acceptance.__file__)))
 pending.replace(report)
 """
 
@@ -79,7 +79,7 @@ def test_registered_children_share_transport_capacity(tmp_path, concurrent, tota
         descriptor = tmp_path / "descriptor.json"
         descriptor.write_text(json.dumps(owner.run.descriptor.to_record()))
         roots = [
-            str(Path(package.__file__).parents[1]) for package in (nci_si_acceptance, nci_si_mcp)
+            str(Path(package.__file__).parents[1]) for package in (nci_sip_acceptance, nci_sip_mcp)
         ]
         children, destinations = [], [tmp_path / f"child-{index}.json" for index in range(2)]
         try:
@@ -132,8 +132,8 @@ def test_registered_children_share_transport_capacity(tmp_path, concurrent, tota
         reports = [json.loads(path.read_text()) for path in destinations]
         assert [report["reason"] for report in reports] == ["closed", reason]
         assert all(
-            report["core"] == nci_si_mcp.__file__
-            and report["harness"] == nci_si_acceptance.__file__
+            report["core"] == nci_sip_mcp.__file__
+            and report["harness"] == nci_sip_acceptance.__file__
             for report in reports
         )
         assert all(

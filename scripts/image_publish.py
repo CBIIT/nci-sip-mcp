@@ -37,7 +37,7 @@ def main() -> None:
         check=True,
         stdout=subprocess.DEVNULL,
     )
-    run("docker", "tag", "nci-si-mcp:verified", f"{image}:{tag}")
+    run("docker", "tag", "nci-sip-mcp:verified", f"{image}:{tag}")
     run("docker", "push", f"{image}:{tag}")
     digests = json.loads(
         run("docker", "image", "inspect", f"{image}:{tag}", "--format", "{{json .RepoDigests}}")

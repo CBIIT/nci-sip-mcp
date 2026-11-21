@@ -9,16 +9,16 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fakes import FakeEVS, FakeSSIS, concept, primary_element, release, terminology_row
-from nci_si_mcp.bounds import Budget
-from nci_si_mcp.caching import cache_call
-from nci_si_mcp.cadsr import EXPORT_FOLDER
-from nci_si_mcp.config import Settings
-from nci_si_mcp.context import Context
-from nci_si_mcp.cursor import decode, encode
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.release_selection import SessionRelease, session_scope
-from nci_si_mcp.ssis import CADSR_GRAPH, NCIT_GRAPH, SSISClient
+from nci_sip_mcp.bounds import Budget
+from nci_sip_mcp.caching import cache_call
+from nci_sip_mcp.cadsr import EXPORT_FOLDER
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.context import Context
+from nci_sip_mcp.cursor import decode, encode
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.release_selection import SessionRelease, session_scope
+from nci_sip_mcp.ssis import CADSR_GRAPH, NCIT_GRAPH, SSISClient
 from test_evs_client import FakeResponse
 
 NCIT = "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl#"
@@ -118,7 +118,9 @@ class SeamTest(unittest.TestCase):
         self.evs = FakeEVS([concept("C1", active=True), concept("C2", active=True)])
         self.context = Context(settings, evs=self.evs, ssis=self.ssis)
         self.addCleanup(patch.stopall)
-        patch("nci_si_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")).start()
+        patch(
+            "nci_sip_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")
+        ).start()
 
     def call(self, operation="find_data_elements_for_concept", **arguments):
         with cache_call() as hint:
@@ -592,7 +594,7 @@ class SeamTest(unittest.TestCase):
         stale = SimpleNamespace(generated_at="not a date", source_distribution=None)
         with (
             patch.object(self.context.cadsr.export_http, "get_text", return_value=listing),
-            patch("nci_si_mcp.seam.export_state", return_value=stale),
+            patch("nci_sip_mcp.seam.export_state", return_value=stale),
         ):
             result = self.call("get_release_alignment")
         self.assertEqual(result["error"]["code"], "upstream_unavailable")
@@ -627,7 +629,7 @@ class CrossDomainQueryBoundaryTest(unittest.TestCase):
         self.evs = FakeEVS([concept("C1", active=True), concept("C2", active=True)])
         self.context = Context(settings, evs=self.evs, ssis=self.ssis)
         blocker = patch(
-            "nci_si_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")
+            "nci_sip_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")
         )
         blocker.start()
         self.addCleanup(blocker.stop)
@@ -820,7 +822,7 @@ class CrossDomainQueryBoundaryTest(unittest.TestCase):
             ],
         )
         # The outer producer must declare its policy even without the child's hint.
-        with patch("nci_si_mcp.cadsr_content.select_cache_hint"):
+        with patch("nci_sip_mcp.cadsr_content.select_cache_hint"):
             result = self.resolve()
         self.assertEqual(
             result["conceptReference"],
@@ -886,7 +888,7 @@ class StoredValueAndAlignmentTest(unittest.TestCase):
         self.ssis = FakeSSIS(settings)
         self.context = Context(settings, evs=self.evs, ssis=self.ssis)
         opened = patch(
-            "nci_si_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")
+            "nci_sip_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")
         )
         opened.start()
         self.addCleanup(opened.stop)
@@ -1075,9 +1077,9 @@ class StoredValueAndAlignmentTest(unittest.TestCase):
         ):
             with (
                 self.subTest(operation=operation),
-                patch("nci_si_mcp.seam.Budget", return_value=Budget(requests=1)),
+                patch("nci_sip_mcp.seam.Budget", return_value=Budget(requests=1)),
                 patch(
-                    "nci_si_mcp.http_client._open",
+                    "nci_sip_mcp.http_client._open",
                     side_effect=[FakeResponse(json.dumps([terminology_row()]).encode())],
                 ) as opened,
             ):

@@ -13,29 +13,29 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from nci_si_acceptance.fixture_server import (
+from nci_sip_acceptance.fixture_server import (
     Fixture,
     FixtureServer,
     FixtureSet,
     Response,
     request_key,
 )
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_acceptance.request_budget import AttemptLease, ControlledRun
-from nci_si_acceptance.request_summary import read_summary
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_mcp.audit import audited
-from nci_si_mcp.bounds import (
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_acceptance.request_budget import AttemptLease, ControlledRun
+from nci_sip_acceptance.request_summary import read_summary
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_mcp.audit import audited
+from nci_sip_mcp.bounds import (
     Budget,
     CallDeadlineError,
     RequestBudgetError,
     budgeted,
     deadline_scope,
 )
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.http_client import HttpClient, RequestPolicyError
-from nci_si_mcp.invocation import call
-from nci_si_mcp.request_policy import Exchange
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.http_client import HttpClient, RequestPolicyError
+from nci_sip_mcp.invocation import call
+from nci_sip_mcp.request_policy import Exchange
 
 
 def entry_client(base, consumer):

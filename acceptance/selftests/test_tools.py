@@ -6,8 +6,8 @@ import pytest
 from mcp.shared.exceptions import MCPError
 from mcp_types import METHOD_NOT_FOUND
 
-from nci_si_acceptance.spec import TOOLS, Listing
-from nci_si_acceptance.tools import NOT_IMPLEMENTED, Process, Tools
+from nci_sip_acceptance.spec import TOOLS, Listing
+from nci_sip_acceptance.tools import NOT_IMPLEMENTED, Process, Tools
 
 
 def test_process_evidence_includes_nested_binary_files_and_stderr(tmp_path):

@@ -1322,7 +1322,7 @@ LIMIT 965
 
 One recording per concept answers each projection (`include`) and relation list of that concept
 it covers, and a batch is composed from the recordings of the concepts it names
-(`acceptance/src/nci_si_acceptance/concepts.py`).
+(`acceptance/src/nci_sip_acceptance/concepts.py`).
 
 | Operations | Form |
 |---|---|

@@ -2,8 +2,8 @@
 
 import pytest
 
-from nci_si_acceptance.craft import OTHER_RELEASE, RELEASE
-from nci_si_acceptance.results import error_code, release_of
+from nci_sip_acceptance.craft import OTHER_RELEASE, RELEASE
+from nci_sip_acceptance.results import error_code, release_of
 
 ARGUMENTS = {"terminology": "ncit", "code": "C90000001"}
 

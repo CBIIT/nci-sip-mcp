@@ -123,7 +123,7 @@ def source_identity(root: Path, tag: str | None) -> dict[str, Any]:
     target = _git(root, "rev-parse", "--verify", f"{tag}^{{commit}}") if tag else None
     return build_identity(
         _git(root, "rev-parse", "HEAD"),
-        version("nci-si-mcp"),
+        version("nci-sip-mcp"),
         dirty=bool(_git(root, "status", "--porcelain")),
         release_tag=tag,
         tag_commit=target,

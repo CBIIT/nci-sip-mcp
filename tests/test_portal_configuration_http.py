@@ -12,8 +12,8 @@ from scripts.portal_configuration import LocalConfiguration
 from scripts.portal_http import create_server
 from scripts.portal_store import EvidenceStore
 
-from nci_si_mcp.config import Settings
-from nci_si_mcp.config_snapshot import capture
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.config_snapshot import capture
 
 
 class ConfigurationHTTPTest(unittest.TestCase):

@@ -54,7 +54,7 @@ class ReleaseGuardTest(unittest.TestCase):
                 env=os.environ
                 | {
                     "PATH": directory + os.pathsep + os.environ["PATH"],
-                    "GITHUB_REPOSITORY": "CBIIT/nci-si-mcp",
+                    "GITHUB_REPOSITORY": "CBIIT/nci-sip-mcp",
                     "FAKE_RUNS": json.dumps(runs if raw else {"workflow_runs": runs}),
                     "API_STATUS": str(api_status),
                     "ARGV_FILE": str(Path(directory) / "argv"),
@@ -66,7 +66,7 @@ class ReleaseGuardTest(unittest.TestCase):
             )
             self.assertEqual(
                 (Path(directory) / "argv").read_text(),
-                "api\nrepos/CBIIT/nci-si-mcp/actions/workflows/ci.yml/runs"
+                "api\nrepos/CBIIT/nci-sip-mcp/actions/workflows/ci.yml/runs"
                 f"?head_sha={SHA}&branch=main&event=push&per_page=100",
             )
             return result

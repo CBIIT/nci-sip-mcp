@@ -58,12 +58,12 @@ there. Proposals remain advisory; the admin container cannot apply them or resta
 ## Serving MCP alongside the companions
 
 Build the image using the [container runbook](container.md), then tag it for Compose:
-`docker tag nci-si-mcp:local nci-si-mcp:verified`.
-The MCP compose service explicitly selects `NCI_SI_HTTP_AUTH_MODE=trusted-local` and publishes
+`docker tag nci-sip-mcp:local nci-sip-mcp:verified`.
+The MCP compose service explicitly selects `NCI_SIP_HTTP_AUTH_MODE=trusted-local` and publishes
 only on `127.0.0.1:8000`; the image itself defaults to required authentication. Its `/ready`
 healthcheck verifies the local index/model, not upstream availability, with a 180-second startup
 grace. Do not expose this opt-out beyond the trusted local deployment.
-Set `NCI_SI_LOCAL_INDEX` and `NCI_SI_LOCAL_MODEL` to absolute directories containing a compatible
+Set `NCI_SIP_LOCAL_INDEX` and `NCI_SIP_LOCAL_MODEL` to absolute directories containing a compatible
 completed index (readable and writable by UID 65532, as SQLite needs its journal) and offline
 model (readable by UID 65532), then:
 

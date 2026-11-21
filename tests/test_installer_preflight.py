@@ -3,7 +3,7 @@ from email.message import Message
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
-from nci_si_mcp import installer
+from nci_sip_mcp import installer
 
 API = installer
 
@@ -59,8 +59,8 @@ class AggregatePrerequisiteTest(unittest.TestCase):
     def test_expected_observer_failures_return_false_without_leaking_details(self):
         canary = "PRIVATE-CANARY"
         with (
-            patch("nci_si_mcp.installer.shutil.which", return_value=None),
-            patch("nci_si_mcp.installer.urlopen", side_effect=OSError(canary)),
+            patch("nci_sip_mcp.installer.shutil.which", return_value=None),
+            patch("nci_sip_mcp.installer.urlopen", side_effect=OSError(canary)),
         ):
             results = API.run_prerequisites(
                 (
@@ -86,35 +86,35 @@ class AggregatePrerequisiteTest(unittest.TestCase):
         for system, expected in (("Darwin", True), ("Linux", True), ("Windows", False)):
             with (
                 self.subTest(system=system),
-                patch("nci_si_mcp.installer.platform.system", return_value=system),
+                patch("nci_sip_mcp.installer.platform.system", return_value=system),
             ):
                 self.assertEqual(os_check.observe(), expected)
 
     def test_an_http_error_still_proves_endpoint_reachability(self):
         http_error = HTTPError("http://example", 401, "denied", Message(), None)
-        with patch("nci_si_mcp.installer.urlopen", side_effect=http_error):
+        with patch("nci_sip_mcp.installer.urlopen", side_effect=http_error):
             self.assertTrue(API.reachability_prerequisite("x", "http://example", "fix").observe())
 
     def test_incomplete_fixture_configuration_never_falls_back_to_production_urls(self):
         for environment in (
-            {"NCI_SI_UPSTREAM_MODE": "fixture"},
-            {"NCI_SI_EVS_BASE_URL": "file:///etc/hosts"},
-            {"NCI_SI_EVS_BASE_URL": "https://user:secret@example.test?x=1"},
+            {"NCI_SIP_UPSTREAM_MODE": "fixture"},
+            {"NCI_SIP_EVS_BASE_URL": "file:///etc/hosts"},
+            {"NCI_SIP_EVS_BASE_URL": "https://user:secret@example.test?x=1"},
         ):
             with (
                 self.subTest(environment=environment),
                 patch.dict("os.environ", environment, clear=True),
-                self.assertRaisesRegex(ValueError, "NCI_SI_EVS_BASE_URL"),
+                self.assertRaisesRegex(ValueError, "NCI_SIP_EVS_BASE_URL"),
             ):
                 API.local_prerequisites()
 
     def test_server_only_has_the_exact_prerequisite_set_and_needs_only_git_executable(self):
         with (
             patch(
-                "nci_si_mcp.installer.shutil.which",
+                "nci_sip_mcp.installer.shutil.which",
                 side_effect=lambda name: "/usr/bin/git" if name == "git" else None,
             ),
-            patch("nci_si_mcp.installer.urlopen"),
+            patch("nci_sip_mcp.installer.urlopen"),
         ):
             results = API.run_prerequisites(API.local_prerequisites())
 
@@ -135,6 +135,6 @@ class AggregatePrerequisiteTest(unittest.TestCase):
     def test_reachability_uses_a_five_second_timeout(self):
         response = MagicMock()
         response.__enter__.return_value = response
-        with patch("nci_si_mcp.installer.urlopen", return_value=response) as opened:
+        with patch("nci_sip_mcp.installer.urlopen", return_value=response) as opened:
             self.assertTrue(API.reachability_prerequisite("x", "https://example", "fix").observe())
         opened.assert_called_once_with("https://example", timeout=5)

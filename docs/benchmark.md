@@ -14,7 +14,7 @@ pdm run python -m scripts.benchmark --repetitions 20 --output tmp/benchmark-fixt
 For separately authorized live measurements, select a reviewed environment and an EVS case:
 
 ```bash
-NCI_SI_ACCEPTANCE_ENVIRONMENT=evs-only pdm run python -m scripts.benchmark --mode live --case get_concept --repetitions 1 --output tmp/benchmark-live.json
+NCI_SIP_ACCEPTANCE_ENVIRONMENT=evs-only pdm run python -m scripts.benchmark --mode live --case get_concept --repetitions 1 --output tmp/benchmark-live.json
 ```
 
 Live stdio uses the [managed environment policy](../acceptance/README.md#managed-live-environments),
@@ -94,7 +94,7 @@ Remote measurements are a separate, explicitly authorized **read-only probe**, n
 conformance run. The target must exactly match a normalized HTTPS allowlist entry. TLS
 certificates are verified; redirects, URL credentials, query strings and fragments are rejected.
 There are no remote prepare/restart/state hooks. If required, supply the Authorization header
-through `NCI_SI_BENCHMARK_AUTHORIZATION` in the process environment, never a command argument.
+through `NCI_SIP_BENCHMARK_AUTHORIZATION` in the process environment, never a command argument.
 
 ```bash
 pdm run benchmark-http --target https://approved.example/mcp --allow-target https://approved.example/mcp --allow-remote --case get_concept --output tmp/remote-probe/report.json
@@ -149,8 +149,8 @@ remote-unprepared skips are a deliberate transport contract and remain visible.
 Run the live-capable suite with:
 
 ```bash
-NCI_SI_ACCEPTANCE_MODE=live NCI_SI_ACCEPTANCE_ENVIRONMENT=evs-only NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample' pdm run acceptance -n 4 --dist worksteal --report=live.json
-pdm run python -m nci_si_acceptance.report acceptance/fixture.json --live acceptance/live.json
+NCI_SIP_ACCEPTANCE_MODE=live NCI_SIP_ACCEPTANCE_ENVIRONMENT=evs-only NCI_SIP_ACCEPTANCE_PREPARE='nci-sip-mcp index-sample' pdm run acceptance -n 4 --dist worksteal --report=live.json
+pdm run python -m nci_sip_acceptance.report acceptance/fixture.json --live acceptance/live.json
 ```
 
 The historical Phase 5 snapshot had **16 live-capable protocol cases**; its **928 remaining

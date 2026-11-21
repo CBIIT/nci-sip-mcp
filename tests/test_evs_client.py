@@ -9,9 +9,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
 from fakes import concept, release
-from nci_si_mcp.errors import PlatformError
-from nci_si_mcp.evs import EVSClient, EVSNotFoundError, EVSResponseError, concept_path
-from nci_si_mcp.http_client import (
+from nci_sip_mcp.errors import PlatformError
+from nci_sip_mcp.evs import EVSClient, EVSNotFoundError, EVSResponseError, concept_path
+from nci_sip_mcp.http_client import (
     UpstreamRejectedError,
     UpstreamTimeoutError,
     UpstreamTooLargeError,
@@ -49,8 +49,8 @@ def http_error(status, body=b""):
     return HTTPError("https://example.invalid", status, "Reason", {}, io.BytesIO(body))
 
 
-@patch("nci_si_mcp.http_client.time.sleep")
-@patch("nci_si_mcp.http_client._open")
+@patch("nci_sip_mcp.http_client.time.sleep")
+@patch("nci_sip_mcp.http_client._open")
 class EVSClientTest(unittest.TestCase):
     def test_gdc_mapset_and_page_use_the_api_paths_and_verify_release(self, urlopen, sleep):
         client = self.client()
@@ -143,7 +143,7 @@ class EVSClientTest(unittest.TestCase):
                 urlopen.reset_mock()
                 urlopen.side_effect = [failure, FakeResponse(b'{"version": "test"}')]
 
-                with self.assertLogs("nci_si_mcp.http_client", level="WARNING"):
+                with self.assertLogs("nci_sip_mcp.http_client", level="WARNING"):
                     result = self.client(max_attempts=2).get_api_version()
 
                 self.assertEqual(result, {"version": "test"})
@@ -158,7 +158,7 @@ class EVSClientTest(unittest.TestCase):
         ]
 
         with (
-            self.assertLogs("nci_si_mcp.http_client", level="WARNING"),
+            self.assertLogs("nci_sip_mcp.http_client", level="WARNING"),
             self.assertRaises(UpstreamUnavailableError) as raised,
         ):
             self.client(max_attempts=4, retry_backoff_seconds=0.25).get_api_version()
@@ -179,7 +179,7 @@ class EVSClientTest(unittest.TestCase):
                 urlopen.side_effect = [failure, failure]
 
                 with (
-                    self.assertLogs("nci_si_mcp.http_client", level="WARNING"),
+                    self.assertLogs("nci_sip_mcp.http_client", level="WARNING"),
                     self.assertRaises(UpstreamTimeoutError) as raised,
                 ):
                     self.client(timeout_seconds=7, max_attempts=2).get_api_version()
@@ -192,7 +192,7 @@ class EVSClientTest(unittest.TestCase):
         urlopen.side_effect = [TimeoutError("timed out"), URLError("refused")]
 
         with (
-            self.assertLogs("nci_si_mcp.http_client", level="WARNING"),
+            self.assertLogs("nci_sip_mcp.http_client", level="WARNING"),
             self.assertRaises(UpstreamUnavailableError) as raised,
         ):
             self.client(max_attempts=2).get_api_version()
@@ -203,7 +203,7 @@ class EVSClientTest(unittest.TestCase):
         urlopen.side_effect = [http_error(500), TimeoutError("timed out")]
 
         with (
-            self.assertLogs("nci_si_mcp.http_client", level="WARNING"),
+            self.assertLogs("nci_sip_mcp.http_client", level="WARNING"),
             self.assertRaises(UpstreamUnavailableError) as raised,
         ):
             self.client(max_attempts=2).get_api_version()
@@ -294,7 +294,7 @@ class EVSClientTest(unittest.TestCase):
                 with self.assertRaises(EVSResponseError) as raised:
                     call()
                 self.assertNotIsInstance(raised.exception, EVSNotFoundError)
-                self.assertIn("NCI_SI_EVS_BASE_URL", str(raised.exception))
+                self.assertIn("NCI_SIP_EVS_BASE_URL", str(raised.exception))
         urlopen.side_effect = http_error(404, b'{"message": "C1 not found"}')
         with self.assertRaises(EVSNotFoundError):
             client.get_concept("C1", release=release())
@@ -334,7 +334,7 @@ class EVSClientTest(unittest.TestCase):
     def test_a_backoff_of_zero_retries_without_waiting(self, urlopen, sleep):
         urlopen.side_effect = [URLError("temporary"), FakeResponse(b'{"version": "test"}')]
 
-        with self.assertLogs("nci_si_mcp.http_client", level="WARNING"):
+        with self.assertLogs("nci_sip_mcp.http_client", level="WARNING"):
             result = self.client(max_attempts=2, retry_backoff_seconds=0).get_api_version()
 
         self.assertEqual(result, {"version": "test"})
@@ -398,7 +398,7 @@ class EVSClientTest(unittest.TestCase):
 
                 self.assertEqual(
                     raised.exception.details,
-                    {"bound": "NCI_SI_EVS_MAX_RESPONSE_BYTES", "limit": 10, "reached": 11},
+                    {"bound": "NCI_SIP_EVS_MAX_RESPONSE_BYTES", "limit": 10, "reached": 11},
                 )
                 self.assertEqual(urlopen.call_count, 1)
 
@@ -497,7 +497,7 @@ class EVSClientTest(unittest.TestCase):
             FakeResponse(b'{"a": 1}\n', {"Content-Length": "9"}),
         ]
 
-        with self.assertLogs("nci_si_mcp.http_client", level="WARNING"):
+        with self.assertLogs("nci_sip_mcp.http_client", level="WARNING"):
             result = self.client(max_attempts=2).get_api_version()
 
         self.assertEqual(result, {"a": 1})
@@ -512,7 +512,7 @@ class EVSClientTest(unittest.TestCase):
         self.assertEqual(
             str(raised.exception),
             "EVS request failed for /api/v1/metadata/terminologies: HTTP 404 Not Found; "
-            "EVS does not serve this endpoint or release, check NCI_SI_EVS_BASE_URL",
+            "EVS does not serve this endpoint or release, check NCI_SIP_EVS_BASE_URL",
         )
 
     def test_an_empty_body_with_an_ignored_length_is_invalid_not_retried(self, urlopen, sleep):
@@ -537,7 +537,7 @@ class EVSContentBoundaryTest(unittest.TestCase):
 
     def reply(self, value):
         return patch(
-            "nci_si_mcp.http_client._open", return_value=FakeResponse(json.dumps(value).encode())
+            "nci_sip_mcp.http_client._open", return_value=FakeResponse(json.dumps(value).encode())
         )
 
     def test_all_terminology_path_segments_are_encoded(self):
@@ -604,7 +604,7 @@ class EVSContentBoundaryTest(unittest.TestCase):
 
     def test_an_empty_batch_returns_without_a_network_request(self):
         with patch(
-            "nci_si_mcp.http_client._open", side_effect=AssertionError("unexpected request")
+            "nci_sip_mcp.http_client._open", side_effect=AssertionError("unexpected request")
         ):
             self.assertEqual(self.client.get_concepts_by_codes([], self.release), [])
 

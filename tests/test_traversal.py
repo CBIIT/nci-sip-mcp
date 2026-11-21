@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from fakes import FakeEVS, concept, release
-from nci_si_mcp.bounds import (
+from nci_sip_mcp.bounds import (
     DEFAULT_MAX_DEPTH,
     DEFAULT_MAX_EDGES,
     DEFAULT_MAX_NODES,
@@ -16,17 +16,17 @@ from nci_si_mcp.bounds import (
     clamp_edge_limit,
     clamp_limits,
 )
-from nci_si_mcp.config import DEFAULT_EXCLUSION_ROLE_CODES
-from nci_si_mcp.errors import InputValidationError, correlated
-from nci_si_mcp.evs import EVSNotFoundError, EVSResponseError
-from nci_si_mcp.http_client import UpstreamTooLargeError
-from nci_si_mcp.traversal import (
+from nci_sip_mcp.config import DEFAULT_EXCLUSION_ROLE_CODES
+from nci_sip_mcp.errors import InputValidationError, correlated
+from nci_sip_mcp.evs import EVSNotFoundError, EVSResponseError
+from nci_sip_mcp.http_client import UpstreamTooLargeError
+from nci_sip_mcp.traversal import (
     EDGE_KINDS,
     _fetch_concepts,
     select_edge_types,
     traverse_ncit,
 )
-from nci_si_mcp.validation import TRAVERSAL_EDGE_TYPES
+from nci_sip_mcp.validation import TRAVERSAL_EDGE_TYPES
 
 
 def json_logs(logs, event=None):
@@ -641,7 +641,7 @@ class TraversalTest(unittest.TestCase):
             + [concept(f"C{n}") for n in range(100, 107)]
         )
 
-        with patch("nci_si_mcp.traversal.BATCH_SIZE", 3):
+        with patch("nci_sip_mcp.traversal.BATCH_SIZE", 3):
             walk(client, max_depth=2)
 
         self.assertEqual([len(call[2]) for call in client.calls], [1, 3, 3, 1])
@@ -676,7 +676,7 @@ class TraversalTest(unittest.TestCase):
         )
         client.hubs = frozenset({"C3"})
 
-        with self.assertLogs("nci_si_mcp.traversal", level="WARNING"):
+        with self.assertLogs("nci_sip_mcp.traversal", level="WARNING"):
             result = walk(complete_graph(client), max_depth=2)
 
         self.assertEqual(pairs(result), [("C1", "C2"), ("C1", "C3"), ("C2", "C4")])
@@ -688,7 +688,7 @@ class TraversalTest(unittest.TestCase):
         client = star()
         client.errors = {"get_descendants": UpstreamTooLargeError("too large")}
 
-        with self.assertLogs("nci_si_mcp.traversal", level="WARNING") as logs:
+        with self.assertLogs("nci_sip_mcp.traversal", level="WARNING") as logs:
             result = walk(complete_graph(client), max_depth=1, edge_types=["child", "descendant"])
 
         self.assertEqual(pairs(result), [("C1", "C11")])
@@ -704,7 +704,7 @@ class TraversalTest(unittest.TestCase):
         )
         client.hubs = frozenset({"C2", "C4"})
 
-        with self.assertLogs("nci_si_mcp.traversal", level="WARNING"):
+        with self.assertLogs("nci_sip_mcp.traversal", level="WARNING"):
             result = walk(complete_graph(client), max_depth=2)
 
         self.assertEqual((result.truncation.bound, result.truncation.omitted), ("upstream_cap", 2))
@@ -715,7 +715,7 @@ class TraversalTest(unittest.TestCase):
         client = HubEVS([concept("C1", "Hub", children=[child("C2")])])
         client.hubs = frozenset({"C1"})
 
-        with self.assertLogs("nci_si_mcp.traversal", level="WARNING"):
+        with self.assertLogs("nci_sip_mcp.traversal", level="WARNING"):
             result = walk(client, max_depth=1)
 
         self.assertEqual(
@@ -734,7 +734,7 @@ class TraversalTest(unittest.TestCase):
 
         client = Hub([concept("C1"), concept("C2")], descendants={"C2": [descendant("C21", 1)]})
 
-        with self.assertLogs("nci_si_mcp.traversal", level="WARNING"):
+        with self.assertLogs("nci_sip_mcp.traversal", level="WARNING"):
             result = walk(client, start_codes=["C1", "C2"], max_depth=1, edge_types=["descendant"])
 
         self.assertEqual(pairs(result), [("C2", "C21")])
@@ -760,7 +760,7 @@ class TraversalTest(unittest.TestCase):
         client.hubs = frozenset({"C1"})
         client.errors = {"get_descendants": UpstreamTooLargeError("too large")}
 
-        with self.assertLogs("nci_si_mcp.traversal", level="WARNING") as logs:
+        with self.assertLogs("nci_sip_mcp.traversal", level="WARNING") as logs:
             result = walk(client, max_depth=1, edge_types=["child", "descendant"])
 
         self.assertEqual((result.truncation.bound, result.truncation.omitted), ("upstream_cap", 1))
@@ -838,7 +838,7 @@ class TraversalTest(unittest.TestCase):
         )
         client.hubs = frozenset({"C17"})
 
-        with self.assertLogs("nci_si_mcp.traversal", level="INFO") as logs:
+        with self.assertLogs("nci_sip_mcp.traversal", level="INFO") as logs:
             result = walk(client, max_depth=2)
 
         # One request for C1, then 8 -> 4 + 4 -> 2 + 2 -> 1 + 1, and the minimal re-read of C17.
@@ -950,13 +950,13 @@ class TraversalTest(unittest.TestCase):
         )
         client.hubs = frozenset({"C2", "C4"})
 
-        with self.assertLogs("nci_si_mcp.traversal", level="WARNING") as logs:
+        with self.assertLogs("nci_sip_mcp.traversal", level="WARNING") as logs:
             walk(complete_graph(client), max_depth=2)
 
         warnings = json_logs(logs)
         self.assertEqual({code for record in warnings for code in record["codes"]}, {"C2", "C4"})
         self.assertTrue(
-            all(record["bound"] == "NCI_SI_EVS_MAX_RESPONSE_BYTES" for record in warnings)
+            all(record["bound"] == "NCI_SIP_EVS_MAX_RESPONSE_BYTES" for record in warnings)
         )
 
 

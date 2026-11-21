@@ -200,19 +200,19 @@ class TestReportWorkflowTest(unittest.TestCase):
                         "run": "shards=(unit-coverage/unit-coverage-*)\n"
                         'test "${#shards[@]}" -eq 4\n'
                         "pdm run coverage combine unit-coverage/unit-coverage-{0,1,2,3}/.coverage\n"
-                        "pdm run coverage report --include='*/src/nci_si_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=95\n"
-                        "pdm run coverage report --include='*/src/nci_si_mcp/*,*/src/ncit_index/*' --fail-under=95\n",
+                        "pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=95\n"
+                        "pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*' --fail-under=95\n",
                     },
                     {
                         "name": "Report coverage against the aim",
-                        "run": "total=\"$(pdm run coverage report --include='*/src/nci_si_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=0 --format=total)\"\n"
+                        "run": "total=\"$(pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=0 --format=total)\"\n"
                         'echo "Coverage ${total}% (the aim is above 98%)" >> "$GITHUB_STEP_SUMMARY"\n'
                         "if awk -v total=\"$total\" 'BEGIN { exit !(total <= 98) }'; then\n"
                         '  echo "::warning title=Coverage is not above 98%::${total}%. Cover the untested behaviour; do not pad."\nfi\n',
                     },
                     {
                         "name": "Export measured server coverage",
-                        "run": "pdm run coverage json --include='*/src/nci_si_mcp/*,*/src/ncit_index/*' -o tmp/coverage/server.json",
+                        "run": "pdm run coverage json --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*' -o tmp/coverage/server.json",
                     },
                     {
                         "uses": UPLOAD,

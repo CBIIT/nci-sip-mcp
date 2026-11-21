@@ -20,7 +20,7 @@ from fakes import (
     primary_element,
     vm_response,
 )
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.registry import invoke
 from test_server import ServerFixture
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -138,7 +138,7 @@ class ToolContractTest(ServerFixture):
         invoke(self.context, "index_codes", ["C3262", "C4741"])
         # Every upstream answer is scripted per tool; nothing may reach the network.
         refuse = patch(
-            "nci_si_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")
+            "nci_sip_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")
         )
         refuse.start()
         self.addCleanup(refuse.stop)

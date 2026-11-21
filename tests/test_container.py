@@ -8,8 +8,8 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from fakes import concept
-from nci_si_mcp import container_entry
-from nci_si_mcp.audit import JsonFormatter
+from nci_sip_mcp import container_entry
+from nci_sip_mcp.audit import JsonFormatter
 from ncit_index.embeddings import HashingEmbeddingProvider, SentenceTransformersProvider
 from ncit_index.errors import NoActiveIndexError
 from test_index import normalized, update_manifest
@@ -54,7 +54,7 @@ class ContainerTest(ServerFixture):
                 container_entry, "SentenceTransformersProvider", side_effect=OSError("not cached")
             ),
             patch.object(container_entry, "run_http") as serve,
-            self.assertLogs("nci_si_mcp.container_entry", level="ERROR") as logs,
+            self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as logs,
         ):
             self.assertEqual(container_entry.main(), 1)
         serve.assert_not_called()
@@ -69,7 +69,7 @@ class ContainerTest(ServerFixture):
             patch.object(container_entry.Settings, "from_env", return_value=self.settings),
             patch.object(container_entry, "configure_logging"),
             patch.object(container_entry, "prepared_index", side_effect=OSError("sensitive-token")),
-            self.assertLogs("nci_si_mcp.container_entry", level="ERROR") as logs,
+            self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as logs,
         ):
             self.assertEqual(container_entry.main(), 1)
         records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
@@ -136,15 +136,15 @@ class ContainerTest(ServerFixture):
 
     def test_bad_model_setting_names_the_variable_without_its_value(self):
         logging.disable(logging.NOTSET)
-        error = ValueError("NCI_SI_EMBEDDING_MODEL cannot be sensitive-token")
+        error = ValueError("NCI_SIP_EMBEDDING_MODEL cannot be sensitive-token")
         with (
             patch.object(container_entry.Settings, "from_env", side_effect=error),
             patch.object(container_entry, "configure_logging"),
-            self.assertLogs("nci_si_mcp.container_entry", level="ERROR") as logs,
+            self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as logs,
         ):
             self.assertEqual(container_entry.main(), 1)
         records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
-        self.assertEqual([r["parameter"] for r in records], ["NCI_SI_EMBEDDING_MODEL"])
+        self.assertEqual([r["parameter"] for r in records], ["NCI_SIP_EMBEDDING_MODEL"])
         self.assertNotIn("sensitive-token", json.dumps(records))
 
     def test_fatal_startup_diagnostic_survives_critical_verbosity(self):
@@ -187,7 +187,7 @@ class ContainerOfflineTest(ServerFixture):
             patch.object(
                 container_entry, "run_http", side_effect=AssertionError("Cannot serve legacy index")
             ),
-            self.assertLogs("nci_si_mcp.container_entry", level="ERROR") as captured,
+            self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as captured,
         ):
             self.assertEqual(container_entry.main(), 1)
         self.assertEqual(captured.records[0].structured["asset"], "index")

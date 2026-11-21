@@ -10,25 +10,25 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-from nci_si_mcp import installer, installer_state
+from nci_sip_mcp import installer, installer_state
 
 ROOT = Path(__file__).parent.parent
-INSTALLER = Path(sys.executable).with_name("nci-si-install")
-ROOT_HELP = "usage: nci-si-install [-h]\n                      {plan,check,run,status,start,stop,uninstall,help} ...\n\nInstall and operate the local NCI Semantic Infrastructure MCP server.\n\npositional arguments:\n  {plan,check,run,status,start,stop,uninstall,help}\n    plan                Print the ordered installation plan\n    check               Check every prerequisite before installation\n    run                 Run and record verified installation steps\n    status              Reverify and show installation status\n    start               Start HTTP or print the installed stdio client\n                        configuration\n    stop                Stop the installed local HTTP server\n    uninstall           Remove the recorded local installation\n    help                Explain an executable installation step\n\noptions:\n  -h, --help            show this help message and exit\n"  # noqa: E501
+INSTALLER = Path(sys.executable).with_name("nci-sip-install")
+ROOT_HELP = "usage: nci-sip-install [-h]\n                       {plan,check,run,status,start,stop,uninstall,help} ...\n\nInstall and operate the local NCI Semantic Infrastructure Program MCP server.\n\npositional arguments:\n  {plan,check,run,status,start,stop,uninstall,help}\n    plan                Print the ordered installation plan\n    check               Check every prerequisite before installation\n    run                 Run and record verified installation steps\n    status              Reverify and show installation status\n    start               Start HTTP or print the installed stdio client\n                        configuration\n    stop                Stop the installed local HTTP server\n    uninstall           Remove the recorded local installation\n    help                Explain an executable installation step\n\noptions:\n  -h, --help            show this help message and exit\n"  # noqa: E501
 
 SELECTION_OPTIONS = """options:
   -h, --help        show this help message and exit
   --target {local}  installation target
 """
 
-PLAN_HELP = "usage: nci-si-install plan [-h] --target {local}\n\n" + SELECTION_OPTIONS
+PLAN_HELP = "usage: nci-sip-install plan [-h] --target {local}\n\n" + SELECTION_OPTIONS
 
-CHECK_HELP = "usage: nci-si-install check [-h] --target {local}\n\n" + SELECTION_OPTIONS
+CHECK_HELP = "usage: nci-sip-install check [-h] --target {local}\n\n" + SELECTION_OPTIONS
 
 RUN_HELP = (
-    """usage: nci-si-install run [-h] --target {local} [--transport {stdio,http}]
-                          [--profile {cadsr,evs,unified}] --data-dir DATA_DIR
-                          [--restart] [--non-interactive]
+    """usage: nci-sip-install run [-h] --target {local} [--transport {stdio,http}]
+                           [--profile {cadsr,evs,unified}] --data-dir DATA_DIR
+                           [--restart] [--non-interactive]
 """
     + """
 options:
@@ -47,9 +47,9 @@ options:
 STEP_HELP = "Step: check_prerequisites\nPurpose: Check every selected requirement before installation changes anything.\nWhy: A partial installation must not be created when required inputs are missing.\nAction: Apply every fix reported by `check` or a BLOCKED `run`.\nVerification: Rerun every selected prerequisite; confirmation alone is never accepted.\nCommon failures: missing tools, occupied ports, or unreachable EVS and caDSR endpoints.\nGuide: https://github.com/CBIIT/nci-sip-mcp/blob/main/docs/installer-targets.md\n"  # noqa: E501
 
 STATUS_HELP = (
-    """usage: nci-si-install status [-h] --target {local} [--transport {stdio,http}]
-                             [--profile {cadsr,evs,unified}]
-                             --data-dir DATA_DIR
+    """usage: nci-sip-install status [-h] --target {local} [--transport {stdio,http}]
+                              [--profile {cadsr,evs,unified}]
+                              --data-dir DATA_DIR
 """
     + """
 options:
@@ -103,9 +103,9 @@ class InstallerCliTest(unittest.TestCase):
             {
                 "COLUMNS": "80",
                 "PATH": "",
-                "NCI_SI_EVS_BASE_URL": "http://127.0.0.1:1/PRIVATE-CANARY",
-                "NCI_SI_CADSR_BASE_URL": "http://127.0.0.1:2/PRIVATE-CANARY",
-                "NCI_SI_DATA_DIR": str(ROOT / "missing-installer-state"),
+                "NCI_SIP_EVS_BASE_URL": "http://127.0.0.1:1/PRIVATE-CANARY",
+                "NCI_SIP_CADSR_BASE_URL": "http://127.0.0.1:2/PRIVATE-CANARY",
+                "NCI_SIP_DATA_DIR": str(ROOT / "missing-installer-state"),
             }
         )
         code, stdout, stderr = self.run_installer(
@@ -169,16 +169,16 @@ class InstallerCliTest(unittest.TestCase):
                             ),
                         )
                     environment = os.environ.copy()
-                    environment["NCI_SI_EVS_BASE_URL"] = value
+                    environment["NCI_SIP_EVS_BASE_URL"] = value
                     code, stdout, stderr = self.run_installer(*arguments, environment=environment)
-                self.assertEqual((code, stdout, "NCI_SI_EVS_BASE_URL" in stderr), (2, "", True))
+                self.assertEqual((code, stdout, "NCI_SIP_EVS_BASE_URL" in stderr), (2, "", True))
 
     def test_run_records_and_status_reverifies_the_real_prerequisite_stage(self):
         with tempfile.TemporaryDirectory() as directory:
             environment = {
                 "PATH": "",
-                "NCI_SI_EVS_BASE_URL": "http://127.0.0.1:1",
-                "NCI_SI_CADSR_BASE_URL": "http://127.0.0.1:2",
+                "NCI_SIP_EVS_BASE_URL": "http://127.0.0.1:1",
+                "NCI_SIP_CADSR_BASE_URL": "http://127.0.0.1:2",
             }
             with patch.dict(os.environ, environment, clear=False):
                 run = self.run_installer("run", "--target", "local", "--data-dir", directory)
@@ -195,8 +195,8 @@ class InstallerCliTest(unittest.TestCase):
                         "step": "check_prerequisites",
                         "missing": [
                             "Install Git so pip can install the recorded source commit.",
-                            "Restore network access to NCI_SI_EVS_BASE_URL.",
-                            "Restore network access to NCI_SI_CADSR_BASE_URL.",
+                            "Restore network access to NCI_SIP_EVS_BASE_URL.",
+                            "Restore network access to NCI_SIP_CADSR_BASE_URL.",
                         ],
                     }
                 ],
@@ -204,8 +204,8 @@ class InstallerCliTest(unittest.TestCase):
                 "nextAction": (
                     "Resolve the failed prerequisites: Install Git so pip can install the recorded "
                     "source commit.; Restore "
-                    "network access to NCI_SI_EVS_BASE_URL.; Restore network access to "
-                    "NCI_SI_CADSR_BASE_URL."
+                    "network access to NCI_SIP_EVS_BASE_URL.; Restore network access to "
+                    "NCI_SIP_CADSR_BASE_URL."
                 ),
             }
             self.assertEqual(json.loads(run[1]), expected)
@@ -214,8 +214,8 @@ class InstallerCliTest(unittest.TestCase):
     def test_restart_rejects_removed_component_flags_without_changing_state(self):
         with tempfile.TemporaryDirectory() as directory:
             environment = os.environ | {
-                "NCI_SI_EVS_BASE_URL": "http://127.0.0.1:1",
-                "NCI_SI_CADSR_BASE_URL": "http://127.0.0.1:2",
+                "NCI_SIP_EVS_BASE_URL": "http://127.0.0.1:1",
+                "NCI_SIP_CADSR_BASE_URL": "http://127.0.0.1:2",
             }
             self.run_installer(
                 "run", "--target", "local", "--data-dir", directory, environment=environment
@@ -464,8 +464,8 @@ class InstallerCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory():
             environment = os.environ | {
                 "PATH": "",
-                "NCI_SI_EVS_BASE_URL": "http://127.0.0.1:1",
-                "NCI_SI_CADSR_BASE_URL": "http://127.0.0.1:2",
+                "NCI_SIP_EVS_BASE_URL": "http://127.0.0.1:1",
+                "NCI_SIP_CADSR_BASE_URL": "http://127.0.0.1:2",
             }
             code, stdout, stderr = self.run_installer(
                 "help", "check_prerequisites", "--target", "local", environment=environment

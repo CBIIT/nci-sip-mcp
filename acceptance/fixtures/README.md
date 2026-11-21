@@ -1,7 +1,7 @@
 # Fixtures
 
 The upstream responses the suite runs against in fixture mode.
-Each is a JSON file in the format `src/nci_si_acceptance/fixture_server.py` describes, and states
+Each is a JSON file in the format `src/nci_sip_acceptance/fixture_server.py` describes, and states
 whether it was **recorded** from a live service (and when) or **crafted** for a case the live
 service does not produce on demand (and which requirement it stands in for).
 
@@ -16,13 +16,13 @@ service does not produce on demand (and which requirement it stands in for).
   crafted outright, in memory, by `craft.py` (for example caDSR's capped keyword search).
 - `scenarios/<group>/<name>/`: the fixtures of one scenario, which answer before the ordinary
   ones while a test selects it (`@pytest.mark.scenario("<group>/<name>")`). A `settings.json`
-  there holds the `NCI_SI_*` settings the scenario's server process starts with. Only recorded
+  there holds the `NCI_SIP_*` settings the scenario's server process starts with. Only recorded
   scenario fixtures are files; the crafted ones are built in memory.
 
 ## Scenarios
 
 The scenario fixtures are recorded from live where EVS produces the
-case on demand (`acceptance-record`) and crafted otherwise by `src/nci_si_acceptance/craft.py`,
+case on demand (`acceptance-record`) and crafted otherwise by `src/nci_sip_acceptance/craft.py`,
 from the recorded set where they change a real answer. Crafted fixtures are not files: they are
 built in memory whenever the set loads, and the manifest's `crafted:` line holds the digest of
 what `craft.py` makes now, so a change to them shows in review as that one line. To review a
@@ -66,7 +66,7 @@ caDSR's own behaviour is in the ordinary fixtures, with no scenario of its own:
   back as HTTP 200, with `apiResponse` saying so (X-15).
 - **Credentials.** The lists-of-values API and CDE Match refuse an anonymous caller (401,
   recorded). Until NCI issues credentials (owner's decision, 3 October 2026),
-  `cadsr/credentialed` answers for a server that holds `NCI_SI_CADSR_CREDENTIAL` with answers
+  `cadsr/credentialed` answers for a server that holds `NCI_SIP_CADSR_CREDENTIAL` with answers
   crafted from the published contracts, recorded under `recorded/cadsr-contracts/`. The data
   elements and contexts in them are the recorded content's; what no recording can give (CDE
   Match's scores, its rule, marked "Crafted") is invented. A self-test holds each answer to its
@@ -109,7 +109,7 @@ Two kinds of request are answered whatever their form:
 
 - **Concepts.** One recording per concept answers every projection (`include`) of that concept
   and each of its relation lists the recording covers, and every batch (`?list=`) is composed
-  from the recordings of the concepts it names, by the rules of `src/nci_si_acceptance/concepts.py`. A batch comes back in no particular order: EVS keeps none.
+  from the recordings of the concepts it names, by the rules of `src/nci_sip_acceptance/concepts.py`. A batch comes back in no particular order: EVS keeps none.
 - **Ignored parameters.** A parameter the live service is shown to ignore is declared with the
   evidence and left out of the match (FHIR `$expand` ignores `count`, `offset` and `activeOnly`).
 

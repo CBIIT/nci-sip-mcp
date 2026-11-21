@@ -9,9 +9,9 @@ import pytest
 import yaml
 from http_receiver import WireReceiver
 
-from nci_si_acceptance import record
-from nci_si_acceptance.fixture_server import FixtureServer, load_fixtures
-from nci_si_acceptance.record import Recorder, RecordingError, live_fetch, plan, stale, write
+from nci_sip_acceptance import record
+from nci_sip_acceptance.fixture_server import FixtureServer, load_fixtures
+from nci_sip_acceptance.record import Recorder, RecordingError, live_fetch, plan, stale, write
 
 RELEASE_QUERY = (
     "evs",

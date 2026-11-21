@@ -14,12 +14,12 @@ import pytest
 from anyio.streams.buffered import BufferedByteReceiveStream
 from test_request_supervision import authorization, failure_leaves
 
-from nci_si_acceptance import request_children, request_stdio
-from nci_si_acceptance.client import open_session
-from nci_si_acceptance.request_authorization import Authorization, Limits, RequestGrant
-from nci_si_acceptance.request_stdio import StderrTransfer, StdioOwner
-from nci_si_acceptance.request_supervision import SupervisedRun
-from nci_si_mcp.errors import RequestPolicyError
+from nci_sip_acceptance import request_children, request_stdio
+from nci_sip_acceptance.client import open_session
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_acceptance.request_stdio import StderrTransfer, StdioOwner
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_mcp.errors import RequestPolicyError
 
 # Deadlock protection for fixture phases, not a startup or production cleanup deadline.
 PROCESS_SAFETY_SECONDS = 30

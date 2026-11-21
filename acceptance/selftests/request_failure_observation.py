@@ -1,16 +1,19 @@
 """Failure-only evidence at the registered-child snapshot boundary."""
 
 import json
+import linecache
 import sqlite3
 import sys
+import time
 from typing import Literal, NotRequired, TypedDict
 
 import pytest
 
-from nci_si_acceptance.request_budget import ControlledRun, LedgerSnapshot
-from nci_si_mcp.http_client import RequestPolicyError
+from nci_sip_acceptance.request_budget import ControlledRun, LedgerSnapshot
+from nci_sip_mcp.http_client import RequestPolicyError
 
 PROPERTY = "accounting_snapshot_diagnostic"
+ATTEMPT_PROPERTY = "accounting_snapshot_attempt"
 # Enough for the accounting refusal and a failed marker; never traverse unrelated graphs.
 MAX_CONTEXTS = 8
 MAX_SQLITE_CODE = 2147483647  # Bound SQLite integer metadata to a signed 32-bit code.
@@ -114,9 +117,44 @@ def _publish(record: Observation, node: pytest.Item) -> None:
                 node.user_properties[index] = (PROPERTY, json.dumps(record))
 
 
+class Attempt(TypedDict):
+    elapsed_seconds: float
+    function: NotRequired[str]
+    line: NotRequired[int]
+    statement: NotRequired[str]
+
+
+def _attempt(error: RequestPolicyError, elapsed: float) -> Attempt:
+    """Name the ledger statement that failed from the traceback the refusal already carries."""
+    attempt: Attempt = {"elapsed_seconds": round(elapsed, 3)}
+    context = BaseException.__dict__["__context__"].__get__(error)
+    trace = None if context is None else context.__traceback__
+    frames = []
+    while trace is not None:
+        frames.append(trace)
+        trace = trace.tb_next
+    ledger = [t for t in frames if t.tb_frame.f_code.co_filename.endswith("request_budget.py")]
+    if ledger:
+        innermost = ledger[-1]
+        code = innermost.tb_frame.f_code
+        attempt["function"] = code.co_qualname
+        attempt["line"] = innermost.tb_lineno
+        attempt["statement"] = linecache.getline(code.co_filename, innermost.tb_lineno).strip()
+    return attempt
+
+
+def _publish_attempt(attempt: Attempt, node: pytest.Item) -> None:
+    text = json.dumps(attempt)
+    node.user_properties.append((ATTEMPT_PROPERTY, text))
+    node.add_report_section("call", ATTEMPT_PROPERTY, text)
+
+
 def snapshot(run: ControlledRun, node: pytest.Item) -> LedgerSnapshot:
+    started = time.monotonic()
     try:
         return run.snapshot()
     except RequestPolicyError as error:
+        elapsed = time.monotonic() - started
         _publish(_observe(error), node)
+        _publish_attempt(_attempt(error, elapsed), node)
         raise

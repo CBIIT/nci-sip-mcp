@@ -20,7 +20,7 @@ journal/WAL files beside `nci_si.sqlite3`; UID/GID 65532 must be able to write t
 Serving never builds or activates an index.
 
 Supply the embedding model separately in a read-only Hugging Face cache mounted at
-`/model-cache`. `NCI_SI_EMBEDDING_MODEL` must retain the model identity in the index manifest,
+`/model-cache`. `NCI_SIP_EMBEDDING_MODEL` must retain the model identity in the index manifest,
 not a new path to the same weights. If the index was built using a local model path, mount
 the model at that same path. The image sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`;
 the container entry point additionally requests local files only. Missing or incompatible
@@ -36,8 +36,8 @@ docker run --rm --read-only --stop-timeout 20 --cap-drop=ALL --security-opt=no-n
 ```
 
 The environment file is supplied by the operator, never built into the image. It must configure
-the approved `NCI_SI_HTTP_AUTH_FACTORY` integration, or explicitly set
-`NCI_SI_HTTP_AUTH_MODE=trusted-local` for a trusted local deployment with loopback-only publishing
+the approved `NCI_SIP_HTTP_AUTH_FACTORY` integration, or explicitly set
+`NCI_SIP_HTTP_AUTH_MODE=trusted-local` for a trusted local deployment with loopback-only publishing
 (`-p 127.0.0.1:...`, as above). Otherwise startup refuses before listening with
 `Required HTTP authentication needs an installed integration factory`. Host allow-lists are
 not authentication: a reachable client can supply an allowed Host header. Set the
@@ -55,7 +55,7 @@ asserts upstream availability. The image's HEALTHCHECK requests `/health`; local
 `/ready` instead. Both use the configured HTTP port, a three-second request bound, 30-second
 interval, five-second probe timeout, 180-second startup grace and three retries. The startup
 grace matches the smoke's model/index startup allowance; increase it for larger cold assets.
-If overriding `NCI_SI_HTTP_ALLOWED_HOSTS`, retain `127.0.0.1:*` for these internal probes; they do
+If overriding `NCI_SIP_HTTP_ALLOWED_HOSTS`, retain `127.0.0.1:*` for these internal probes; they do
 not bypass Host admission or need credentials. JSON diagnostics go to stderr, collected by container log
 drivers; stdout remains reserved for MCP when stdio is explicitly selected.
 
@@ -83,11 +83,11 @@ client-facing end-to-end bound; it does not guarantee cancellation of server wor
 
 Restrict outbound traffic at the network layer to the origins configured by these settings:
 
-- `NCI_SI_EVS_BASE_URL`
-- `NCI_SI_EVS_FHIR_BASE_URL`
-- `NCI_SI_CADSR_BASE_URL`
-- `NCI_SI_CADSR_FTP_URL`
-- `NCI_SI_SSIS_SPARQL_URL`
+- `NCI_SIP_EVS_BASE_URL`
+- `NCI_SIP_EVS_FHIR_BASE_URL`
+- `NCI_SIP_CADSR_BASE_URL`
+- `NCI_SIP_CADSR_FTP_URL`
+- `NCI_SIP_SSIS_SPARQL_URL`
 
 Derive the allow-list from deployment configuration, not a fixed list of production hosts.
 Mounted model and index assets need no download access. Separately account for destinations
@@ -126,7 +126,7 @@ the image scan. [Publication recovery](#scan-policy-and-publication) is describe
 ### Local builds and dependency lock
 
 Run `pdm build --no-sdist` in a tagged checkout, then
-`docker build --platform linux/amd64 --load -t nci-si-mcp:local .`; `--load` puts the image in
+`docker build --platform linux/amd64 --load -t nci-sip-mcp:local .`; `--load` puts the image in
 the local store, where a buildx `docker-container` builder would otherwise leave it in the build
 cache. The `docker` CLI on a Podman engine builds the OCI format, which drops the
 `HEALTHCHECK` the smoke check reads; there use `podman build --format docker` instead.
@@ -135,7 +135,7 @@ about 1.6 GB, so it needs that network access, the disk and several minutes.
 The build trusts the PyTorch wheel index at `https://download.pytorch.org/whl/cpu` as an
 additional dependency source; the committed lock binds the selected wheel hashes.
 Keep exactly one current wheel in `dist/`. Run
-`pdm run python -m scripts.container_smoke nci-si-mcp:local` to check the image with an
+`pdm run python -m scripts.container_smoke nci-sip-mcp:local` to check the image with an
 external, test-only model and a recorded concept. CI builds the same wheel/image and runs
 the same smoke check, including default-auth refusal, explicit local serving and Docker's
 healthy status. This is packaging evidence, not production retrieval calibration.

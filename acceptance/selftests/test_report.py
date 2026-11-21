@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from nci_si_acceptance import report as report_module
-from nci_si_acceptance.report import (
+from nci_sip_acceptance import report as report_module
+from nci_sip_acceptance.report import (
     ATTRIBUTION,
     COLLECTOR,
     UNMATCHED,
@@ -24,13 +24,13 @@ from nci_si_acceptance.report import (
     withhold_from,
     write_report,
 )
-from nci_si_acceptance.report import (
+from nci_sip_acceptance.report import (
     SUITE as SUITE_KEY,
 )
-from nci_si_acceptance.report import (
+from nci_sip_acceptance.report import (
     TestResult as NativeTestResult,
 )
-from nci_si_acceptance.spec import REQUIRED_TOOLS
+from nci_sip_acceptance.spec import REQUIRED_TOOLS
 
 
 @pytest.mark.parametrize(
@@ -510,7 +510,7 @@ def test_the_report_records_the_transport_of_the_run():
 
 
 def test_a_failure_shows_the_credential_of_a_remote_server_nowhere(monkeypatch):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_AUTHORIZATION", "Bearer do-not-print")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_AUTHORIZATION", "Bearer do-not-print")
     failed = pytest.TestReport(
         "t.py::test_a",
         ("t.py", 1, "test_a"),
@@ -531,7 +531,7 @@ def test_a_failure_shows_the_credential_of_a_remote_server_nowhere(monkeypatch):
 
 
 def test_an_unrelated_failure_keeps_its_rich_traceback(monkeypatch):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_AUTHORIZATION", "Bearer private-token")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_AUTHORIZATION", "Bearer private-token")
     traceback = SimpleNamespace(reprcrash="AssertionError: expected concept C1")
     failed = phase("call", "failed")
     failed.longrepr = traceback
@@ -546,7 +546,7 @@ def test_a_credential_with_quotes_and_non_ascii_is_withheld_from_the_report_file
     monkeypatch, tmp_path
 ):
     credential = 'Digest username="a\\b", realm="Zürich"'
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_AUTHORIZATION", credential)
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_AUTHORIZATION", credential)
     collector = Collector()
     collector.tests["t.py::test_a"] = {
         "tool": "get_form",

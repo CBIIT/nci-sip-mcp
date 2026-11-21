@@ -5,15 +5,15 @@ server process of its own, started with the scenarios active and with their
 settings, so that nothing the server keeps between calls outlives them. Requests a
 server makes while it starts must find fixtures too.
 
-Against a remote server (`NCI_SI_ACCEPTANCE_URL`) the harness starts no process: a probe makes
+Against a remote server (`NCI_SIP_ACCEPTANCE_URL`) the harness starts no process: a probe makes
 sure the server answers and reaches the fixture server before the first test, and the operator's
 state-change hook, where there is one, gives a scenario set's tests, and each `own_server` test,
 the state they need; without it those tests are skipped. A remote server's prepare step is
-the operator's (`NCI_SI_ACCEPTANCE_PREPARED`).
+the operator's (`NCI_SIP_ACCEPTANCE_PREPARED`).
 
 The operator's prepare command, where one is given, runs once, before the first test that
 starts a server, in the server's environment, with the codes of the index set listed in the file
-`NCI_SI_ACCEPTANCE_INDEX_CODES` names; every server then starts from a copy of the data
+`NCI_SIP_ACCEPTANCE_INDEX_CODES` names; every server then starts from a copy of the data
 directory it produced. A prepare command that fails, or whose requests find no fixture,
 fails every test that depends on it, without aborting unrelated tests.
 """
@@ -31,23 +31,23 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import yaml
 
-from nci_si_acceptance.client import (
+from nci_sip_acceptance.client import (
     INDEX_CODES_VARIABLE,
     Target,
     open_remote_session,
     open_session,
     server_environment,
 )
-from nci_si_acceptance.environments import NATIVE_HANDOFF
-from nci_si_acceptance.fixture_server import (
+from nci_sip_acceptance.environments import NATIVE_HANDOFF
+from nci_sip_acceptance.fixture_server import (
     MANIFEST,
     FixtureServer,
     fixture_documents,
     load_fixtures,
 )
-from nci_si_acceptance.remote import StateHook, announcement, probe
-from nci_si_acceptance.report import COLLECTOR, write_report
-from nci_si_acceptance.suite import (
+from nci_sip_acceptance.remote import StateHook, announcement, probe
+from nci_sip_acceptance.report import COLLECTOR, write_report
+from nci_sip_acceptance.suite import (
     NOT_DECLARED_PREPARED,
     NOT_PREPARED,
     OWN_SERVER,
@@ -63,17 +63,17 @@ from nci_si_acceptance.suite import (
     skip_unprepared,
     unmatched_requests,
 )
-from nci_si_acceptance.tools import Process, Tools
+from nci_sip_acceptance.tools import Process, Tools
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from typing import TextIO
 
-    from nci_si_acceptance.client import Session
-    from nci_si_acceptance.request_native import NativeRun
-    from nci_si_acceptance.request_stdio import StderrTransfer
+    from nci_sip_acceptance.client import Session
+    from nci_sip_acceptance.request_native import NativeRun
+    from nci_sip_acceptance.request_stdio import StderrTransfer
 
-pytest_plugins = ["nci_si_acceptance.report"]
+pytest_plugins = ["nci_sip_acceptance.report"]
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 TARGET = pytest.StashKey[Target]()
@@ -96,10 +96,10 @@ def pytest_configure(config: pytest.Config) -> None:
         raise pytest.UsageError(str(error)) from error
     if config.stash[TARGET].url and config.getoption("numprocesses", None):
         # Workers would each run the probe and the state-change hook against the one server.
-        raise pytest.UsageError("a remote server (NCI_SI_ACCEPTANCE_URL) is tested by one process")
+        raise pytest.UsageError("a remote server (NCI_SIP_ACCEPTANCE_URL) is tested by one process")
     if config.getoption("controlled_run_dir") is not None:
         # Furnished opt-in keeps ordinary fixture installs independent of the core.
-        from nci_si_acceptance.request_native import NativeRun  # noqa: PLC0415
+        from nci_sip_acceptance.request_native import NativeRun  # noqa: PLC0415
 
         try:
             config.stash[NATIVE] = NativeRun(config, config.stash[TARGET])
@@ -333,7 +333,7 @@ def _session_log(target: Target, path: Path) -> Iterator[tuple[TextIO, StderrTra
     try:
         if target.controller is not None:
             # Only a controlled caller transfers its diagnostic file.
-            from nci_si_acceptance.request_stdio import StderrTransfer  # noqa: PLC0415
+            from nci_sip_acceptance.request_stdio import StderrTransfer  # noqa: PLC0415
 
             transfer = StderrTransfer(stream)
         yield stream, transfer

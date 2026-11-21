@@ -10,8 +10,8 @@ from dataclasses import replace
 import pytest
 import yaml
 
-from nci_si_acceptance import document, stories
-from nci_si_acceptance.requirements import load_requirements
+from nci_sip_acceptance import document, stories
+from nci_sip_acceptance.requirements import load_requirements
 
 pytest_plugins = ["pytester"]
 
@@ -41,8 +41,8 @@ def source(tmp_path, value):
 
 
 def test_every_actual_case_is_documented_and_the_generated_guide_is_current(pytester, monkeypatch):
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_MODE", "fixture")
-    monkeypatch.setenv("NCI_SI_ACCEPTANCE_PROFILE", "unified")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_MODE", "fixture")
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_PROFILE", "unified")
     items, _ = pytester.inline_genitems(str(stories.ROOT / "tests"), "-p", "no:cacheprovider")
     cases = stories.cases_of(items)
     rendered = stories.render(stories.load_stories(), cases)
@@ -189,13 +189,13 @@ def test_check_mode_reports_staleness_without_rewriting(tmp_path, monkeypatch, e
 def test_command_writes_the_complete_guide_even_with_profile_or_pytest_filters(tmp_path):
     output = tmp_path / "guide.md"
     environment = os.environ | {
-        "NCI_SI_ACCEPTANCE_PROFILE": "cadsr",
-        "NCI_SI_ACCEPTANCE_MODE": "live",
+        "NCI_SIP_ACCEPTANCE_PROFILE": "cadsr",
+        "NCI_SIP_ACCEPTANCE_MODE": "live",
         "PYTEST_ADDOPTS": "-k no_tests_match_this_expression",
     }
 
     completed = subprocess.run(  # noqa: S603 - same interpreter, suite module, no server execution
-        [sys.executable, "-m", "nci_si_acceptance.stories", "--output", str(output)],
+        [sys.executable, "-m", "nci_sip_acceptance.stories", "--output", str(output)],
         env=environment,
         capture_output=True,
         text=True,

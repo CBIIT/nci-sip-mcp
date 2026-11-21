@@ -1,6 +1,9 @@
 """The Local run workflow walks the documented setup as written, on both platforms."""
 
+import os
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -34,7 +37,7 @@ STEPS = [
     ("Check that the documented Python and PDM are in use (macOS)", f"({PDM_ROWS}) && {MACOS}"),
     ("Check that the documented Python and PDM are in use (Linux)", f"({PDM_ROWS}) && {LINUX}"),
     ("Print the EVS release", "matrix.combination == 'server'"),
-    ("Select the released index source (CI only)", "matrix.server || matrix.index"),
+    ("Select release or candidate index source (CI only)", "matrix.server || matrix.index"),
     ("Install released server and optional index environments", "matrix.server || matrix.index"),
     ("Start the loopback caDSR and Shared SI recorder (CI only)", "matrix.server"),
     ("Verify the local server lifecycle", "matrix.server"),
@@ -102,16 +105,16 @@ DOCUMENTS = {
 }
 
 CI_INDEX_INSTALL = (
-    '"$INDEX_VENV/bin/python" -m pip install "nci-si-mcp[server,index] @ '
+    '"$INDEX_VENV/bin/python" -m pip install "nci-sip-mcp[server,index] @ '
     'git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"'
 )
 CI_SERVER_INSTALL = (
-    '"$SERVER_VENV/bin/python" -m pip install "nci-si-mcp[server] @ '
+    '"$SERVER_VENV/bin/python" -m pip install "nci-sip-mcp[server] @ '
     'git+https://github.com/CBIIT/nci-sip-mcp@${RELEASE_TAG}"'
 )
 
 FIXTURE_RUN = """# shellcheck disable=SC2016 # the single quotes are the documented form
-NCI_SI_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SI_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SI_ACCEPTANCE_PREPARE='nci-si-mcp index-sample $(cat "$NCI_SI_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json
+NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE=required NCI_SIP_ACCEPTANCE_SECURITY_SERVER='python ../scripts/permissions_fixture.py' NCI_SIP_ACCEPTANCE_PREPARE='nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")' pdm run acceptance -n 4 --dist worksteal --report=fixture.json
 status=$?
 [ "$status" -le 1 ] && [ -s acceptance/fixture.json ] || { echo "::error::The fixture run did not finish (exit status $status)."; exit 1; }
 """  # noqa: E501
@@ -137,8 +140,8 @@ CI_ONLY = {
     "that the runner image ships takes over from the uv install",
     "Write the readiness probe (CI only)": "the helper that starts a documented server, waits "
     "for its readiness endpoint and stops it",
-    "Select the released index source (CI only)": "a pull request substitutes its checkout for "
-    "the tag in the documented release URL, while other runs select the latest release tag",
+    "Select release or candidate index source (CI only)": "PR, main-push and manual branch runs "
+    "use this checkout; scheduled runs select the latest published release",
     "Serve over stdio and initialize (CI only)": "an initialize round-trip that no one types",
     "Verify required-index HTTP and indexed search (CI only)": "starts the documented command "
     "under a readiness probe, then calls MCP and asserts the sampled concept and index provenance",
@@ -183,11 +186,11 @@ CI_ONLY = {
     "curl --fail --silent http://127.0.0.1:8000/ready": "verifies the guide's documented HTTP "
     "readiness endpoint",
     "status=$?": "keeps the fixture run's exit status, which the next line judges",
-    'export NCI_SI_DATA_DIR="$INDEX_DATA"': "uses the workflow's temporary index directory in "
+    'export NCI_SIP_DATA_DIR="$INDEX_DATA"': "uses the workflow's temporary index directory in "
     "place of the document's /path/to/data placeholder",
-    '"$INDEX_VENV/bin/nci-si-mcp" index-sample C3262 C2991 C40704 C153397 C116938': "runs the "
+    '"$INDEX_VENV/bin/nci-sip-mcp" index-sample C3262 C2991 C40704 C153397 C116938': "runs the "
     "documented sample through the isolated tagged-release environment",
-    '"$INDEX_VENV/bin/nci-si-mcp" evaluate': "runs the documented evaluation through the same "
+    '"$INDEX_VENV/bin/nci-sip-mcp" evaluate': "runs the documented evaluation through the same "
     "isolated tagged-release environment",
     '[ "$status" -le 1 ] && [ -s acceptance/fixture.json ] || { echo "::error::The fixture run '
     'did not finish (exit status $status)."; exit 1; }': "exit status 1 means some tests did "
@@ -199,9 +202,9 @@ CI_ONLY = {
 # local-run.yml says what this does not cover; tests/test_workflow_containment.py ties both
 # installer jobs to the same design.
 LOOPBACK_ENV = {
-    "NCI_SI_CADSR_BASE_URL": "http://127.0.0.1:8767/cadsr",
-    "NCI_SI_CADSR_FTP_URL": "http://127.0.0.1:8767/cadsr-ftp",
-    "NCI_SI_SSIS_SPARQL_URL": "http://127.0.0.1:8767/ssis-sparql",
+    "NCI_SIP_CADSR_BASE_URL": "http://127.0.0.1:8767/cadsr",
+    "NCI_SIP_CADSR_FTP_URL": "http://127.0.0.1:8767/cadsr-ftp",
+    "NCI_SIP_SSIS_SPARQL_URL": "http://127.0.0.1:8767/ssis-sparql",
     "no_proxy": "127.0.0.1,localhost,::1,cadsrapi.cancer.gov,cadsrapi-stage.cancer.gov,"
     "cadsr.nci.nih.gov,shared.semantics.cancer.gov",
 }
@@ -268,7 +271,7 @@ PY
 PROBES = {
     "Serve over stdio and initialize (CI only)": (
         "QUICKSTART.md",
-        "pdm run nci-si-mcp serve",
+        "pdm run nci-sip-mcp serve",
         None,
     ),
     "Serve the validation dashboard until ready (CI only)": (
@@ -284,7 +287,7 @@ PROBES = {
 }
 
 DOCUMENTED_INDEX_INSTALL = (
-    '"$INDEX_VENV/bin/python" -m pip install "nci-si-mcp[server,index] @ '
+    '"$INDEX_VENV/bin/python" -m pip install "nci-sip-mcp[server,index] @ '
     'git+https://github.com/CBIIT/nci-sip-mcp@vX.Y.Z"'
 )
 REQUIRED_INDEX_RUN = r"""set -euo pipefail
@@ -311,9 +314,9 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
-export NCI_SI_DATA_DIR="$INDEX_DATA"
-export NCI_SI_HTTP_REQUIRE_INDEX=1
-"$INDEX_VENV/bin/nci-si-mcp" serve --transport streamable-http &
+export NCI_SIP_DATA_DIR="$INDEX_DATA"
+export NCI_SIP_HTTP_REQUIRE_INDEX=1
+"$INDEX_VENV/bin/nci-sip-mcp" serve --transport streamable-http &
 server=$!
 python3 "$RUNNER_TEMP/ready.py" http://127.0.0.1:8000/ready --pid "$server"
 "$INDEX_VENV/bin/python" - <<'PY'
@@ -335,7 +338,7 @@ asyncio.run(check())
 PY
 """
 
-SERVER_ONLY_RUN = r"""export NCI_SI_DATA_DIR="$RUNNER_TEMP/server-only-data"
+SERVER_ONLY_RUN = r"""export NCI_SIP_DATA_DIR="$RUNNER_TEMP/server-only-data"
 "$SERVER_VENV/bin/python" - <<'PY'
 import asyncio
 import os
@@ -344,9 +347,9 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 async def check():
     server = StdioServerParameters(
-        command=os.environ["SERVER_VENV"] + "/bin/nci-si-mcp",
+        command=os.environ["SERVER_VENV"] + "/bin/nci-sip-mcp",
         args=["serve"],
-        env={"NCI_SI_DATA_DIR": os.environ["RUNNER_TEMP"] + "/server-only-data"},
+        env={"NCI_SIP_DATA_DIR": os.environ["RUNNER_TEMP"] + "/server-only-data"},
     )
     async with Client(stdio_client(server)) as client:
         arguments = {"terminology": "ncit", "query": "Neoplasm", "mode": "semantic"}
@@ -606,7 +609,7 @@ import json, subprocess
 request = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
     "protocolVersion": "2025-06-18", "capabilities": {},
     "clientInfo": {"name": "local-run", "version": "0"}}}
-server = subprocess.Popen(["pdm", "run", "nci-si-mcp", "serve"], stdin=subprocess.PIPE,
+server = subprocess.Popen(["pdm", "run", "nci-sip-mcp", "serve"], stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, text=True)
 try:
     server.stdin.write(json.dumps(request) + "\n")
@@ -873,23 +876,107 @@ class LocalRunWorkflowTest(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            by_name["Select the released index source (CI only)"],
+            by_name["Select release or candidate index source (CI only)"],
             "\n".join(
                 (
                     "set -euo pipefail",
-                    'if [ "$EVENT_NAME" = "pull_request" ]; then',
+                    'if [ "$EVENT_NAME" = "schedule" ]; then',
+                    '  RELEASE_TAG="$(git describe --tags --abbrev=0)"',
+                    (
+                        '  RELEASE_DISTRIBUTION="$(git show "$RELEASE_TAG:pyproject.toml" | '
+                        "python3 -c 'import sys, tomllib; "
+                        'print(tomllib.loads(sys.stdin.read())["project"]["name"])\')"'
+                    ),
+                    '  if [ "$RELEASE_DISTRIBUTION" != "nci-sip-mcp" ]; then',
+                    (
+                        '    echo "::error::Scheduled tag $RELEASE_TAG provides '
+                        "$RELEASE_DISTRIBUTION; no compatible NCI SIP release is available, so "
+                        "released SIP verification "
+                        'was not performed."'
+                    ),
+                    "    exit 1",
+                    "  fi",
+                    "else",
                     "  RELEASE_TAG=v0.0.0",
                     '  git tag "$RELEASE_TAG" HEAD',
                     '  git config --global --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-si-mcp',
                     '  git config --global --add url."file://$GITHUB_WORKSPACE/".insteadOf https://github.com/CBIIT/nci-sip-mcp',
-                    "else",
-                    '  RELEASE_TAG="$(git describe --tags --abbrev=0)"',
                     "fi",
                     'echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"',
                     "",
                 )
             ),
         )
+
+    def test_source_selection_uses_candidate_for_unreleased_events_and_tag_for_schedule(self):
+        script = run_by_name()["Select release or candidate index source (CI only)"]
+        scenarios = (
+            ("pull_request", "refs/pull/42/merge", "v0.0.0", True),
+            ("push", "refs/heads/main", "v0.0.0", True),
+            ("workflow_dispatch", "refs/heads/issue/511-policy", "v0.0.0", True),
+            ("workflow_dispatch", "refs/heads/main", "v0.0.0", True),
+            ("schedule", "refs/heads/main", "v0.39.2", False),
+        )
+        for event, ref, expected_tag, candidate in scenarios:
+            with self.subTest(event=event, ref=ref), TemporaryDirectory() as directory:
+                root = Path(directory)
+                git_dir = root / "bin"
+                git_dir.mkdir()
+                fake_git = git_dir / "git"
+                calls = root / "git-calls"
+                fake_git.write_text(
+                    f"#!{sys.executable}\n"
+                    "import os, sys\n"
+                    "with open(os.environ['GIT_CALLS'], 'a', encoding='utf-8') as stream:\n"
+                    "    stream.write(' '.join(sys.argv[1:]) + '\\n')\n"
+                    "if sys.argv[1:] == ['describe', '--tags', '--abbrev=0']:\n"
+                    "    print(os.environ['FAKE_TAG'])\n"
+                    "elif sys.argv[1:] == ['show', os.environ['FAKE_TAG'] + ':pyproject.toml']:\n"
+                    "    print('[project]\\nname = \"nci-si-mcp\"')\n",
+                    encoding="utf-8",
+                )
+                fake_git.chmod(0o755)
+                environment = {
+                    "EVENT_NAME": event,
+                    "GITHUB_REF": ref,
+                    "GITHUB_WORKSPACE": str(root),
+                    "GITHUB_ENV": str(root / "github-env"),
+                    "GIT_CONFIG_GLOBAL": str(root / "global.gitconfig"),
+                    "GIT_CALLS": str(calls),
+                    "FAKE_TAG": "v0.39.2",
+                    "HOME": str(root),
+                    "PATH": str(git_dir) + os.pathsep + os.environ["PATH"],
+                }
+                result = subprocess.run(  # noqa: S603 - executes a repository-owned workflow step in a temp dir
+                    ["bash", "-e", "-o", "pipefail", "-c", script],  # noqa: S607
+                    cwd=root,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                commands = calls.read_text(encoding="utf-8").splitlines()
+                if candidate:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(
+                        (root / "github-env").read_text(encoding="utf-8"),
+                        f"RELEASE_TAG={expected_tag}\n",
+                    )
+                    self.assertEqual(len(commands), 3)
+                    self.assertEqual(commands[0], "tag v0.0.0 HEAD")
+                    self.assertTrue(all("file:///" in command for command in commands[1:]))
+                else:
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("nci-si-mcp", result.stdout)
+                    self.assertIn("released SIP verification was not performed", result.stdout)
+                    self.assertEqual(
+                        commands,
+                        [
+                            "describe --tags --abbrev=0",
+                            "show v0.39.2:pyproject.toml",
+                        ],
+                    )
 
     def test_required_index_readiness_and_search_are_exact(self):
         by_name = run_by_name()
@@ -1016,7 +1103,7 @@ class LocalRunWorkflowTest(unittest.TestCase):
         self.assertEqual(
             extra,
             {
-                "Select the released index source (CI only)": ["env"],
+                "Select release or candidate index source (CI only)": ["env"],
                 "Install released server and optional index environments": ["env"],
                 "Start the loopback caDSR and Shared SI recorder (CI only)": ["id"],
                 "Build selected local container images": ["env"],

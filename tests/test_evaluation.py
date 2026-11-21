@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from fakes import concept
-from nci_si_mcp.evaluation import GoldQuery, evaluate_retrieval
+from nci_sip_mcp.evaluation import GoldQuery, evaluate_retrieval
 from ncit_index.embeddings import HashingEmbeddingProvider
 from ncit_index.index import LocalIndex
 from test_index import IndexTestCase, normalized

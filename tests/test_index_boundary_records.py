@@ -4,11 +4,11 @@ import logging
 from unittest.mock import patch
 
 from fakes import concept, release
-from nci_si_mcp.errors import InputValidationError
-from nci_si_mcp.evaluation import GoldQuery, evaluate_build, evaluate_retrieval
-from nci_si_mcp.http_client import UpstreamUnavailableError
-from nci_si_mcp.indexing import full_build, open_index
-from nci_si_mcp.registry import invoke
+from nci_sip_mcp.errors import InputValidationError
+from nci_sip_mcp.evaluation import GoldQuery, evaluate_build, evaluate_retrieval
+from nci_sip_mcp.http_client import UpstreamUnavailableError
+from nci_sip_mcp.indexing import full_build, open_index
+from nci_sip_mcp.registry import invoke
 from test_audit import captured, records
 from test_index import normalized
 from test_indexing import fixture_calibration
@@ -36,7 +36,7 @@ class IndexBoundaryRecordsTest(ServerFixture):
         )
 
     def test_sample_replacement_and_operator_activation_emit_info_records(self):
-        with captured(), self.assertLogs("nci_si_mcp.index", level="INFO") as logs:
+        with captured(), self.assertLogs("nci_sip_mcp.index", level="INFO") as logs:
             invoke(self.context, "index_codes", ["C3262"])
             first = self.local_index.get_active_manifest()
             self.evs.release = release("26.07d", "2026-07-27")

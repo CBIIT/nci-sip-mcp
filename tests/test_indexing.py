@@ -4,14 +4,14 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from fakes import concept, release, terminology_row
-from nci_si_mcp.errors import correlated
-from nci_si_mcp.evaluation import evaluate_build
-from nci_si_mcp.evaluation_sets import parse_set
-from nci_si_mcp.evs import EVSClient, EVSReleaseMismatchError, EVSResponseError
-from nci_si_mcp.index_adapter import manifest_record
-from nci_si_mcp.indexing import full_build
-from nci_si_mcp.registry import invoke
-from nci_si_mcp.release import ReleaseContext
+from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evaluation import evaluate_build
+from nci_sip_mcp.evaluation_sets import parse_set
+from nci_sip_mcp.evs import EVSClient, EVSReleaseMismatchError, EVSResponseError
+from nci_sip_mcp.index_adapter import manifest_record
+from nci_sip_mcp.indexing import full_build
+from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.release import ReleaseContext
 from ncit_index.errors import IndexBuildError, IndexCompatibilityError
 from test_audit import captured, records
 from test_evaluation_sets import sample_set_payload
@@ -38,7 +38,7 @@ class FullBuildTest(ServerFixture):
 
     def build_pages(self, pages):
         replies = [FakeResponse(json.dumps(page).encode()) for page in pages]
-        with patch("nci_si_mcp.http_client._open", side_effect=replies) as opened:
+        with patch("nci_sip_mcp.http_client._open", side_effect=replies) as opened:
             result = full_build(self.context, self.release)
         return result, [call.args[0].full_url for call in opened.call_args_list]
 
@@ -127,7 +127,7 @@ class FullBuildTest(ServerFixture):
         self.assertEqual(self.context.index.get_active_manifest(), self.active)
 
     def test_offline_rebuild_and_activation_commands_need_no_upstream(self):
-        with patch("nci_si_mcp.http_client._open", side_effect=AssertionError("offline")):
+        with patch("nci_sip_mcp.http_client._open", side_effect=AssertionError("offline")):
             result = invoke(self.context, "index_rebuild", self.active.build_id)
             listed = invoke(self.context, "index_builds")
             self.assertEqual(len(listed["builds"]), 2)
@@ -142,9 +142,9 @@ class FullBuildTest(ServerFixture):
             FakeResponse(json.dumps({"total": 1, "concepts": [concept("C1")]}).encode()),
         ]
         with (
-            patch("nci_si_mcp.http_client._open", side_effect=replies) as opened,
+            patch("nci_sip_mcp.http_client._open", side_effect=replies) as opened,
             patch(
-                "nci_si_mcp.handlers.production_set", return_value=fixture_calibration("C1", "C1")
+                "nci_sip_mcp.handlers.production_set", return_value=fixture_calibration("C1", "C1")
             ),
         ):
             result = invoke(self.context, "index_build")
@@ -159,7 +159,7 @@ class FullBuildTest(ServerFixture):
             FakeResponse(json.dumps([terminology_row()]).encode()),
             FakeResponse(json.dumps({"total": 1, "concepts": [concept("C1")]}).encode()),
         ]
-        with patch("nci_si_mcp.http_client._open", side_effect=replies):
+        with patch("nci_sip_mcp.http_client._open", side_effect=replies):
             result = invoke(self.context, "index_build")
         candidate = next(b for b in self.local_index.list_builds() if not b.active)
         self.assertIn(candidate.build_id, result["error"]["message"])
@@ -182,7 +182,7 @@ class FullBuildTest(ServerFixture):
             candidate.build_id,
         )
         with patch(
-            "nci_si_mcp.handlers.production_set",
+            "nci_sip_mcp.handlers.production_set",
             return_value=fixture_calibration("C2", "Missing"),
         ):
             result = invoke(self.context, "index_rebuild", candidate.build_id)
@@ -204,7 +204,7 @@ class FullBuildTest(ServerFixture):
             build_kind="production",
         )
         with patch(
-            "nci_si_mcp.handlers.production_set",
+            "nci_sip_mcp.handlers.production_set",
             return_value=fixture_calibration("C1", "Target"),
         ):
             result = invoke(self.context, "evaluate", build_id=candidate.build_id)
@@ -287,7 +287,7 @@ class FullBuildRequestTest(unittest.TestCase):
 
     def reply(self, value):
         return patch(
-            "nci_si_mcp.http_client._open", return_value=FakeResponse(json.dumps(value).encode())
+            "nci_sip_mcp.http_client._open", return_value=FakeResponse(json.dumps(value).encode())
         )
 
     def test_full_build_requests_all_indexed_fields_and_rejects_zero_total(self):

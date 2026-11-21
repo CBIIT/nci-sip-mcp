@@ -6,11 +6,11 @@ from urllib.error import URLError
 from jsonschema import Draft202012Validator
 
 from fakes import catalogue_rows, concept
-from nci_si_acceptance.spec import RECORDS
-from nci_si_mcp.bounds import Budget
-from nci_si_mcp.config import Settings
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.registry import invoke
+from nci_sip_acceptance.spec import RECORDS
+from nci_sip_mcp.bounds import Budget
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.registry import invoke
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
 
@@ -211,7 +211,7 @@ class CatalogueHttpTest(ServerFixture):
         ]
 
     def test_both_metadata_paths_use_the_caller_release(self):
-        with patch("nci_si_mcp.http_client._open", side_effect=self.responses()) as opened:
+        with patch("nci_sip_mcp.http_client._open", side_effect=self.responses()) as opened:
             result = self.listing()
         self.assertEqual(len(result["relationships"]), 9)
         self.assertEqual(
@@ -238,7 +238,7 @@ class CatalogueHttpTest(ServerFixture):
 
     def test_unknown_release_retains_its_specific_error(self):
         failure = http_error(404, b'{"message":"Terminology not found = ncit_old"}')
-        with patch("nci_si_mcp.http_client._open", side_effect=failure):
+        with patch("nci_sip_mcp.http_client._open", side_effect=failure):
             result = self.listing(release="old")
         self.assertEqual(result["error"]["code"], "release_not_available")
         self.assertEqual(result["error"]["details"]["requested"], "ncit_old")
@@ -246,9 +246,9 @@ class CatalogueHttpTest(ServerFixture):
     def test_retries_spend_the_shared_budget_without_partial_catalogue_success(self):
         budget = Budget(requests=2)
         with (
-            patch("nci_si_mcp.content.Budget", return_value=budget),
+            patch("nci_sip_mcp.content.Budget", return_value=budget),
             patch(
-                "nci_si_mcp.http_client._open", side_effect=[URLError("down"), *self.responses()]
+                "nci_sip_mcp.http_client._open", side_effect=[URLError("down"), *self.responses()]
             ) as opened,
         ):
             result = self.listing()
@@ -261,8 +261,8 @@ class CatalogueHttpTest(ServerFixture):
     def test_neighborhood_catalogue_and_graph_share_one_budget(self):
         budget = Budget(requests=2)
         with (
-            patch("nci_si_mcp.content.Budget", return_value=budget),
-            patch("nci_si_mcp.http_client._open", side_effect=self.responses()) as opened,
+            patch("nci_sip_mcp.content.Budget", return_value=budget),
+            patch("nci_sip_mcp.http_client._open", side_effect=self.responses()) as opened,
         ):
             result = invoke(
                 self.context,

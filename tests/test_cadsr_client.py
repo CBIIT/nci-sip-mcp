@@ -12,16 +12,16 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
-from nci_si_mcp.cadsr import CaDSRClient, export_state
-from nci_si_mcp.config import Settings
-from nci_si_mcp.errors import InputValidationError, PlatformError
-from nci_si_mcp.http_client import (
+from nci_sip_mcp.cadsr import CaDSRClient, export_state
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.errors import InputValidationError, PlatformError
+from nci_sip_mcp.http_client import (
     UpstreamRejectedError,
     UpstreamTimeoutError,
     UpstreamTooLargeError,
     UpstreamUnavailableError,
 )
-from nci_si_mcp.release import RegistryMetadataError
+from nci_sip_mcp.release import RegistryMetadataError
 from test_evs_client import http_error
 from test_http_client import Reply, ServerTestCase
 
@@ -235,7 +235,7 @@ class CaDSRClientTest(ServerTestCase):
             raise TimeoutError
 
         with (
-            patch("nci_si_mcp.http_client._open", side_effect=timeout),
+            patch("nci_sip_mcp.http_client._open", side_effect=timeout),
             self.assertRaises(UpstreamTimeoutError) as raised,
         ):
             client.match_data_element({"entity": "Fixture"}, {})
@@ -287,7 +287,7 @@ class CaDSRClientTest(ServerTestCase):
         records = []
         client.http.on_request = records.append
         with (
-            self.assertLogs("nci_si_mcp", level="DEBUG") as logs,
+            self.assertLogs("nci_sip_mcp", level="DEBUG") as logs,
             self.assertRaises(UpstreamRejectedError) as raised,
         ):
             client.list_contexts()
@@ -357,7 +357,7 @@ class ClientBoundaryTest(ServerTestCase):
             with (
                 self.subTest(failure=type(failure).__name__),
                 patch.object(error, "read", side_effect=failure),
-                patch("nci_si_mcp.http_client._open", side_effect=error) as opened,
+                patch("nci_sip_mcp.http_client._open", side_effect=error) as opened,
                 self.assertRaises(UpstreamRejectedError) as raised,
             ):
                 client.resolve_registry_release()
@@ -392,7 +392,7 @@ class ClientBoundaryTest(ServerTestCase):
         records = []
         client.match_http.on_request = records.append
         with (
-            self.assertLogs("nci_si_mcp", level="DEBUG") as logs,
+            self.assertLogs("nci_sip_mcp", level="DEBUG") as logs,
             self.assertRaises(UpstreamRejectedError) as raised,
         ):
             client.match_value_meanings([{"name": "X"}], {})
@@ -417,7 +417,7 @@ class ClientBoundaryTest(ServerTestCase):
                 raise TimeoutError
 
             with (
-                patch("nci_si_mcp.http_client._open", side_effect=timeout),
+                patch("nci_sip_mcp.http_client._open", side_effect=timeout),
                 self.assertRaises(UpstreamTimeoutError) as raised,
             ):
                 operation()

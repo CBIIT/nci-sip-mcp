@@ -6,11 +6,11 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from fakes import FakeSSIS, concept, data_element, release, terminology_row
-from nci_si_mcp.cadsr import CaDSRClient
-from nci_si_mcp.config import Settings
-from nci_si_mcp.errors import InputValidationError
-from nci_si_mcp.evs import EVSClient
-from nci_si_mcp.validation import validate_text_target
+from nci_sip_mcp.cadsr import CaDSRClient
+from nci_sip_mcp.config import Settings
+from nci_sip_mcp.errors import InputValidationError
+from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.validation import validate_text_target
 from test_cadsr_client import reply
 from test_http_client import Reply, ServerTestCase
 from test_server import ServerFixture
@@ -34,7 +34,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
     def test_direct_search_emoji_without_release_refuses_before_discovery(self):
         server = self.serve()
         self.context.evs = EVSClient(server.url)
-        with patch("nci_si_mcp.server.configure_logging"):
+        with patch("nci_sip_mcp.server.configure_logging"):
             failed, result = self.call("search_concepts", query="😀" * 1000)
         self.assertTrue(failed)
         self.assertEqual(result["error"]["code"], "invalid_request")
@@ -49,7 +49,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
             with self.subTest(extra=extra):
                 server = self.serve(reply({"total": 0}))
                 self.context.evs = EVSClient(server.url)
-                with patch("nci_si_mcp.server.configure_logging"):
+                with patch("nci_sip_mcp.server.configure_logging"):
                     failed, result = self.call(
                         "search_concepts", query=query + extra, release="26.06e"
                     )
@@ -96,7 +96,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
                     self.context.cadsr = CaDSRClient(
                         replace(self.settings, cadsr_base_url=server.url)
                     )
-                    with patch("nci_si_mcp.server.configure_logging"):
+                    with patch("nci_sip_mcp.server.configure_logging"):
                         failed, result = self.call(
                             tool, **{parameter: text + extra, "registryRelease": pin}
                         )
@@ -128,7 +128,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
         server = self.serve()
         self.context.evs = EVSClient(server.url)
         self.context.ssis = FakeSSIS(self.settings)
-        with patch("nci_si_mcp.server.configure_logging"):
+        with patch("nci_sip_mcp.server.configure_logging"):
             failed, result = self.call("ground_value", text="😀" * 1000)
         self.assertTrue(failed)
         self.assertEqual(result["error"]["code"], "invalid_request")
@@ -144,7 +144,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
         server = self.serve(Reply(body=json.dumps([terminology_row()]).encode()))
         self.context.evs = EVSClient(server.url)
         self.context.ssis = FakeSSIS(self.settings)
-        with patch("nci_si_mcp.server.configure_logging"):
+        with patch("nci_sip_mcp.server.configure_logging"):
             failed, result = self.call("ground_value", text=text)
         self.assertTrue(failed)
         self.assertEqual(result["error"]["code"], "invalid_request")
@@ -157,7 +157,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
         # An admissible text search still grounds its first result through MCP.
         self.context.ssis = FakeSSIS(self.settings)
         with (
-            patch("nci_si_mcp.server.configure_logging"),
+            patch("nci_sip_mcp.server.configure_logging"),
             patch.object(
                 self.evs,
                 "search_concepts",
