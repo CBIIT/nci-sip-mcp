@@ -162,10 +162,11 @@ def _terminal_member(row: _Member, owner: _Owner) -> bool:
     # sessions. Darwin zombie SID is unavailable, so the exact anchored PGID
     # binds membership. ps is non-atomic: this proves only that signals may stop,
     # never durable containment or that every descendant has been reaped.
+    # ps appends modifier flags (N niced, + foreground) after the state letter.
     return (
         (row.pgid, row.uid, row.ruid) == (owner.pid, owner.uid, owner.ruid)
         and row.sid in (None, owner.pid)
-        and row.state == "Z"
+        and row.state[:1] == "Z"
     )
 
 

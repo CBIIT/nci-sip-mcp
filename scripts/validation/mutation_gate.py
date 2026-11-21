@@ -541,8 +541,19 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"outcome": "INFRA", "message": str(error)}))
         return 2
     except (ValueError, OSError, subprocess.SubprocessError, SyntaxError) as error:
-        print(json.dumps({"outcome": "INFRA", "message": str(error)}))
+        print(json.dumps(infra_record(error)))
+        traceback.print_exception(error)
         return 2
+
+
+def infra_record(error: Exception) -> dict:
+    filename = getattr(error, "filename", None)
+    return {
+        "outcome": "INFRA",
+        "message": str(error),
+        "type": type(error).__name__,
+        **({"filename": filename} if filename is not None else {}),
+    }
 
 
 def imported_coverage(root: Path, directory: Path | None) -> CoverageEvidence | None:

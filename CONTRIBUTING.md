@@ -121,6 +121,8 @@ its actual producer and mutation attempts, raw outcomes and restoration evidence
 aggregate alone is not that proof.
 A fixture execution must exit zero to export a baseline, even if its ratchet expects failures.
 Collection/setup/teardown attribution retains the existing conservative selection rules.
+A gate-level `INFRA` record (exit 2) names the exception `type` and, when it has one, its `filename`;
+the traceback goes to stderr.
 
 For a manual imported baseline, the local coordinator supplies one `local-` batch followed by
 32 lowercase hexadecimal characters as `MUTATION_COVERAGE_BATCH` to each producer, export,

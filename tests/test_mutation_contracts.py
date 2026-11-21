@@ -532,16 +532,22 @@ class MutationCliContractsTest(unittest.TestCase):
             root = Path(directory)
             project(root, "def broken(:\n")
             (root / "src/folder.py").mkdir()
-            for path, message in (
-                ("tests/test_example.py", "Not an eligible Python module: tests/test_example.py"),
-                ("src/example.py", "invalid syntax (<unknown>, line 1)"),
-                ("src/missing.py", "Not an eligible Python module: src/missing.py"),
-                ("src/folder.py", "Not an eligible Python module: src/folder.py"),
+            invalid = {"type": "ValueError"}
+            syntax = {"type": "SyntaxError", "filename": "<unknown>"}
+            for path, message, extra in (
+                (
+                    "tests/test_example.py",
+                    "Not an eligible Python module: tests/test_example.py",
+                    invalid,
+                ),
+                ("src/example.py", "invalid syntax (<unknown>, line 1)", syntax),
+                ("src/missing.py", "Not an eligible Python module: src/missing.py", invalid),
+                ("src/folder.py", "Not an eligible Python module: src/folder.py", invalid),
             ):
                 with self.subTest(path=path):
                     self.assertEqual(
                         command(root, "--paths", path),
-                        (2, [{"outcome": "INFRA", "message": message}]),
+                        (2, [{"outcome": "INFRA", "message": message, **extra}]),
                     )
 
     def test_scheduler_crash_raises_instead_of_returning_partial_results(self):
@@ -687,6 +693,46 @@ class MutationCliContractsTest(unittest.TestCase):
                 {"outcome": "INFRA", "message": "Mutant scheduler failed: controller lost job"},
             )
 
+    def test_cli_os_error_reports_infra_with_type_filename_and_traceback(self):
+        # Given an OS refusal naming a file, the real CLI keeps exit 2 and says
+        # which error it was and where; the traceback goes to stderr.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            project(root, "def answer():\n    return True\n")
+            package = Path(gate.__file__).parents[2]
+            driver = root / "driver.py"
+            driver.write_text(
+                "import sys\nfrom unittest.mock import patch\n"
+                f"sys.path.insert(0, {str(package)!r})\n"
+                "from scripts.validation import mutation_gate as gate\n"
+                "denial = PermissionError(1, 'Operation not permitted', '/x')\n"
+                "with patch.object(gate, 'collect', side_effect=denial):\n"
+                "    raise SystemExit(gate.main(sys.argv[1:]))\n"
+            )
+            child = subprocess.run(  # noqa: S603 - real CLI with OS-boundary fault injection
+                [sys.executable, str(driver), "--root", str(root), "--paths", "src/example.py"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            self.assertEqual(child.returncode, 2, child.stdout + child.stderr)
+            self.assertEqual(
+                json.loads(child.stdout.splitlines()[-1]),
+                {
+                    "outcome": "INFRA",
+                    "message": "[Errno 1] Operation not permitted: '/x'",
+                    "type": "PermissionError",
+                    "filename": "/x",
+                },
+            )
+            self.assertTrue(child.stderr.startswith("Traceback (most recent call last):\n"))
+            self.assertEqual(
+                child.stderr.splitlines()[-1],
+                "PermissionError: [Errno 1] Operation not permitted: '/x'",
+            )
+
 
 class MutationSourceContractsTest(unittest.TestCase):
     def test_scope_excludes_each_nonproduction_path_family(self):
@@ -716,6 +762,7 @@ class MutationSourceContractsTest(unittest.TestCase):
                                 {
                                     "outcome": "INFRA",
                                     "message": f"Not an eligible Python module: {name}",
+                                    "type": "ValueError",
                                 }
                             ],
                         ),
@@ -1067,7 +1114,7 @@ class MutationSourceContractsTest(unittest.TestCase):
                     (root / "allow.yaml").write_text(content)
                     self.assertEqual(
                         command(root, "--paths", "src/example.py", "--allowlist", "allow.yaml"),
-                        (2, [{"outcome": "INFRA", "message": message}]),
+                        (2, [{"outcome": "INFRA", "message": message, "type": "ValueError"}]),
                     )
 
     def test_changed_sites_use_merge_base_and_include_multiline_intersections_only(self):
