@@ -898,6 +898,7 @@ class SharedCoverageTest(unittest.TestCase):
                 {
                     "outcome": "INFRA",
                     "message": "Coverage fragment producer does not match the campaign batch",
+                    "type": "ValueError",
                 },
             )
 
@@ -908,7 +909,11 @@ class SharedCoverageTest(unittest.TestCase):
             self.assertEqual(incomplete.returncode, 2, incomplete.stdout + incomplete.stderr)
             self.assertEqual(
                 json.loads(incomplete.stdout),
-                {"outcome": "INFRA", "message": "Missing coverage shards: [('fixture', '1/1')]"},
+                {
+                    "outcome": "INFRA",
+                    "message": "Missing coverage shards: [('fixture', '1/1')]",
+                    "type": "ValueError",
+                },
             )
             retained.rename(fixture)
             for fragment_dir, batch in ((current, current_batch), (prior, prior_batch)):
