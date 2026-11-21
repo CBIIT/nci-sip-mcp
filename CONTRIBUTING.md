@@ -114,6 +114,8 @@ same-run fragments and pass `--coverage-dir`. A missing, incomplete, malformed o
 import fails as `INFRA`, even for an empty catalogue; it never silently reruns a baseline.
 A fixture execution must exit zero to export a baseline, even if its ratchet expects failures.
 Collection/setup/teardown attribution retains the existing conservative selection rules.
+A gate-level `INFRA` record (exit 2) names the exception `type` and, when it has one, its `filename`;
+the traceback goes to stderr.
 
 For a focused local sensitivity run (for example with `--paths`), `pdm run mutation-gate` without
 `--coverage-dir` computes clean unit, harness self-test and prepared-fixture baselines itself;
