@@ -621,25 +621,43 @@ class _ChildTracer:
         self.module_seen = False
 
     def trace(self, frame, event, _argument):
-        if event == "call" and frame.f_code.co_name == "<module>":
-            self.module_call(frame)
-        if event == "line" and self.matches(frame):
-            self.lines.add(frame.f_lineno)
+        try:
+            if event == "call" and frame.f_code.co_name == "<module>":
+                self.module_call(frame)
+            if event == "line" and self.matches(frame):
+                self.lines.add(frame.f_lineno)
+        except Exception as error:  # noqa: BLE001 - the tracer must never alter the traced code
+            self.fail(f"Tracer callback failed: {error}")
         return self.trace
 
+    def fail(self, detail: str) -> None:
+        self.module_seen = True
+        self.outcome = "invalid"
+        self.detail = detail
+
     def module_call(self, frame) -> None:
-        if frame_module(frame) != self.config["module"]:
+        if frame_module(frame) != self.config["module"] or self.outcome == "invalid":
             return
         self.module_seen = True
         try:
             path, source, compiled = verified_module_source(frame, self.config)
-            self.path = str(path)
-            self.source_digest = hashlib.sha256(source).hexdigest()
-            self.bytecode_digest = hashlib.sha256(marshal.dumps(compiled)).hexdigest()
-            self.outcome = "reached"
         except (OSError, ValueError, SyntaxError) as error:
-            self.outcome = "invalid"
-            self.detail = str(error)
+            self.fail(str(error))
+            return
+        identity = (
+            str(path),
+            hashlib.sha256(source).hexdigest(),
+            hashlib.sha256(marshal.dumps(compiled)).hexdigest(),
+        )
+        if self.outcome == "reached" and identity != (
+            self.path,
+            self.source_digest,
+            self.bytecode_digest,
+        ):
+            self.fail("Module executed more than one source")
+            return
+        self.path, self.source_digest, self.bytecode_digest = identity
+        self.outcome = "reached"
 
     def matches(self, frame) -> bool:
         return (
@@ -690,3 +708,19 @@ def install_child_trace() -> None:
     threading.settrace(trace)
     for tracer in tracers:
         atexit.register(tracer.finish)
+    release_descendants()
+
+
+def release_descendants() -> None:
+    # A Python process this child starts would otherwise trace itself into the same record.
+    os.environ.pop("MUTATION_CHILD_TRACE_CONFIG", None)
+    hook = os.environ.get("MUTATION_CHILD_TRACE_HOOK")
+    entries = [
+        entry
+        for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+        if entry not in ("", hook)
+    ]
+    if entries:
+        os.environ["PYTHONPATH"] = os.pathsep.join(entries)
+    else:
+        os.environ.pop("PYTHONPATH", None)

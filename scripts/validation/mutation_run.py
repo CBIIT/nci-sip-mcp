@@ -19,6 +19,7 @@ from time import monotonic, sleep
 from types import FrameType
 
 from coverage import Coverage, CoverageData
+from coverage.exceptions import NoDataError
 from pytest import ExitCode
 from scripts.processes import STOP_SECONDS, stop
 from scripts.validation.mutation_child_trace import (
@@ -628,7 +629,10 @@ def native_candidate_owners(
         raise ValueError("Installed child mutation lacks its source span")
     if not data_file.exists():
         coverage = Coverage(data_file=str(data_file), config_file=False)
-        coverage.combine(strict=True, keep=True)
+        try:
+            coverage.combine(strict=True, keep=True)
+        except NoDataError as error:
+            raise ValueError(f"Candidate run left no coverage data: {error}") from error
         coverage.save()
     lines = coverage_map(data_file, scratch).get(target.relative_to(scratch).as_posix(), {})
     return set(context_tests(line_contexts(lines, *span)))

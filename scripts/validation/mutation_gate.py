@@ -94,7 +94,7 @@ def mutate_and_measure(
                     item["selected"],
                     jobs["timeout"],
                     mutated_file=target,
-                    mutated_span=(mutant.line, mutant.end_line),
+                    mutated_span=(mutant.line, mutant.line + mutant.after.count("\n")),
                     expected_children=child_routes,
                 )
             except (OSError, subprocess.SubprocessError) as error:
