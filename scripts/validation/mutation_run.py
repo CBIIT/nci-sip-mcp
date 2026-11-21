@@ -12,14 +12,26 @@ import tempfile
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from threading import current_thread, main_thread
 from time import monotonic, sleep
 from types import FrameType
 
-from coverage import CoverageData
+from coverage import Coverage, CoverageData
+from coverage.exceptions import NoDataError
 from pytest import ExitCode
 from scripts.processes import STOP_SECONDS, stop
+from scripts.validation.mutation_child_trace import (
+    TEST_PHASES,
+    ChildTrace,
+    Domain,
+    Producer,
+    file_digest,
+    prepare_run,
+    read_traces,
+    source_matches,
+)
 
 # An ordinary runner has STOP_SECONDS of grace plus STOP_SECONDS for final KILL/reap.
 # A scheduler must let that entire nested cleanup finish before its own final KILL.
@@ -54,6 +66,13 @@ class _Member:
     uid: int
     ruid: int
     state: str
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageEvidence:
+    root: Path
+    lines: dict[str, dict[str, dict[int, list[str]]]]
+    children: tuple[ChildTrace, ...]
 
 
 def _observe(pid: int) -> int | None:
@@ -234,7 +253,7 @@ def _finish_owned(
         raise failure
 
 
-DOMAINS = {
+DOMAINS: dict[Domain, tuple[str, str]] = {
     "unit": (".", "tests"),
     "selftest": ("acceptance", "selftests"),
     "fixture": ("acceptance", "tests"),
@@ -429,7 +448,9 @@ def program(
         return status
 
 
-def classify(status: int | None, evidence: Path, mutated_file: Path | None = None) -> dict:
+def classify(
+    status: int | None, evidence: Path, mutated_file: Path | None = None
+) -> dict[str, object]:
     if status is None:
         return {"outcome": "TIMEOUT"}
     rows = (
@@ -440,7 +461,9 @@ def classify(status: int | None, evidence: Path, mutated_file: Path | None = Non
     return evidence_outcome(status, rows, mutated_file)
 
 
-def evidence_outcome(status: int, rows: list[dict], mutated_file: Path | None = None) -> dict:
+def evidence_outcome(
+    status: int, rows: list[dict], mutated_file: Path | None = None
+) -> dict[str, object]:
     failed = [row for row in rows if row["outcome"] == "failed"]
     kill = call_kill(status, failed) or import_kill(status, failed, mutated_file)
     if kill:
@@ -450,7 +473,7 @@ def evidence_outcome(status: int, rows: list[dict], mutated_file: Path | None = 
     return successful_calls(rows)
 
 
-def successful_calls(rows: list[dict]) -> dict:
+def successful_calls(rows: list[dict]) -> dict[str, object]:
     calls = [row for row in rows if (row["phase"], row["outcome"]) == ("call", "passed")]
     return {"outcome": "SURVIVED" if calls else "NO_TESTS"}
 
@@ -498,13 +521,54 @@ def stop_notice(row: dict) -> bool:
 
 def run_domain(
     scratch: Path,
-    domain: str,
+    domain: Domain,
     selected: list[str],
     timeout: float,
     *,
     baseline: bool = False,
     mutated_file: Path | None = None,
+    mutated_span: tuple[int, int] | None = None,
+    expected_children: tuple[ChildTrace, ...] = (),
 ) -> tuple[dict, Path]:
+    args, env, data_file, evidence, log = prepare_domain_run(
+        scratch, domain, selected, baseline, collect_coverage=bool(expected_children)
+    )
+    started = monotonic()
+    status = program(args, scratch / DOMAINS[domain][0], env, timeout, log)
+    elapsed = monotonic() - started
+    result: dict[str, object] = classify(status, evidence, mutated_file)
+    try:
+        if status is not None:
+            owners = validate_domain_traces(
+                data_file,
+                env,
+                domain,
+                expected_children,
+                mutated_file,
+                mutated_span,
+                scratch,
+            )
+            if expected_children and result.get("kind") != "import":
+                owners.update(
+                    native_candidate_owners(data_file, scratch, mutated_file, mutated_span)
+                )
+                result = attribute_child_result(result, evidence, owners)
+    except (OSError, ValueError) as error:
+        result = {"outcome": "INFRA", "message": str(error)}
+    if baseline and result["outcome"] == "KILLED":
+        result["outcome"] = "INFRA"
+    result.update(domain=domain, log=log.read_text(errors="replace"), elapsed_seconds=elapsed)
+    return result, data_file
+
+
+def prepare_domain_run(
+    scratch: Path,
+    domain: Domain,
+    selected: list[str],
+    baseline: bool,
+    *,
+    collect_coverage: bool = False,
+) -> tuple[list[str], dict[str, str], Path, Path, Path]:
     directory, default = DOMAINS[domain]
     work = Path(tempfile.mkdtemp(prefix=f"evidence-{domain}-", dir=scratch.parent))
     # Keep instrumentation independent of the subject, including probe self-mutations.
@@ -512,7 +576,16 @@ def run_domain(
     env = environment(scratch, work)
     evidence = work / "events.jsonl"
     env["MUTATION_EVIDENCE"] = str(evidence)
-    env["COVERAGE_FILE"] = str(work / ".coverage")
+    data_file = work / ".coverage"
+    env["COVERAGE_FILE"] = str(data_file)
+    trace_env = prepare_run(
+        data_file,
+        work / "child-hook",
+        domain,
+        "baseline" if baseline else "candidate",
+        "local",
+    )
+    env.update(trace_env)
     args = [
         sys.executable,
         "-c",
@@ -527,19 +600,77 @@ def run_domain(
         str(scratch / directory),
         *(selected or [default]),
     ]
-    args += coverage_args(scratch, work, baseline, env)
+    args += coverage_args(scratch, work, baseline or collect_coverage, env)
     if domain == "fixture":
         env.update(FIXTURE)
         args += ["--report=fixture.json"]
     log = work / "pytest.log"
-    started = monotonic()
-    status = program(args, scratch / directory, env, timeout, log)
-    elapsed = monotonic() - started
-    result = classify(status, evidence, mutated_file)
-    if baseline and result["outcome"] == "KILLED":
-        result["outcome"] = "INFRA"
-    result.update(domain=domain, log=log.read_text(errors="replace"), elapsed_seconds=elapsed)
-    return result, work / ".coverage"
+    return args, env, data_file, evidence, log
+
+
+def validate_domain_traces(
+    data_file: Path,
+    environment: dict[str, str],
+    domain: Domain,
+    expected: tuple[ChildTrace, ...],
+    mutated_file: Path | None,
+    mutated_span: tuple[int, int] | None,
+    scratch: Path,
+) -> set[str]:
+    producer, traces = read_traces(data_file)
+    expected_phase = environment["MUTATION_CHILD_TRACE_PHASE"]
+    if not producer_matches_run(producer, environment, domain, expected_phase):
+        raise ValueError("Child trace belongs to another run")
+    if expected:
+        return verify_child_attempts(traces, expected, mutated_file, mutated_span, scratch)
+    return set()
+
+
+def native_candidate_owners(
+    data_file: Path, scratch: Path, target: Path | None, span: tuple[int, int] | None
+) -> set[str]:
+    if target is None or span is None:
+        raise ValueError("Installed child mutation lacks its source span")
+    if not data_file.exists():
+        coverage = Coverage(data_file=str(data_file), config_file=False)
+        try:
+            coverage.combine(strict=True, keep=True)
+        except NoDataError as error:
+            raise ValueError(f"Candidate run left no coverage data: {error}") from error
+        coverage.save()
+    lines = coverage_map(data_file, scratch).get(target.relative_to(scratch).as_posix(), {})
+    return set(context_tests(line_contexts(lines, *span)))
+
+
+def attribute_child_result(result: dict, evidence: Path, owners: set[str]) -> dict:
+    if result["outcome"] == "KILLED":
+        if result["node"] in owners:
+            return result
+        return {"outcome": "INFRA", "status": 1, "failures": failed_call_records(evidence)}
+    if result["outcome"] == "SURVIVED":
+        return result if passed_call_nodes(evidence) & owners else {"outcome": "NO_TESTS"}
+    return result
+
+
+def failed_call_records(evidence: Path) -> list[dict]:
+    rows = [json.loads(line) for line in evidence.read_text().splitlines()]
+    return [row for row in rows if row["outcome"] == "failed"]
+
+
+def passed_call_nodes(evidence: Path) -> set[str]:
+    calls = [json.loads(line) for line in evidence.read_text().splitlines()]
+    return {row["node"] for row in calls if (row["phase"], row["outcome"]) == ("call", "passed")}
+
+
+def producer_matches_run(
+    producer: Producer, environment: dict[str, str], domain: str, phase: str
+) -> bool:
+    return (
+        producer.run_id == environment["MUTATION_CHILD_TRACE_RUN"]
+        and producer.domain == domain
+        and producer.shard == "local"
+        and producer.phase == phase
+    )
 
 
 def coverage_args(
@@ -588,10 +719,11 @@ def coverage_map(data_file: Path, scratch: Path) -> dict[str, dict[int, list[str
     return result
 
 
-def baseline(root: Path, timeout: float, *, timings: list[dict] | None = None) -> dict:
-    result = {}
+def baseline(root: Path, timeout: float, *, timings: list[dict] | None = None) -> CoverageEvidence:
+    result: dict[str, dict[str, dict[int, list[str]]]] = {}
+    children = []
     with snapshot(root) as scratch:
-        for domain in ("unit", "selftest", "fixture"):
+        for domain in DOMAINS:
             outcome, data = run_domain(scratch, domain, [], timeout, baseline=True)
             if timings is not None:
                 timings.append(
@@ -600,21 +732,113 @@ def baseline(root: Path, timeout: float, *, timings: list[dict] | None = None) -
             if outcome["outcome"] != "SURVIVED":
                 raise ValueError(f"Baseline {domain} failed: {outcome}")
             result[domain] = coverage_map(data, scratch)
-    return result
+            _, traces = read_traces(data)
+            validate_baseline_sources(scratch, traces)
+            children.extend(traces)
+    return CoverageEvidence(root.resolve(), result, tuple(children))
 
 
-def selection(mapping: dict, file: str, line: int, end_line: int) -> dict[str, list[str]]:
+def validate_baseline_sources(scratch: Path, traces: list[ChildTrace]) -> None:
+    for trace in traces:
+        if trace.outcome == "unreached":
+            continue
+        if not source_matches(scratch, trace):
+            raise ValueError(f"Installed child source differs from baseline: {trace.source}")
+
+
+def selection(
+    lines: dict[str, dict[str, dict[int, list[str]]]], file: str, line: int, end_line: int
+) -> dict[str, list[str]]:
     result = {}
-    for domain, files in mapping.items():
-        lines = files.get(file, {})
-        contexts = line_contexts(lines, line, end_line)
+    for domain, files in lines.items():
+        file_lines = files.get(file, {})
+        contexts = line_contexts(file_lines, line, end_line)
         if not contexts:
             continue
         if "" in contexts:
             # Collection imports cannot identify every consumer of constants or decorators.
-            contexts = {context for values in lines.values() for context in values}
+            contexts = {context for values in file_lines.values() for context in values}
         result[domain] = context_tests(contexts)
     return result
+
+
+def child_selection(
+    evidence: CoverageEvidence, file: str, line: int, end_line: int
+) -> list[ChildTrace]:
+    traces = [trace for trace in evidence.children if child_trace_is_baseline_run(trace, file)]
+    if traces:
+        require_baseline_source(evidence.root, file, traces)
+    return [trace for trace in traces if any(line <= number <= end_line for number in trace.lines)]
+
+
+def require_baseline_source(root: Path, file: str, traces: list[ChildTrace]) -> None:
+    current = file_digest(root / file)
+    if any(trace.source_digest != current for trace in traces):
+        raise ValueError(f"Installed child source differs from baseline: {file}")
+
+
+def child_trace_is_baseline_run(trace: ChildTrace, file: str) -> bool:
+    return (
+        trace.source == file
+        and trace.outcome == "reached"
+        and trace.test_phase == "run"
+        and trace.phase in {"baseline", "producer"}
+    )
+
+
+def verify_child_attempts(
+    traces: list[ChildTrace],
+    expected: tuple[ChildTrace, ...],
+    mutated_file: Path | None,
+    mutated_span: tuple[int, int] | None,
+    scratch: Path,
+) -> set[str]:
+    if mutated_file is None or mutated_span is None:
+        raise ValueError("Installed child mutation lacks its source span")
+    source = mutated_file.read_bytes()
+    expected_digest = sha256(source).hexdigest()
+    source_name = mutated_file.relative_to(scratch).as_posix()
+    return {
+        route.node
+        for route in expected
+        if verify_child_route_attempt(traces, route, source_name, expected_digest, mutated_span)
+    }
+
+
+def verify_child_route_attempt(
+    traces: list[ChildTrace],
+    route: ChildTrace,
+    source_name: str,
+    expected_digest: str,
+    span: tuple[int, int],
+) -> bool:
+    attempts = child_attempts(traces, route)
+    if route.source != source_name:
+        raise ValueError("Expected installed child route names another source")
+    if any(
+        trace.outcome == "reached" and trace.source_digest != expected_digest for trace in attempts
+    ):
+        raise ValueError("Installed child source differs from the mutation")
+    return any(child_attempt_reaches_mutation(trace, expected_digest, span) for trace in attempts)
+
+
+def child_attempts(traces: list[ChildTrace], route: ChildTrace) -> list[ChildTrace]:
+    return [
+        trace
+        for trace in traces
+        if (trace.node, trace.source, trace.module, trace.test_phase)
+        == (route.node, route.source, route.module, "run")
+    ]
+
+
+def child_attempt_reaches_mutation(
+    trace: ChildTrace, expected_digest: str, span: tuple[int, int]
+) -> bool:
+    return (
+        trace.outcome == "reached"
+        and trace.source_digest == expected_digest
+        and any(span[0] <= line <= span[1] for line in trace.lines)
+    )
 
 
 def context_tests(contexts: set[str]) -> list[str]:
@@ -623,7 +847,7 @@ def context_tests(contexts: set[str]) -> list[str]:
         if not context:
             continue
         node, _, phase = context.rpartition("|")
-        if "::" not in node or phase not in {"run", "setup", "teardown"}:
+        if "::" not in node or phase not in TEST_PHASES:
             raise ValueError(f"Unrecognized coverage context: {context!r}")
         if phase == "run":
             tests.add(node)
@@ -631,10 +855,7 @@ def context_tests(contexts: set[str]) -> list[str]:
     return sorted(tests)
 
 
-def line_contexts(lines: dict, start: int, end: int) -> set[str]:
+def line_contexts(lines: dict[int, list[str]], start: int, end: int) -> set[str]:
     return {
-        context
-        for number, values in lines.items()
-        if start <= int(number) <= end
-        for context in values
+        context for number, values in lines.items() if start <= number <= end for context in values
     }

@@ -1,29 +1,46 @@
 """The mutation command measures assertion sensitivity without editing its caller."""
 
 import ast
+import atexit
 import contextlib
+import hashlib
 import io
 import json
 import os
+import queue
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
-from dataclasses import asdict
+import venv
+from dataclasses import asdict, replace
 from pathlib import Path
-from threading import Thread
-from types import SimpleNamespace
+from threading import Event, Thread
+from types import FunctionType, SimpleNamespace
 from typing import ClassVar
 from unittest.mock import patch
 
+import coverage.version
+import pytest
 import yaml
 from scripts.processes import stop, wait_until
+from scripts.validation import mutation_child_trace as child_trace
 from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
+from scripts.validation.mutation_coverage import parse_fragment_children
 from scripts.validation.mutation_gate import execute_job
-from scripts.validation.mutation_run import coverage_map, program, run_domain, selection, snapshot
+from scripts.validation.mutation_probe import child_context
+from scripts.validation.mutation_run import (
+    CoverageEvidence,
+    coverage_map,
+    program,
+    run_domain,
+    selection,
+    snapshot,
+)
 from scripts.validation.mutation_source import (
     allowlist,
     candidates,
@@ -33,7 +50,10 @@ from scripts.validation.mutation_source import (
     scope,
 )
 
+from fakes import INSTALLED_CHILD_TEST, project
+
 ROOT = Path(__file__).resolve().parents[1]
+NO_COVERAGE = CoverageEvidence(ROOT, {}, ())
 RECORDED_WAIT_SOURCE = """class StdioOwner:
     async def _wait(self, seconds: float, deadline: CleanupDeadline) -> bool:
         try:
@@ -96,23 +116,208 @@ def return_none_key(source: str) -> dict[str, str]:
     )
 
 
-def project(root, source, unit="assert example.answer() is True", contract="assert 1 == 1"):
-    files = {
-        "src/example.py": source,
-        "tests/test_example.py": f"import example\ndef test_value():\n    {unit}\n",
-        "acceptance/selftests/test_harness.py": "def test_harness():\n    assert 2 == 2\n",
-        "acceptance/tests/test_contract.py": (
-            f"import example\ndef test_contract():\n    {contract}\n"
-        ),
-        "acceptance/conftest.py": (
-            "def pytest_addoption(parser):\n    parser.addoption('--report')\n"
-        ),
-        "pyproject.toml": '[tool.pytest.ini_options]\npythonpath = ["src"]\n',
-    }
-    for name, value in files.items():
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(value)
+WHEEL_CHILD_TEST = """\
+import json, os, subprocess, sys, tempfile, venv
+from pathlib import Path
+from scripts.validation.mutation_child_trace import ChildRoute, child_environment
+
+def test_wheel():
+    root = Path(__file__).resolve().parents[1]
+    with tempfile.TemporaryDirectory() as temporary:
+        work = Path(temporary).resolve()
+        wheelhouse = work / "wheels"
+        wheelhouse.mkdir()
+        clean_env = {
+            "HOME": str(work), "PATH": os.environ.get("PATH", ""),
+            "PIP_CONFIG_FILE": os.devnull, "PIP_NO_INDEX": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1", "PYTHONNOUSERSITE": "1",
+        }
+        built = subprocess.run(
+            [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
+             "--no-index", "--wheel-dir", str(wheelhouse), str(root)],
+            env=clean_env, capture_output=True, text=True, check=False,
+        )
+        assert built.returncode == 0, built.stdout + built.stderr
+        wheels = list(wheelhouse.glob("*.whl"))
+        assert len(wheels) == 1, wheels
+        environment = work / "venv"
+        venv.EnvBuilder(with_pip=True, system_site_packages=False).create(environment)
+        interpreter = environment / "bin/python"
+        installed = subprocess.run(
+            [str(interpreter), "-m", "pip", "install", "--no-deps", "--no-index",
+             "--no-cache-dir", str(wheels[0])],
+            env=clean_env, capture_output=True, text=True, check=False,
+        )
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        route = ChildRoute("src/wheel_sample/cli.py", "wheel_sample.cli", environment)
+        child = subprocess.run(
+            [str(interpreter), "-B", "-m", "wheel_sample.cli"],
+            cwd=work, env=child_environment(route), capture_output=True, text=True, check=False,
+        )
+        assert child.returncode == 0, child.stdout + child.stderr
+        result = json.loads(child.stdout)
+        assert (result["name"], result["spec"], result["value"]) == (
+            "__main__", "wheel_sample.cli", 1
+        )
+        assert Path(result["file"]).resolve().is_relative_to(environment)
+        assert str(root / "src") not in result["path"]
+"""
+
+
+COMPOSITION_CONTEXT_TEST = """\
+import json, os, subprocess, venv
+from pathlib import Path
+from unittest.mock import patch
+import pytest
+from scripts.validation.mutation_child_trace import ChildRoute, child_environment
+
+STATE = {}
+ROOT = Path(__file__).resolve().parents[1]
+
+@pytest.fixture(scope="module")
+def environments(tmp_path_factory):
+    work = tmp_path_factory.mktemp("owned-environments")
+    result = []
+    for name in ("one", "two"):
+        environment = work / name
+        venv.EnvBuilder(with_pip=False, system_site_packages=False).create(environment)
+        interpreter = environment / "bin/python"
+        site = subprocess.run(
+            [str(interpreter), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+            capture_output=True, text=True, check=True,
+        )
+        target = Path(site.stdout.strip()) / "example.py"
+        target.write_bytes((ROOT / "src/example.py").read_bytes())
+        result.append(environment)
+    return result
+
+def snapshot(directory):
+    return {path.name: path.read_bytes() for path in directory.iterdir()}
+
+def launch(environment):
+    route = ChildRoute("src/example.py", "example", environment)
+    prior = child_environment(route)
+    child = subprocess.run(
+        [str(environment / "bin/python"), "-B", "-c", "import example; print(example.__file__)"],
+        env=prior, capture_output=True, text=True, check=False,
+    )
+    assert child.returncode == 0, child.stdout + child.stderr
+    assert Path(child.stdout.strip()).resolve().is_relative_to(environment.resolve())
+    directory = Path(prior["MUTATION_CHILD_TRACE_DIR"])
+    config = Path(prior["MUTATION_CHILD_TRACE_CONFIG"])
+    request = config.with_name(config.name.replace(".config.json", ".request.json"))
+    return prior, directory, snapshot(directory), json.loads(request.read_text())
+
+def test_a_same_owner_rejects_foreign_environment_and_duplicate(environments, request):
+    prior, directory, before, record = launch(environments[0])
+    assert (record["node"], record["test_phase"]) == (request.node.nodeid, "run")
+    STATE.update(prior=prior, directory=directory, before=before, record=record)
+    with patch.dict(
+        os.environ, {"MUTATION_CHILD_TRACE_CONFIG": prior["MUTATION_CHILD_TRACE_CONFIG"]}
+    ):
+        with pytest.raises(ValueError, match="another producer or route"):
+            child_environment(ChildRoute("src/example.py", "example", environments[1]))
+    assert snapshot(directory) == before
+    duplicate = json.dumps([prior["MUTATION_CHILD_TRACE_CONFIG"]] * 2)
+    with patch.dict(os.environ, {"MUTATION_CHILD_TRACE_CONFIG": duplicate}):
+        with pytest.raises(ValueError, match="Duplicate installed child trace config"):
+            child_environment(ChildRoute("src/example.py", "example", environments[0]))
+    assert snapshot(directory) == before
+
+def test_b_different_owner_cannot_compose_prior(environments, request):
+    prior, directory, before, record = (
+        STATE[key] for key in ("prior", "directory", "before", "record")
+    )
+    assert record["node"] != request.node.nodeid and record["test_phase"] == "run"
+    with patch.dict(
+        os.environ, {"MUTATION_CHILD_TRACE_CONFIG": prior["MUTATION_CHILD_TRACE_CONFIG"]}
+    ):
+        with pytest.raises(ValueError, match="another producer or route"):
+            child_environment(ChildRoute("src/example.py", "example", environments[0]))
+    assert snapshot(directory) == before
+
+@pytest.fixture
+def setup_prior(environments, request):
+    prior, directory, before, record = launch(environments[0])
+    assert (record["node"], record["test_phase"]) == (request.node.nodeid, "setup")
+    return prior, directory, before, record
+
+def test_c_same_owner_cannot_compose_setup_route_during_call(environments, setup_prior, request):
+    prior, directory, before, record = setup_prior
+    assert record["node"] == request.node.nodeid
+    assert os.environ["MUTATION_COVERAGE_CONTEXT"] == request.node.nodeid + "|run"
+    with patch.dict(
+        os.environ, {"MUTATION_CHILD_TRACE_CONFIG": prior["MUTATION_CHILD_TRACE_CONFIG"]}
+    ):
+        with pytest.raises(ValueError, match="another producer or route"):
+            child_environment(ChildRoute("src/example.py", "example", environments[0]))
+    assert snapshot(directory) == before
+"""
+
+
+def wheel_project(root):
+    project(root, "pass\n", unit="pass")
+    package = root / "src/wheel_sample"
+    package.mkdir()
+    (package / "__init__.py").write_text("READY = True\n")
+    (package / "cli.py").write_text(
+        "import json, sys\n"
+        "def answer():\n    return 1\n"
+        "VALUE = answer()\n"
+        "print(json.dumps({'name': __name__, 'spec': __spec__.name, 'value': VALUE, "
+        "'file': __file__, 'path': sys.path}))\n"
+    )
+    (root / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["pdm-backend"]\nbuild-backend = "pdm.backend"\n'
+        '[project]\nname = "wheel-sample"\nversion = "1.0"\n'
+        '[tool.pdm.build]\nincludes = ["src/wheel_sample"]\n'
+        '[tool.pytest.ini_options]\npythonpath = ["src"]\n'
+    )
+    (root / "tests/test_installed_wheel.py").write_text(WHEEL_CHILD_TEST)
+
+
+def composed_wheel_child_test():
+    sentinel = (
+        "import os, socket\n"
+        "def deny(self, address):\n"
+        "    with open(os.environ['WHEEL_SENTINEL'], 'a') as log:\n"
+        "        log.write('connect denied\\n')\n"
+        "    raise OSError('blocked')\n"
+        "socket.socket.connect = deny\n"
+    )
+    route_line = (
+        '        route = ChildRoute("src/wheel_sample/cli.py", "wheel_sample.cli", environment)\n'
+    )
+    setup = route_line + (
+        '        initializer = ChildRoute("src/wheel_sample/__init__.py", '
+        '"wheel_sample", environment)\n'
+        "        first = child_environment(initializer)\n"
+        "        with patch.dict(os.environ, first, clear=True):\n"
+        "            child_env = child_environment(route)\n"
+        '        hooks = work / "sentinel-hooks"\n'
+        "        hooks.mkdir()\n"
+        '        site = hooks / "sitecustomize.py"\n'
+        f"        site.write_text({sentinel!r})\n"
+        '        with site.open("a") as hook:\n'
+        '            hook.write("from _mutation_child_trace import install_child_trace\\n'
+        'install_child_trace()\\n")\n'
+        '        child_env["PYTHONPATH"] = str(hooks) + os.pathsep + child_env["PYTHONPATH"]\n'
+        '        child_env["WHEEL_SENTINEL"] = str(root / "sentinel.log")\n'
+        '        (root / "sentinel.log").unlink(missing_ok=True)\n'
+    )
+    return (
+        WHEEL_CHILD_TEST.replace(
+            "from pathlib import Path\n",
+            "from pathlib import Path\nfrom unittest.mock import patch\n",
+        )
+        .replace(route_line, setup)
+        .replace("env=child_environment(route)", "env=child_env")
+        .replace(
+            '        assert str(root / "src") not in result["path"]\n',
+            '        assert str(root / "src") not in result["path"]\n'
+            '        assert (root / "sentinel.log").read_text() == "connect denied\\n"\n',
+        )
+    )
 
 
 def command(root, *args):
@@ -149,6 +354,422 @@ def cli(root, *args):
         timeout=180,
         check=False,
     )
+
+
+def child_trace_fixture(root):
+    data_file = root / ".coverage"
+    trace_environment = child_trace.prepare_run(
+        data_file, root / "trace-hook", "unit", "candidate", "1/1"
+    )
+    trace_environment["MUTATION_COVERAGE_CONTEXT"] = "tests/test_trace.py::test_child|run"
+    route = child_trace.ChildRoute("src/example.py", "example", root / "owned-child")
+    with patch.dict(os.environ, trace_environment, clear=True):
+        environment = child_trace.child_environment(route)
+    directory = child_trace.trace_directory(data_file)
+    request_path = next(directory.glob("*.request.json"))
+    config_path = next(directory.glob("*.config.json"))
+    request = json.loads(request_path.read_text())
+    config = json.loads(config_path.read_text())
+    result_path = Path(config["record"])
+    result_path.write_text(
+        json.dumps(
+            {
+                **request,
+                "path": str(root / "owned-child/lib/python3.14/site-packages/example.py"),
+                "source_digest": "a" * 64,
+                "bytecode_digest": "b" * 64,
+                "executable": str(root / "owned-child/bin/python"),
+                "lines": [1],
+                "outcome": "reached",
+                "detail": "",
+            }
+        )
+    )
+    return data_file, request_path, config_path, result_path, environment, trace_environment
+
+
+class NativeTracerProducerContractTest(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def bind_item(self, request):
+        self.item = request.node
+
+    @staticmethod
+    def consume_real_events(tracer, module_path, source):
+        events = queue.Queue()
+        release = Event()
+        stop = Event()
+        filename = str(module_path)
+        compiled = compile(source, filename, "exec", dont_inherit=True, optimize=sys.flags.optimize)
+
+        def capture(frame, event, argument):
+            if stop.is_set():
+                return None
+            if frame.f_code.co_filename == filename:
+                events.put((frame, event, argument, frame.f_lineno))
+                if not release.wait(30):
+                    raise TimeoutError("Native event consumer did not release its frame")
+                release.clear()
+            return capture
+
+        def execute():
+            try:
+                sys.settrace(capture)
+                FunctionType(compiled, {"__name__": "coverage.version", "__file__": filename})()
+            except BaseException as error:  # noqa: BLE001 - return the worker failure to its owner
+                events.put(error)
+            finally:
+                sys.settrace(None)
+                events.put(None)
+
+        worker = Thread(target=execute)
+        worker.start()
+        observed = set()
+        try:
+            while True:
+                item = events.get(timeout=30)
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                frame, event, argument, line = item
+                try:
+                    tracer.trace(frame, event, argument)
+                    if event == "line":
+                        observed.add(line)
+                finally:
+                    release.set()
+        finally:
+            stop.set()
+            release.set()
+            worker.join(timeout=30)
+        if worker.is_alive():
+            raise RuntimeError("Native event producer did not finish")
+        return observed, compiled
+
+    def declared_trace(self, root, source_name, environment):
+        module_path = Path(coverage.version.__file__).resolve()
+        source = module_path.read_bytes()
+        source_copy = root / source_name
+        source_copy.parent.mkdir(parents=True)
+        source_copy.write_bytes(source)
+        self.assertEqual(source_copy.read_bytes(), module_path.read_bytes())
+        data_file = root / ".coverage"
+        trace_env = child_trace.prepare_run(data_file, root / "hook", "unit", "candidate", "local")
+        route = child_trace.ChildRoute(source_name, "coverage.version", environment)
+        with patch.dict(os.environ, trace_env), child_context(self.item, "run"):
+            child_env = child_trace.child_environment(route)
+        config = child_trace.read_object(Path(child_env["MUTATION_CHILD_TRACE_CONFIG"]))
+        return data_file, config, child_env, module_path, source
+
+    def test_native_tracer_records_real_installed_module_events(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, config, _, module_path, source = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            tracer = child_trace._ChildTracer(config)
+            observed, _compiled = self.consume_real_events(tracer, module_path, source)
+            tracer.finish()
+            self.assertTrue(
+                Path(str(config["record"])).is_file(), "The trace result was not written"
+            )
+            record = json.loads(Path(str(config["record"])).read_text())
+            self.assertEqual(record["outcome"], "reached")
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual(len(traces), 1)
+            trace = traces[0]
+            self.assertEqual(
+                (trace.node, trace.test_phase, trace.source, trace.module, trace.outcome),
+                (self.item.nodeid, "run", "src/coverage/version.py", "coverage.version", "reached"),
+            )
+            self.assertEqual(Path(trace.path), module_path)
+            self.assertEqual(
+                trace.source_digest, hashlib.sha256((root / trace.source).read_bytes()).hexdigest()
+            )
+            self.assertTrue(observed)
+            self.assertEqual(trace.lines, tuple(sorted(observed)))
+
+    def test_native_tracer_refuses_foreign_and_stale_real_frames(self):
+        for scenario in ("foreign source", "foreign environment", "stale code"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                environment = Path(sys.prefix)
+                if scenario == "foreign environment":
+                    environment = root / "owned-venv"
+                    venv.EnvBuilder(with_pip=False, system_site_packages=False).create(environment)
+                source_name = (
+                    "src/coverage/not_version.py"
+                    if scenario == "foreign source"
+                    else "src/coverage/version.py"
+                )
+                data_file, config, _, module_path, source = self.declared_trace(
+                    root, source_name, environment
+                )
+                if scenario == "stale code":
+                    old = b"The version and URL for coverage.py"
+                    replacement = b"The versioN and URL for coverage.py"
+                    self.assertEqual(source.count(old), 1)
+                    stale = source.replace(old, replacement)
+                    self.assertEqual(len(stale), len(source))
+                    code_source = stale
+                else:
+                    code_source = source
+                tracer = child_trace._ChildTracer(config)
+                self.consume_real_events(tracer, module_path, code_source)
+                tracer.finish()
+                self.assertTrue(
+                    Path(str(config["record"])).is_file(), "The trace result was not written"
+                )
+                message = (
+                    "Loaded bytecode does not match the installed source"
+                    if scenario == "stale code"
+                    else "Module did not execute from the declared installed environment"
+                )
+                with self.assertRaisesRegex(ValueError, message):
+                    child_trace.read_traces(data_file)
+                self.assertEqual(module_path.read_bytes(), source)
+
+    def test_native_consumer_refuses_a_truncated_genuine_trace(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, config, _, module_path, source = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            tracer = child_trace._ChildTracer(config)
+            self.consume_real_events(tracer, module_path, source)
+            tracer.finish()
+            self.assertTrue(
+                Path(str(config["record"])).is_file(), "The trace result was not written"
+            )
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual([trace.outcome for trace in traces], ["reached"])
+            Path(str(config["record"])).write_text('{"version":')
+            with self.assertRaises(json.JSONDecodeError):
+                child_trace.read_traces(data_file)
+
+    def test_native_consumer_refuses_failed_child_initialization(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, _, child_env, _, _ = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            (root / "hook/_mutation_child_trace.py").unlink()
+            child_env["PYTHONNOUSERSITE"] = "1"
+            child = subprocess.run(
+                [sys.executable, "-B", "-c", "print('child started')"],
+                cwd=root,
+                env=child_env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual((child.returncode, child.stdout), (0, "child started\n"))
+            with self.assertRaisesRegex(
+                ValueError, "Installed child request is missing its result"
+            ):
+                child_trace.read_traces(data_file)
+
+    @staticmethod
+    def installed_module_run(module_path, source, in_thread):
+        compiled = compile(
+            source, str(module_path), "exec", dont_inherit=True, optimize=sys.flags.optimize
+        )
+        result = queue.Queue()
+
+        def execute_module():
+            namespace = {"__name__": "coverage.version", "__file__": str(module_path)}
+            try:
+                FunctionType(compiled, namespace)()
+                result.put(namespace["__version__"])
+            except BaseException as error:  # noqa: BLE001 - return the worker failure to its owner
+                result.put(error)
+
+        if in_thread:
+            worker = Thread(target=execute_module)
+            worker.start()
+            worker.join(timeout=30)
+            if worker.is_alive():
+                raise RuntimeError("Installed module worker did not finish")
+        else:
+            execute_module()
+        value = result.get(timeout=30)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    def assert_installed_events(self, in_thread):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, config, child_env, module_path, source = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            callbacks = []
+            register = atexit.register
+            previous_trace = sys.gettrace()
+            previous_thread_trace = threading.gettrace()
+
+            def register_owned(callback):
+                registered = register(callback)
+                callbacks.append(registered)
+                return registered
+
+            try:
+                with (
+                    patch.dict(
+                        os.environ,
+                        {"MUTATION_CHILD_TRACE_CONFIG": child_env["MUTATION_CHILD_TRACE_CONFIG"]},
+                    ),
+                    patch.object(atexit, "register", register_owned),
+                ):
+                    child_trace.install_child_trace()
+                    version = self.installed_module_run(module_path, source, in_thread)
+            finally:
+                sys.settrace(previous_trace)
+                threading.settrace(previous_thread_trace)
+                for callback in callbacks:
+                    atexit.unregister(callback)
+            for callback in callbacks:
+                callback()
+            self.assertEqual(version, coverage.version.__version__)
+            self.assertTrue(
+                Path(str(config["record"])).is_file(), "The installed tracer did not emit a result"
+            )
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual(len(traces), 1)
+            trace = traces[0]
+            self.assertEqual(
+                (trace.node, trace.outcome, Path(trace.path)),
+                (self.item.nodeid, "reached", module_path),
+            )
+            lines = source.decode().splitlines()
+            early = next(
+                index for index, line in enumerate(lines, 1) if line.startswith("version_info =")
+            )
+            late = next(
+                index for index, line in enumerate(lines, 1) if line.startswith("__url__ =")
+            )
+            self.assertIn(early, trace.lines)
+            self.assertIn(late, trace.lines)
+
+    def test_install_traces_main_thread_and_emits_result(self):
+        self.assert_installed_events(in_thread=False)
+
+    def test_install_traces_new_thread_and_emits_result(self):
+        self.assert_installed_events(in_thread=True)
+
+    def test_install_refuses_invalid_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, child_env, _, _ = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            Path(child_env["MUTATION_CHILD_TRACE_CONFIG"]).write_text('{"version":')
+            previous_trace = sys.gettrace()
+            previous_thread_trace = threading.gettrace()
+            callbacks = []
+            register = atexit.register
+
+            def register_owned(callback):
+                registered = register(callback)
+                callbacks.append(registered)
+                return registered
+
+            try:
+                with (
+                    patch.dict(
+                        os.environ,
+                        {"MUTATION_CHILD_TRACE_CONFIG": child_env["MUTATION_CHILD_TRACE_CONFIG"]},
+                    ),
+                    patch.object(atexit, "register", register_owned),
+                ):
+                    with self.assertRaises(json.JSONDecodeError):
+                        child_trace.install_child_trace()
+                    self.assertIs(sys.gettrace(), previous_trace)
+                    self.assertIs(threading.gettrace(), previous_thread_trace)
+            finally:
+                sys.settrace(previous_trace)
+                threading.settrace(previous_thread_trace)
+                for callback in callbacks:
+                    atexit.unregister(callback)
+
+    def test_installed_dispatcher_forwards_real_frame_events(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, config, child_env, module_path, source = self.declared_trace(
+                root, "src/coverage/version.py", Path(sys.prefix)
+            )
+            callbacks = []
+            register = atexit.register
+            previous_trace = sys.gettrace()
+            previous_thread_trace = threading.gettrace()
+
+            def register_owned(callback):
+                registered = register(callback)
+                callbacks.append(registered)
+                return registered
+
+            try:
+                try:
+                    with (
+                        patch.dict(
+                            os.environ,
+                            {
+                                "MUTATION_CHILD_TRACE_CONFIG": child_env[
+                                    "MUTATION_CHILD_TRACE_CONFIG"
+                                ]
+                            },
+                        ),
+                        patch.object(atexit, "register", register_owned),
+                    ):
+                        child_trace.install_child_trace()
+                        dispatcher = sys.gettrace()
+                finally:
+                    sys.settrace(previous_trace)
+                    threading.settrace(previous_thread_trace)
+
+                self.assertTrue(callable(dispatcher))
+                self.assertIn(
+                    dispatcher.__code__, child_trace.install_child_trace.__code__.co_consts
+                )
+                self.assertEqual(
+                    Path(dispatcher.__code__.co_filename).resolve(),
+                    Path(child_trace.__file__).resolve(),
+                )
+                continuations = {}
+
+                def forward(frame, event, argument):
+                    callback = dispatcher if event == "call" else continuations.get(frame)
+                    if callback is not None:
+                        continuation = callback(frame, event, argument)
+                        if continuation is None:
+                            continuations.pop(frame, None)
+                        else:
+                            continuations[frame] = continuation
+                    if event == "return":
+                        continuations.pop(frame, None)
+
+                observed, _compiled = self.consume_real_events(
+                    SimpleNamespace(trace=forward), module_path, source
+                )
+                for callback in callbacks:
+                    callback()
+                self.assertTrue(
+                    Path(str(config["record"])).is_file(), "The trace result was not written"
+                )
+                record = json.loads(Path(str(config["record"])).read_text())
+                self.assertEqual(record["outcome"], "reached")
+                _, traces = child_trace.read_traces(data_file)
+                self.assertEqual(len(traces), 1)
+                trace = traces[0]
+                self.assertEqual(
+                    (trace.node, trace.module, Path(trace.path)),
+                    (self.item.nodeid, "coverage.version", module_path),
+                )
+                self.assertTrue(observed)
+                self.assertEqual(trace.lines, tuple(sorted(observed)))
+            finally:
+                for callback in callbacks:
+                    atexit.unregister(callback)
 
 
 class MutationOperatorsTest(unittest.TestCase):
@@ -313,6 +934,14 @@ class MutationOperatorsTest(unittest.TestCase):
     def test_ci_runs_pr_mutation_on_every_pull_request_to_main(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         self.assertEqual(
+            workflow.get("env"),
+            {
+                "MUTATION_COVERAGE_BATCH": (
+                    "gha-${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}"
+                )
+            },
+        )
+        self.assertEqual(
             workflow["jobs"]["mutation"],
             {
                 "name": "mutation (diff)",
@@ -336,7 +965,10 @@ class MutationOperatorsTest(unittest.TestCase):
                             "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
                         ),
                         "with": {
-                            "pattern": "mutation-coverage-${{ github.sha }}-*",
+                            "pattern": (
+                                "mutation-coverage-${{ github.sha }}-${{ github.run_id }}-"
+                                "${{ github.run_attempt }}-*"
+                            ),
                             "path": "tmp/mutation-coverage",
                         },
                     },
@@ -359,7 +991,10 @@ class MutationOperatorsTest(unittest.TestCase):
                             "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
                         ),
                         "with": {
-                            "name": "mutation-results-${{ github.sha }}-${{ matrix.shard }}",
+                            "name": (
+                                "mutation-results-${{ github.sha }}-${{ github.run_id }}-"
+                                "${{ github.run_attempt }}-${{ matrix.shard }}"
+                            ),
                             "path": "tmp/mutation-runs/",
                             "if-no-files-found": "warn",
                             "retention-days": 30,
@@ -499,6 +1134,520 @@ class MutationOperatorsTest(unittest.TestCase):
 
 
 class MutationExecutionTest(unittest.TestCase):
+    def test_composed_routes_reject_different_owner_phase_environment_and_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, "def answer():\n    return True\n")
+            (root / "tests/test_composition.py").write_text(COMPOSITION_CONTEXT_TEST)
+            nodes = [
+                "tests/test_composition.py::test_a_same_owner_rejects_foreign_environment_and_duplicate",
+                "tests/test_composition.py::test_b_different_owner_cannot_compose_prior",
+                "tests/test_composition.py::test_c_same_owner_cannot_compose_setup_route_during_call",
+            ]
+            outcome, data = run_domain(root, "unit", nodes, 60, baseline=True)
+            self.assertEqual(outcome["outcome"], "SURVIVED", outcome)
+            _, traces = child_trace.read_traces(data)
+            self.assertEqual(
+                {(trace.node, trace.test_phase, trace.outcome) for trace in traces},
+                {(nodes[0], "run", "reached"), (nodes[2], "setup", "reached")},
+            )
+
+    def test_main_module_route_records_the_executed_installed_wheel(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            wheel_project(root)
+            outcome, data = run_domain(
+                root, "unit", ["tests/test_installed_wheel.py"], 90, baseline=True
+            )
+            self.assertEqual(outcome["outcome"], "SURVIVED", outcome["log"])
+            _, traces = child_trace.read_traces(data)
+            self.assertEqual(len(traces), 1)
+            trace = traces[0]
+            self.assertEqual(trace.outcome, "reached")
+            self.assertEqual(trace.node, "tests/test_installed_wheel.py::test_wheel")
+            self.assertEqual((trace.module, trace.test_phase), ("wheel_sample.cli", "run"))
+            self.assertEqual(
+                trace.source_digest, hashlib.sha256((root / trace.source).read_bytes()).hexdigest()
+            )
+            self.assertTrue(Path(trace.path).is_relative_to(Path(trace.environment)))
+            self.assertEqual(Path(trace.path).parts[-2:], ("wheel_sample", "cli.py"))
+            self.assertIn(2, trace.lines)
+
+    def test_one_wheel_child_reports_both_declared_routes_and_keeps_network_sentinel(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            wheel_project(root)
+            with (root / "src/wheel_sample/cli.py").open("a") as module:
+                module.write(
+                    "import socket\n"
+                    "try:\n    socket.socket().connect(('127.0.0.1', 0))\n"
+                    "except OSError:\n    pass\n"
+                )
+            (root / "tests/test_installed_wheel.py").write_text(composed_wheel_child_test())
+            outcome, data = run_domain(
+                root, "unit", ["tests/test_installed_wheel.py"], 90, baseline=True
+            )
+            self.assertEqual(outcome["outcome"], "SURVIVED", outcome)
+            self.assertEqual((root / "sentinel.log").read_text(), "connect denied\n")
+            directory = child_trace.trace_directory(data)
+            self.assertEqual(len(list(directory.glob("*.request.json"))), 2)
+            self.assertEqual(len(list(directory.glob("*.result.json"))), 2)
+            _, traces = child_trace.read_traces(data)
+            self.assertEqual(
+                {(trace.source, trace.module, trace.outcome) for trace in traces},
+                {
+                    ("src/wheel_sample/__init__.py", "wheel_sample", "reached"),
+                    ("src/wheel_sample/cli.py", "wheel_sample.cli", "reached"),
+                },
+            )
+            for trace in traces:
+                self.assertEqual(trace.node, "tests/test_installed_wheel.py::test_wheel")
+                self.assertEqual(trace.test_phase, "run")
+                self.assertEqual(
+                    trace.source_digest,
+                    hashlib.sha256((root / trace.source).read_bytes()).hexdigest(),
+                )
+                self.assertTrue(Path(trace.path).is_relative_to(Path(trace.environment)))
+                self.assertTrue(trace.lines)
+
+    def test_module_spec_cannot_claim_a_different_installed_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            wheel_project(root)
+            test = WHEEL_CHILD_TEST.replace(
+                'ChildRoute("src/wheel_sample/cli.py", "wheel_sample.cli", environment)',
+                'ChildRoute("src/wheel_sample/__init__.py", "wheel_sample.cli", environment)',
+            )
+            (root / "tests/test_installed_wheel.py").write_text(test)
+            outcome, _ = run_domain(
+                root, "unit", ["tests/test_installed_wheel.py"], 90, baseline=True
+            )
+            self.assertEqual(outcome["outcome"], "INFRA", outcome)
+            self.assertEqual(
+                outcome["message"],
+                "Installed child trace is invalid: Module did not execute from the declared "
+                "installed environment",
+            )
+
+    def test_child_attribution_uses_the_same_reaching_and_failing_node(self):
+        cases = (
+            ("passing child", False, "", "SURVIVED", None),
+            ("failing child", False, "child", "KILLED", "test_value"),
+            ("unreached child", True, "", "NO_TESTS", None),
+            ("unrelated failure", False, "unrelated", "INFRA", None),
+            ("ordinary owner", True, "ordinary", "KILLED", "test_ordinary"),
+        )
+        for name, unreached, failing, outcome, node in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                project(root, "value = 1\n")
+                test = INSTALLED_CHILD_TEST
+                if unreached:
+                    test = test.replace(
+                        "'import example; print(example.__file__)'",
+                        "('pass' if 'value = 2' in package.read_text() "
+                        "else 'import example; print(example.__file__)')",
+                    ).replace(
+                        "    imported = Path(child.stdout.strip()).resolve()\n"
+                        "    assert imported.is_relative_to(environment.resolve())\n",
+                        "    assert child.returncode == 0\n",
+                    )
+                if failing == "child":
+                    test = test.replace(
+                        "'import example; print(example.__file__)'",
+                        "'import example; assert example.value == 1; print(example.__file__)'",
+                    )
+                if failing == "unrelated":
+                    test += (
+                        "def test_unrelated():\n"
+                        "    root = Path(__file__).resolve().parents[1]\n"
+                        "    assert (root / 'src/example.py').read_text() == 'value = 1\\n'\n"
+                    )
+                if failing == "ordinary":
+                    test += (
+                        "def test_ordinary():\n    import example\n    assert example.value == 1\n"
+                    )
+                path = "tests/test_installed_child.py"
+                (root / path).write_text(test)
+                base, data = run_domain(root, "unit", [path], 30, baseline=True)
+                self.assertEqual(base["outcome"], "SURVIVED", base["log"])
+                _, routes = child_trace.read_traces(data)
+                target = root / "src/example.py"
+                target.write_text("value = 2\n")
+                result, _ = run_domain(
+                    root,
+                    "unit",
+                    [path],
+                    30,
+                    mutated_file=target,
+                    mutated_span=(1, 1),
+                    expected_children=tuple(routes),
+                )
+                self.assertEqual(result["outcome"], outcome, result)
+                self.assertEqual(
+                    result.get("node"), f"{path}::{node}" if node is not None else None
+                )
+                self.assertEqual(result.get("status"), {"unrelated": 1}.get(failing))
+                self.assertEqual(
+                    result.get("failures", []),
+                    {
+                        "unrelated": [
+                            {
+                                "node": f"{path}::test_unrelated",
+                                "phase": "call",
+                                "outcome": "failed",
+                                "assertion": True,
+                            }
+                        ]
+                    }.get(failing, []),
+                )
+
+    def test_a_passing_unreached_child_route_leaves_an_ordinary_owner_survived(self):
+        # Given a child route the mutation never reaches and a passing in-process test of
+        # the mutated module, the ordinary owner decides: SURVIVED, not NO_TESTS.
+        unreached = INSTALLED_CHILD_TEST.replace(
+            "'import example; print(example.__file__)'",
+            "('pass' if 'value = 2' in package.read_text() "
+            "else 'import example; print(example.__file__)')",
+        ).replace(
+            "    imported = Path(child.stdout.strip()).resolve()\n"
+            "    assert imported.is_relative_to(environment.resolve())\n",
+            "    assert child.returncode == 0\n",
+        )
+        ordinary = "def test_ordinary():\n    import example\n    assert example.value > 0\n"
+        path = "tests/test_installed_child.py"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, "value = 1\n", contract="import example\n    assert example.value == 1")
+            (root / path).write_text(unreached + ordinary)
+            base, data = run_domain(root, "unit", [path], 60, baseline=True)
+            self.assertEqual(base["outcome"], "SURVIVED", base["log"])
+            _, routes = child_trace.read_traces(data)
+            target = root / "src/example.py"
+            target.write_text("value = 2\n")
+            span = {"mutated_file": target, "mutated_span": (1, 1)}
+            result, _ = run_domain(
+                root, "unit", [path], 60, expected_children=tuple(routes), **span
+            )
+            self.assertEqual(result["outcome"], "SURVIVED", result)
+
+            (root / path).write_text(unreached)
+            result, _ = run_domain(
+                root, "unit", [path], 60, expected_children=tuple(routes), **span
+            )
+            self.assertEqual(result["outcome"], "NO_TESTS", result)
+
+            measured = mutation_gate.measure(
+                root,
+                {"unit": [path], "fixture": ["tests/test_contract.py::test_contract"]},
+                60,
+                expected_children=tuple(routes),
+                **span,
+            )
+        self.assertEqual(measured["outcome"], "KILLED", measured)
+        self.assertEqual(measured["node"], "tests/test_contract.py::test_contract")
+        self.assertEqual(
+            [(row["domain"], row["outcome"]) for row in measured["domains"]],
+            [("unit", "NO_TESTS"), ("fixture", "KILLED")],
+        )
+
+    def test_configured_child_environment_passes_the_staged_trace_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (
+                data_file,
+                request_path,
+                config_path,
+                _result_path,
+                environment,
+                trace_environment,
+            ) = child_trace_fixture(root)
+            self.assertEqual(
+                environment["PYTHONPATH"], trace_environment["MUTATION_CHILD_TRACE_HOOK"]
+            )
+            self.assertEqual(environment["MUTATION_CHILD_TRACE_CONFIG"], str(config_path))
+            self.assertEqual(
+                json.loads(request_path.read_text())["node"], "tests/test_trace.py::test_child"
+            )
+            _producer, traces = child_trace.read_traces(data_file)
+            self.assertEqual(
+                [(trace.node, trace.outcome) for trace in traces],
+                [("tests/test_trace.py::test_child", "reached")],
+            )
+
+    def test_read_traces_rejects_a_missing_child_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            result.unlink()
+            with self.assertRaisesRegex(
+                ValueError, "Installed child request is missing its result"
+            ):
+                child_trace.read_traces(data_file)
+
+    def test_read_traces_rejects_a_config_that_redirects_its_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, config_path, _result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            config = json.loads(config_path.read_text())
+            config["record"] = str(Path(temporary) / "other-result.json")
+            config_path.write_text(json.dumps(config))
+            with self.assertRaisesRegex(
+                ValueError, "Installed child trace config does not match its request"
+            ):
+                child_trace.read_traces(data_file)
+
+    def test_read_traces_rejects_a_request_from_another_producer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, request_path, config_path, _result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            request = json.loads(request_path.read_text())
+            request["run_id"] = "0" * 32
+            request_path.write_text(json.dumps(request))
+            config = json.loads(config_path.read_text())
+            config["run_id"] = request["run_id"]
+            config_path.write_text(json.dumps(config))
+            with self.assertRaisesRegex(
+                ValueError, "Installed child trace belongs to another producer or route"
+            ):
+                child_trace.read_traces(data_file)
+
+    def test_imported_fragment_rejects_a_child_from_another_shard(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            producer, _ = child_trace.read_traces(data_file)
+            fragment = {
+                "producer": json.loads(
+                    (child_trace.trace_directory(data_file) / "producer.json").read_text()
+                ),
+                "children": [json.loads(result.read_text())],
+            }
+            self.assertEqual(producer.shard, "1/1")
+            _, children = parse_fragment_children(fragment)
+            self.assertEqual([child.shard for child in children], ["1/1"])
+            fragment["children"][0]["shard"] = "2/2"
+            with self.assertRaisesRegex(
+                ValueError, "Installed child trace belongs to another producer or route"
+            ):
+                parse_fragment_children(fragment)
+
+    def test_read_traces_rejects_non_hexadecimal_digests_of_the_right_length(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            original = result.read_text()
+            for field, value in (
+                ("source_digest", "g" * 64),
+                ("bytecode_digest", "A" * 64),
+            ):
+                with self.subTest(field=field):
+                    result.write_text(json.dumps({**json.loads(original), field: value}))
+                    with self.assertRaisesRegex(
+                        ValueError, "Installed child trace belongs to another producer or route"
+                    ):
+                        child_trace.read_traces(data_file)
+
+    def test_child_selection_owns_only_the_lines_its_trace_reached(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file, *_ = child_trace_fixture(root)
+            _, (trace,) = child_trace.read_traces(data_file)
+            (root / "src").mkdir()
+            (root / "src/example.py").write_text("a = 1\nb = 2\nc = 3\n")
+            digest = hashlib.sha256((root / "src/example.py").read_bytes()).hexdigest()
+            trace = replace(trace, phase="producer", source_digest=digest, lines=(2, 3))
+            evidence = SimpleNamespace(root=root, children=[trace])
+            spans = {(1, 1): [], (4, 5): [], (1, 2): [trace], (3, 9): [trace]}
+            for (line, end_line), expected in spans.items():
+                with self.subTest(span=(line, end_line)):
+                    self.assertEqual(
+                        runner.child_selection(evidence, "src/example.py", line, end_line),
+                        expected,
+                    )
+
+    def test_prepare_run_accepts_an_existing_empty_directory_and_refuses_a_used_one(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            data_file = root / ".coverage"
+            directory = child_trace.trace_directory(data_file)
+            directory.mkdir()
+            environment = child_trace.prepare_run(
+                data_file, root / "hook", "unit", "candidate", "1/1"
+            )
+            self.assertEqual(environment["MUTATION_CHILD_TRACE_DIR"], str(directory))
+            self.assertEqual([path.name for path in directory.iterdir()], ["producer.json"])
+            with self.assertRaisesRegex(ValueError, "Child trace directory is not empty"):
+                child_trace.prepare_run(data_file, root / "hook", "unit", "candidate", "1/1")
+
+    def test_read_traces_binds_each_child_identity_field_to_its_request(self):
+        foreign = {
+            "run_id": "0" * 32,
+            "invocation": "0" * 32,
+            "domain": "fixture",
+            "shard": "2/2",
+            "phase": "producer",
+            "test_phase": "setup",
+            "node": "tests/test_other.py::test_other",
+            "source": "src/other.py",
+            "module": "other",
+            "environment": "/other-environment",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            original = result.read_text()
+            for field, value in foreign.items():
+                with self.subTest(field=field):
+                    result.write_text(json.dumps({**json.loads(original), field: value}))
+                    with self.assertRaisesRegex(ValueError, "another producer or route"):
+                        child_trace.read_traces(data_file)
+            result.write_text(original)
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual(len(traces), 1)
+
+    def test_read_traces_rejects_malformed_result_fields(self):
+        invalid = (
+            ("version", True),
+            ("version", None),
+            ("node", None),
+            ("module", []),
+            ("lines", None),
+            ("lines", [True]),
+            ("lines", [0]),
+            ("lines", [1.0]),
+            ("lines", [2, 1]),
+            ("lines", [1, 1]),
+            ("outcome", None),
+            ("outcome", []),
+            ("outcome", {}),
+            ("outcome", "unknown"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            data_file, _request, _config, result, *_ = child_trace_fixture(
+                Path(temporary).resolve()
+            )
+            original = result.read_text()
+            for field, value in invalid:
+                with self.subTest(field=field, value=value):
+                    result.write_text(json.dumps({**json.loads(original), field: value}))
+                    with self.assertRaisesRegex(ValueError, "Invalid installed child trace record"):
+                        child_trace.read_traces(data_file)
+            result.write_text(original)
+            _, traces = child_trace.read_traces(data_file)
+            self.assertEqual(len(traces), 1)
+
+    def test_installed_module_must_be_in_the_active_venv_site_packages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            environment = root / "venv"
+            base_environment = root / "base"
+            site_packages = environment / "lib/python3.14/site-packages"
+            module = site_packages / "example.py"
+            process = SimpleNamespace(prefix=str(environment), base_prefix=str(base_environment))
+            with (
+                patch.object(child_trace, "sys", process),
+                patch.object(
+                    child_trace.sysconfig, "get_paths", return_value={"purelib": str(site_packages)}
+                ),
+            ):
+                self.assertTrue(
+                    child_trace.installed_module_path(module, environment, ("example.py",))
+                )
+                process.base_prefix = str(environment)
+                self.assertFalse(
+                    child_trace.installed_module_path(module, environment, ("example.py",))
+                )
+                process.base_prefix = str(base_environment)
+                self.assertFalse(
+                    child_trace.installed_module_path(
+                        root / "checkout/example.py", environment, ("example.py",)
+                    )
+                )
+                with patch.object(
+                    child_trace.sysconfig,
+                    "get_paths",
+                    return_value={"purelib": str(root / "other-site")},
+                ):
+                    self.assertFalse(
+                        child_trace.installed_module_path(module, environment, ("example.py",))
+                    )
+                self.assertFalse(
+                    child_trace.installed_module_path(module, environment, ("other.py",))
+                )
+
+    def test_mutation_gate_credits_an_installed_child_to_its_failing_test(self):
+        source = "assert 1 == 1\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, source, unit="pass")
+            (root / "tests/test_example.py").write_text(
+                "def test_placeholder():\n    assert True\n"
+            )
+            (root / "acceptance/tests/test_contract.py").write_text(
+                "def test_contract():\n    assert True\n"
+            )
+            (root / "tests/test_installed_child.py").write_text(INSTALLED_CHILD_TEST)
+
+            result = cli(root, "--paths", "src/example.py", "--shard", "1/3", "-n", "1")
+            rows = mutant_rows([json.loads(line) for line in result.stdout.splitlines()])
+
+        self.assertEqual(
+            {row["outcome"] for row in rows}, {"KILLED"}, result.stdout + result.stderr
+        )
+        self.assertEqual(
+            {row["node"] for row in rows}, {"tests/test_installed_child.py::test_value"}
+        )
+        self.assertEqual({row["domain"] for row in rows}, {"unit"})
+
+    def test_mutation_gate_rejects_stale_installed_child_bytecode(self):
+        source = "def answer():\n    return 1\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, source, unit="pass")
+            (root / "tests/test_example.py").write_text(
+                "def test_placeholder():\n    assert True\n"
+            )
+            (root / "acceptance/tests/test_contract.py").write_text(
+                "def test_contract():\n    assert True\n"
+            )
+            stale_child_test = (
+                INSTALLED_CHILD_TEST.replace(
+                    "import subprocess, venv\n", "import os, py_compile, subprocess, venv\n"
+                )
+                .replace(
+                    "    package.write_bytes((root / 'src/example.py').read_bytes())\n",
+                    "    package.write_bytes((root / 'src/example.py').read_bytes())\n"
+                    "    original = package.stat()\n"
+                    "    py_compile.compile(str(package), doraise=True)\n"
+                    "    package.write_text(package.read_text().replace('return 1', 'return 2'))\n"
+                    "    os.utime(package, ns=(original.st_atime_ns, original.st_mtime_ns))\n",
+                )
+                .replace(
+                    "'import example; print(example.__file__)'",
+                    "'import example; print(example.__file__); print(example.answer())'",
+                )
+                .replace(
+                    "    assert imported.is_relative_to(environment.resolve())\n",
+                    "    assert imported.is_relative_to(environment.resolve())\n"
+                    "    assert child.stdout.splitlines()[1] == '1'\n",
+                )
+            )
+            (root / "tests/test_installed_child.py").write_text(stale_child_test)
+
+            result = cli(root, "--paths", "src/example.py", "--shard", "1/3", "-n", "1")
+            records = [json.loads(line) for line in result.stdout.splitlines()]
+
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(records[-1]["outcome"], "INFRA")
+        self.assertIn("Loaded bytecode does not match", records[-1]["message"])
+
     def test_aggregate_cost_overflow_keeps_complete_summary_and_candidate_bytes(self):
         # Given valid individual timings, an unreportable aggregate must fail
         # closed after all candidate identities and summary counts are emitted.
@@ -552,7 +1701,7 @@ class MutationExecutionTest(unittest.TestCase):
 
         output = io.StringIO()
         with (
-            patch.object(mutation_gate, "imported_coverage", return_value={}),
+            patch.object(mutation_gate, "imported_coverage", return_value=NO_COVERAGE),
             patch.object(mutation_gate, "run_scheduler", side_effect=scheduler),
             contextlib.redirect_stdout(output),
         ):
@@ -594,7 +1743,13 @@ class MutationExecutionTest(unittest.TestCase):
             project(root, "def answer():\n    return True\n")
             mutants, _ = candidates("src/example.py", (root / "src/example.py").read_bytes())
             manifest = root / "mutations.json"
-            manifest.write_text(json.dumps(mutation_gate.manifest_data(root, mutants[:1], {}, 20)))
+            manifest.write_text(
+                json.dumps(
+                    mutation_gate.manifest_data(
+                        root, mutants[:1], CoverageEvidence(root, {}, ()), 20
+                    )
+                )
+            )
             result = root / "result-0.json"
             original = b'{"previous": true}\n'
             result.write_bytes(original)
@@ -718,7 +1873,7 @@ class MutationExecutionTest(unittest.TestCase):
 
                 output = io.StringIO()
                 with (
-                    patch.object(mutation_gate, "imported_coverage", return_value={}),
+                    patch.object(mutation_gate, "imported_coverage", return_value=NO_COVERAGE),
                     patch.object(mutation_gate, "run_scheduler", side_effect=scheduler),
                     contextlib.redirect_stdout(output),
                 ):
@@ -794,7 +1949,7 @@ class MutationExecutionTest(unittest.TestCase):
         output = io.StringIO()
         with (
             patch.object(mutation_gate, "collect", return_value=(mutants, [])),
-            patch.object(mutation_gate, "imported_coverage", return_value={}),
+            patch.object(mutation_gate, "imported_coverage", return_value=NO_COVERAGE),
             patch.object(mutation_gate.random.Random, "shuffle"),
             patch.object(mutation_gate, "run_scheduler", side_effect=scheduler),
             contextlib.redirect_stdout(output),
@@ -913,9 +2068,15 @@ class MutationExecutionTest(unittest.TestCase):
                 contextlib.redirect_stderr(output),
                 patch.object(mutation_gate, "program", side_effect=scheduler),
             ):
-                first = mutation_gate.schedule(root, mutants[:1], {}, args)
-                second = mutation_gate.schedule(root, mutants[:1], {}, args)
-                third = mutation_gate.schedule(root, mutants[:1], {}, args)
+                first = mutation_gate.schedule(
+                    root, mutants[:1], CoverageEvidence(root, {}, ()), args
+                )
+                second = mutation_gate.schedule(
+                    root, mutants[:1], CoverageEvidence(root, {}, ()), args
+                )
+                third = mutation_gate.schedule(
+                    root, mutants[:1], CoverageEvidence(root, {}, ()), args
+                )
             self.assertEqual(
                 [directory.parent for directory in directories],
                 [root / "tmp/mutation-runs"] * 3,
@@ -956,7 +2117,10 @@ class MutationExecutionTest(unittest.TestCase):
                         self.assertRaises(mutation_gate.SchedulerError) as failed,
                     ):
                         mutation_gate.schedule(
-                            root, mutants[:1], {}, SimpleNamespace(timeout=20, workers=1)
+                            root,
+                            mutants[:1],
+                            CoverageEvidence(root, {}, ()),
+                            SimpleNamespace(timeout=20, workers=1),
                         )
                     self.assertIs(failed.exception.__cause__, error)
                     self.assertEqual(failed.exception.rows[0]["outcome"], "NO_TESTS")
@@ -1082,6 +2246,7 @@ class MutationExecutionTest(unittest.TestCase):
             "from pathlib import Path\nfrom unittest.mock import patch\n"
             "from scripts.validation import mutation_gate as gate\n"
             "from scripts.validation import mutation_run as run_module\n"
+            "from scripts.validation.mutation_run import CoverageEvidence\n"
             "from scripts.validation.mutation_source import candidates\n"
             f"root = Path({str(root)!r})\n"
             "found, _ = candidates('src/example.py', (root / 'src/example.py').read_bytes())\n"
@@ -1095,7 +2260,8 @@ class MutationExecutionTest(unittest.TestCase):
             "    (root / 'work').write_text(str(cwd))\n"
             "    return original(command, cwd, env, timeout, log, **kwargs)\n"
             "with patch.object(gate, 'collect', return_value=(mutants, [])), "
-            f"patch.object(gate, 'imported_coverage', return_value={mapping!r}), "
+            f"patch.object(gate, 'imported_coverage', "
+            f"return_value=CoverageEvidence(root, {mapping!r}, ())), "
             "patch.object(gate.random.Random, 'shuffle'), patch.object(gate, 'program', run), "
             "patch.object(run_module, '_finish_owned', "
             f"denied_cleanup if {cleanup_denied!r} else finish_owned):\n"
@@ -1759,6 +2925,8 @@ class MutationExecutionTest(unittest.TestCase):
                 .read_text()
                 .split("class MutationOperatorsTest")[0]
             )
+            # The copied helper module imports its shared helpers from fakes.
+            shutil.copyfile(ROOT / "tests/fakes.py", root / "tests/fakes.py")
             shutil.copytree(ROOT / "scripts", root / "scripts")
             # This tiny independent project owns no reviewed production equivalents.
             (root / "allow.yaml").write_text("[]\n")
@@ -1782,7 +2950,9 @@ class MutationExecutionTest(unittest.TestCase):
             )
             child_only = [m for m in mutants if m.qualname == "main" and m.before == "return 0"]
             self.assertEqual(len(child_only), 3)
-            routes = mutation_gate.manifest_data(root, child_only, {"unit": mapping}, 30)
+            routes = mutation_gate.manifest_data(
+                root, child_only, CoverageEvidence(root, {"unit": mapping}, ()), 30
+            )
             self.assertEqual(
                 [row["selected"] for row in routes["mutants"]],
                 [{"unit": ["tests/test_example.py::test_child"]}] * 3,
@@ -1830,7 +3000,10 @@ class MutationExecutionTest(unittest.TestCase):
 
             with patch.object(mutation_gate, "program", side_effect=scheduler):
                 rows = mutation_gate.schedule(
-                    root, [mutant], mapping, SimpleNamespace(timeout=20, workers=1)
+                    root,
+                    [mutant],
+                    CoverageEvidence(root, mapping, ()),
+                    SimpleNamespace(timeout=20, workers=1),
                 )
             self.assertEqual(rows, [{**asdict(mutant), "outcome": "KILLED", "restored": True}])
             self.assertEqual(
@@ -1848,6 +3021,7 @@ class MutationExecutionTest(unittest.TestCase):
                                 "end": mutant.end,
                                 "after": "False",
                                 "selected": {"unit": ["tests/test_example.py::test_value"]},
+                                "child_routes": [],
                             }
                         ],
                         "timeout": 20,
@@ -1912,6 +3086,7 @@ class MutationExecutionTest(unittest.TestCase):
                     "restored",
                 },
             )
+            self.assertNotIn("confirmation", row)
             for selected, expected in (({"unit": []}, ["unit"]), ({}, [])):
                 jobs = json.loads(manifest.read_text())
                 jobs["mutants"][0]["selected"] = selected

@@ -11,18 +11,24 @@ from pathlib import Path
 
 from scripts.processes import stop
 
-from test_mutation_gate import ROOT, project
+from fakes import project
+from test_mutation_gate import ROOT
 
 CHILD = """
 import sys
 from unittest.mock import patch
 from scripts.validation import mutation_gate as gate
+from scripts.validation.mutation_run import CoverageEvidence
 launch = gate.run_scheduler
 def held(*args):
     print('HELD', flush=True)
     assert sys.stdin.readline() == 'release\\n'
     return launch(*args)
-mapping = {'unit': {'src/example.py': {2: ['tests/test_example.py::test_value|run']}}}
+mapping = CoverageEvidence(
+    __import__('pathlib').Path('.'),
+    {'unit': {'src/example.py': {2: ['tests/test_example.py::test_value|run']}}},
+    (),
+)
 with patch.object(gate, 'resolve_coverage', return_value=mapping), \\
      patch.object(gate, 'run_scheduler', held):
     raise SystemExit(gate.main(sys.argv[1:]))

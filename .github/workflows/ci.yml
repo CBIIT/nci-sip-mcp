@@ -14,6 +14,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MUTATION_COVERAGE_BATCH: gha-${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+
 # A newer push to a pull request replaces the run in progress. Every commit on
 # main gets its own run, which is never cancelled or replaced: it validates the
 # commit that a release is cut from.
@@ -42,7 +45,7 @@ jobs:
       - uses: $/.github/actions/setup
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          pattern: mutation-coverage-${{ github.sha }}-*
+          pattern: mutation-coverage-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-*
           path: tmp/mutation-coverage
       - name: Mutate every changed Python site
         env:
@@ -54,7 +57,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: mutation-results-${{ github.sha }}-${{ matrix.shard }}
+          name: mutation-results-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
           path: tmp/mutation-runs/
           # An EMPTY shard never starts a scheduler; nonempty evidence is checked before clearance.
           if-no-files-found: warn
@@ -322,7 +325,10 @@ jobs:
       # Includes the recorded retrieval sample and activation gate with a test-only hashing
       # calibration. It tests execution and arithmetic, not real-model retrieval quality.
       - name: Configure shared unit coverage
-        run: pdm run python -m scripts.validation.mutation_coverage configure unit --output tmp/mutation-config
+        env:
+          UNIT_SHARD: ${{ matrix.shard }}
+          MUTATION_COVERAGE_RESERVATIONS: ${{ runner.temp }}/mutation-coverage-reservations
+        run: pdm run python -m scripts.validation.mutation_coverage configure unit --shard "$UNIT_SHARD" --output tmp/mutation-config
       - name: Test, including recorded retrieval evaluation
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -353,7 +359,7 @@ jobs:
         run: pdm run python -m scripts.validation.mutation_coverage export unit --data .coverage --shard "$UNIT_SHARD" --output tmp/mutation-coverage/unit.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: mutation-coverage-${{ github.sha }}-unit-${{ strategy.job-index }}
+          name: mutation-coverage-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-unit-${{ strategy.job-index }}
           path: tmp/mutation-coverage/unit.json
           if-no-files-found: error
           retention-days: 1
@@ -418,7 +424,9 @@ jobs:
       # comparison below. Any other status (usage error, interruption, a crash) or a missing
       # report is a run that did not happen.
       - name: Configure shared fixture coverage
-        run: pdm run python -m scripts.validation.mutation_coverage configure fixture --output tmp/mutation-config
+        env:
+          MUTATION_COVERAGE_RESERVATIONS: ${{ runner.temp }}/mutation-coverage-reservations
+        run: pdm run python -m scripts.validation.mutation_coverage configure fixture --shard 1/1 --output tmp/mutation-config
       - name: Run the suite against the fixtures
         id: fixture
         env:
@@ -503,7 +511,7 @@ jobs:
           pdm run python -m scripts.validation.mutation_coverage export fixture --data acceptance/.coverage --shard 1/1 --output tmp/mutation-coverage/fixture.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: mutation-coverage-${{ github.sha }}-fixture
+          name: mutation-coverage-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-fixture-0
           path: tmp/mutation-coverage/fixture.json
           if-no-files-found: error
           retention-days: 1
@@ -550,7 +558,10 @@ jobs:
       - uses: $/.github/actions/setup
       # The minimum applies to the shards together, in the coverage job.
       - name: Configure shared selftest coverage
-        run: pdm run python -m scripts.validation.mutation_coverage configure selftest --output tmp/mutation-config
+        env:
+          SELFTEST_SHARD: ${{ matrix.shard }}
+          MUTATION_COVERAGE_RESERVATIONS: ${{ runner.temp }}/mutation-coverage-reservations
+        run: pdm run python -m scripts.validation.mutation_coverage configure selftest --shard "$SELFTEST_SHARD" --output tmp/mutation-config
       - run: pdm run acceptance-selftest -p scripts.validation.mutation_probe --cov-config=../tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= --junitxml=tmp/test-results/selftest.xml
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -580,7 +591,7 @@ jobs:
         run: pdm run python -m scripts.validation.mutation_coverage export selftest --data acceptance/.coverage --shard "$SELFTEST_SHARD" --output tmp/mutation-coverage/selftest.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: mutation-coverage-${{ github.sha }}-selftest-${{ strategy.job-index }}
+          name: mutation-coverage-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-selftest-${{ strategy.job-index }}
           path: tmp/mutation-coverage/selftest.json
           if-no-files-found: error
           retention-days: 1

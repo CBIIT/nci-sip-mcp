@@ -108,7 +108,32 @@ class AcceptanceGateWorkflowTest(unittest.TestCase):
 
     def test_only_a_clean_fixture_execution_exports_the_mutation_baseline(self):
         job = jobs("ci.yml")["acceptance"]
+        self.assertEqual(
+            {key: value for key, value in job.items() if key != "steps"},
+            {"name": "acceptance (fixture)", "runs-on": "ubuntu-24.04", "timeout-minutes": 10},
+        )
         self.assertEqual(step("ci.yml", "acceptance", FIXTURE_STEP)["id"], "fixture")
+        self.assertEqual(
+            [
+                entry
+                for entry in job["steps"]
+                if entry.get("name") == "Configure shared fixture coverage"
+            ],
+            [
+                {
+                    "name": "Configure shared fixture coverage",
+                    "env": {
+                        "MUTATION_COVERAGE_RESERVATIONS": (
+                            "${{ runner.temp }}/mutation-coverage-reservations"
+                        )
+                    },
+                    "run": (
+                        "pdm run python -m scripts.validation.mutation_coverage configure "
+                        "fixture --shard 1/1 --output tmp/mutation-config"
+                    ),
+                }
+            ],
+        )
         self.assertEqual(
             [
                 entry
@@ -127,8 +152,40 @@ class AcceptanceGateWorkflowTest(unittest.TestCase):
             ],
         )
 
+    def test_fixture_mutation_coverage_artifact_binds_its_attempt(self):
+        job = jobs("ci.yml")["acceptance"]
+        self.assertEqual(
+            [
+                entry
+                for entry in job["steps"]
+                if entry.get("with", {}).get("path") == "tmp/mutation-coverage/fixture.json"
+            ],
+            [
+                {
+                    "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+                    "with": {
+                        "name": (
+                            "mutation-coverage-${{ github.sha }}-${{ github.run_id }}-"
+                            "${{ github.run_attempt }}-fixture-0"
+                        ),
+                        "path": "tmp/mutation-coverage/fixture.json",
+                        "if-no-files-found": "error",
+                        "retention-days": 1,
+                    },
+                }
+            ],
+        )
+
     def test_ci_selftest_job_runs_all_shards_without_overrides(self):
         job = jobs("ci.yml")["selftest"]
+        self.assertEqual(
+            {key: value for key, value in job.items() if key not in {"steps", "strategy"}},
+            {
+                "name": "selftest (${{ matrix.shard }})",
+                "runs-on": "ubuntu-24.04",
+                "timeout-minutes": 10,
+            },
+        )
         self.assertEqual(
             job["strategy"],
             {

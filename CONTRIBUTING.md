@@ -108,14 +108,30 @@ CI's existing unit, harness self-test and prepared-fixture jobs collect per-test
 coverage once. Each job's generated config (`mutation_coverage configure`) names that job's own
 absolute data file (`.coverage` at the root for unit, `acceptance/.coverage` for the harness
 domains), so a child started from another working directory writes beside it and is combined.
-They export one-day fragments bound to the checked-out merge commit and tracked
-input bytes; mutation shards wait for those producers and the coverage floors, download their
-same-run fragments and pass `--coverage-dir`. A missing, incomplete, malformed or mismatched
-import fails as `INFRA`, even for an empty catalogue; it never silently reruns a baseline.
+They export one-day fragments bound to the checked-out merge commit, tracked input bytes and
+the repository/run/attempt batch. Each producer reserves its domain/shard once in an owned
+runner-temporary directory outside its output. Mutation shards wait for those producers and the
+coverage floors, download fragments from their own run and attempt, and pass `--coverage-dir`.
+A missing, incomplete, malformed or mismatched import fails as `INFRA`, even for an empty
+catalogue; it never silently reruns a baseline. If the consumer executes in a new attempt,
+all 13 producer fragments must come from that attempt; rerun all producers rather than borrow
+earlier fragments. An unrelated later retry that does not run the consumer does not by itself
+invalidate a previously complete campaign for the exact unchanged candidate and inputs. Review
+its actual producer and mutation attempts, raw outcomes and restoration evidence; a green
+aggregate alone is not that proof.
 A fixture execution must exit zero to export a baseline, even if its ratchet expects failures.
 Collection/setup/teardown attribution retains the existing conservative selection rules.
 A gate-level `INFRA` record (exit 2) names the exception `type` and, when it has one, its `filename`;
 the traceback goes to stderr.
+
+For a manual imported baseline, the local coordinator supplies one `local-` batch followed by
+32 lowercase hexadecimal characters as `MUTATION_COVERAGE_BATCH` to each producer, export,
+check and consumer. It also supplies an absolute, owned `MUTATION_COVERAGE_RESERVATIONS`
+directory shared by the producers and outside **all** producer output and fragment directories.
+Each domain/shard can be reserved only once, including after failure. The coordinator must keep
+all producer snapshots at the consumer's exact HEAD and tracked bytes; the configure command
+cannot observe every later fragment directory. For a retry, use a fresh batch and reservation
+directory and rerun all producers. Preserve prior evidence before cleanup.
 
 For a focused local sensitivity run (for example with `--paths`), `pdm run mutation-gate` without
 `--coverage-dir` computes clean unit, harness self-test and prepared-fixture baselines itself;
@@ -415,6 +431,25 @@ the fixture domain was not run, or it returned `NO_TESTS`, `TIMEOUT` or `INFRA`.
 `NO_TESTS` means no selected domain established an owner; it fails the gate and cannot be
 allowlisted. Inspect selection and call evidence before
 concluding the code is unreachable.
+Explicitly opted-in installed-child routes retain their owning test, installed path, source
+and bytecode digests, executed lines, and producer/run identity. A child kill requires the
+same test to reach the mutated bytes and fail; another node cannot lend its reach. A passing,
+unreached route is `NO_TESTS` and does not block an independent in-process owner. A failing
+call without same-node child or ordinary reach is `INFRA`, with its observed failure retained.
+Candidates with child routes collect coverage to distinguish these owners.
+A child reaches a mutation only on the lines the mutated file holds: a mutation that collapses
+a multi-line statement is judged against its shorter span, so a statement that shifted into the
+old span earns no credit. An import-kind kill keeps its classification without child attribution.
+A Python process the traced child starts is not traced and cannot overwrite its record; a module
+executed with different bytes (path, source or bytecode digest), or a failure inside the tracer, makes the record invalid.
+A run of a candidate with expected child routes that leaves no coverage data is `INFRA`,
+except an import-kind kill, which is classified before coverage is read.
+Malformed or missing trace evidence is `INFRA`; a timed-out run remains `TIMEOUT`.
+An opted-in child may declare several exact source/module routes for the same owning call and
+environment; each emits separate evidence. A module run with `python -m` is matched by its
+`__spec__.name` and verified installed path, not by treating `__main__` as an alias. An owned
+test hook can start the staged tracer alongside its existing network sentinel without adding
+checkout source or host site-packages to the child's product import path.
 Long-lived fixture servers retain the setup context present when they start; later RPCs
 cannot inherit changes to the parent's environment. Their setup-only lines therefore use
 the whole-fixture fallback, counted like the other domains, rather than claiming per-RPC ownership.
@@ -477,7 +512,7 @@ original file, with its synthesized row in `result-N.infra.json`. Corruption fai
 even after scheduler exit zero; file permission failures remain diagnostic. An incomplete row
 never counts as a kill or verified scratch restoration. Retained runs are never resumed automatically.
 The PR mutation job uploads this directory on success or failure as
-`mutation-results-<merge-tree-sha>-<shard>` for 30 days; that is not the retention deadline. The
+`mutation-results-<merge-tree-sha>-<run-id>-<attempt>-<shard>` for 30 days; that is not the retention deadline. The
 tested synthetic PR merge ref can disappear when the PR closes, and producer coverage fragments
 expire after one day. Capture the exact tested Git object T and each required raw artifact as they
 become available, with their hashes, and verify retention before the earliest applicable loss

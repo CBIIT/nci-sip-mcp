@@ -27,8 +27,10 @@ from scripts.validation import mutation_gate as gate
 from scripts.validation import mutation_probe as probe
 from scripts.validation import mutation_run as runner
 from scripts.validation import mutation_source as source
+from scripts.validation.mutation_run import CoverageEvidence
 
-from test_mutation_gate import cli, command, project
+from fakes import project
+from test_mutation_gate import cli, command
 
 
 def git(root, *args):
@@ -244,7 +246,12 @@ class MutationCliContractsTest(unittest.TestCase):
                 patch.object(gate, "program", side_effect=launch),
                 self.assertRaises(ValueError) as failed,
             ):
-                gate.schedule(root, mutants, mapping, SimpleNamespace(timeout=20, workers=1))
+                gate.schedule(
+                    root,
+                    mutants,
+                    CoverageEvidence(root, mapping, ()),
+                    SimpleNamespace(timeout=20, workers=1),
+                )
             rows = getattr(failed.exception, "rows", [])
             self.assertEqual(len(rows), len(mutants))
             self.assertEqual(
@@ -563,7 +570,12 @@ class MutationCliContractsTest(unittest.TestCase):
                 patch.object(gate, "program", side_effect=crash),
                 self.assertRaises(gate.SchedulerError) as failed,
             ):
-                gate.schedule(root, mutants, {}, SimpleNamespace(timeout=20, workers=1))
+                gate.schedule(
+                    root,
+                    mutants,
+                    CoverageEvidence(root, {}, ()),
+                    SimpleNamespace(timeout=20, workers=1),
+                )
             self.assertEqual(str(failed.exception), "Mutant scheduler failed: worker exited 9")
             self.assertEqual(len(failed.exception.rows), len(mutants))
 
@@ -585,7 +597,12 @@ class MutationCliContractsTest(unittest.TestCase):
                 patch.object(gate, "program", side_effect=interrupted),
                 self.assertRaises(gate.SchedulerError) as failed,
             ):
-                gate.schedule(root, mutants, {}, SimpleNamespace(timeout=20, workers=1))
+                gate.schedule(
+                    root,
+                    mutants,
+                    CoverageEvidence(root, {}, ()),
+                    SimpleNamespace(timeout=20, workers=1),
+                )
             self.assertEqual(
                 str(failed.exception), "Mutant scheduler failed: scheduler wait denied"
             )
@@ -631,11 +648,22 @@ class MutationCliContractsTest(unittest.TestCase):
     def assert_scheduler_verdict(self, root, mutants, status, restored, row):
         if status == 0 and restored:
             self.assertEqual(
-                gate.schedule(root, mutants, {}, SimpleNamespace(timeout=20, workers=1)), [row]
+                gate.schedule(
+                    root,
+                    mutants,
+                    CoverageEvidence(root, {}, ()),
+                    SimpleNamespace(timeout=20, workers=1),
+                ),
+                [row],
             )
             return
         with self.assertRaises(gate.SchedulerError) as failed:
-            gate.schedule(root, mutants, {}, SimpleNamespace(timeout=20, workers=1))
+            gate.schedule(
+                root,
+                mutants,
+                CoverageEvidence(root, {}, ()),
+                SimpleNamespace(timeout=20, workers=1),
+            )
         self.assertEqual(str(failed.exception), "Mutant scheduler failed: controller verdict")
         self.assertEqual(failed.exception.rows, [row])
 
@@ -1228,7 +1256,11 @@ class MutationVerdictContractsTest(unittest.TestCase):
             mutants, _ = source.candidates("src/example.py", (root / "src/example.py").read_bytes())
             mapping = {"unit": {"src/example.py": {2: ["tests/test_example.py::test_value|run"]}}}
             path = root / "mutations.json"
-            path.write_text(json.dumps(gate.manifest_data(root, mutants, mapping, 20)))
+            path.write_text(
+                json.dumps(
+                    gate.manifest_data(root, mutants, CoverageEvidence(root, mapping, ()), 20)
+                )
+            )
             with (
                 patch.object(gate, "run_domain", side_effect=PermissionError("cleanup denied")),
                 suppress(PermissionError),  # Require durable evidence even if it propagates.
@@ -1254,7 +1286,9 @@ class MutationVerdictContractsTest(unittest.TestCase):
             project(root, "flag = True\n")
             mutants, _ = source.candidates("src/example.py", b"flag = True\n")
             path = root / "mutations.json"
-            path.write_text(json.dumps(gate.manifest_data(root, mutants, {}, 20)))
+            path.write_text(
+                json.dumps(gate.manifest_data(root, mutants, CoverageEvidence(root, {}, ()), 20))
+            )
             with patch.object(gate, "snapshot", side_effect=OSError("snapshot denied")):
                 gate.execute_job(path, 0)
             row = json.loads((root / "result-0.json").read_text())
@@ -1277,7 +1311,11 @@ class MutationVerdictContractsTest(unittest.TestCase):
             project(root, "def answer():\n    return True\n")
             mutants = source.candidates("src/example.py", (root / "src/example.py").read_bytes())[0]
             path = root / "mutations.json"
-            path.write_text(json.dumps(gate.manifest_data(root, mutants[:1], {}, 20)))
+            path.write_text(
+                json.dumps(
+                    gate.manifest_data(root, mutants[:1], CoverageEvidence(root, {}, ()), 20)
+                )
+            )
             read_bytes = Path.read_bytes
             reads = []
 
@@ -1702,7 +1740,12 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                 and m.operator == "boolean:literal"
             )
             mapping = {"unit": runner.coverage_map(data, root)}
-            rows = gate.schedule(root, [mutant], mapping, SimpleNamespace(timeout=20, workers=1))
+            rows = gate.schedule(
+                root,
+                [mutant],
+                CoverageEvidence(root, mapping, ()),
+                SimpleNamespace(timeout=20, workers=1),
+            )
             self.assertEqual(
                 [(row["outcome"], row.get("phase"), row.get("node")) for row in rows],
                 [("KILLED", "call", "tests/test_example.py::test_owned_session")],
@@ -1942,7 +1985,13 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                     mutant = next(m for m in mutants if m.line == 1)
                     path = root / "mutations.json"
                     mapping = {"unit": {"src/example.py": {1: [""]}}}
-                    path.write_text(json.dumps(gate.manifest_data(root, [mutant], mapping, 20)))
+                    path.write_text(
+                        json.dumps(
+                            gate.manifest_data(
+                                root, [mutant], CoverageEvidence(root, mapping, ()), 20
+                            )
+                        )
+                    )
                     gate.execute_job(path, 0)
                     row = json.loads((root / "result-0.json").read_text())
                     self.assertEqual(row["outcome"], outcome, row)
@@ -1972,7 +2021,9 @@ class MutationEvidenceContractsTest(unittest.TestCase):
         owners = ["tests/test_example.py::test_value|run", "tests/test_other.py::test_other|run"]
         mapping = {"unit": {"src/example.py": {1: owners}}}
         path = root / "mutations.json"
-        path.write_text(json.dumps(gate.manifest_data(root, [mutant], mapping, 20)))
+        path.write_text(
+            json.dumps(gate.manifest_data(root, [mutant], CoverageEvidence(root, mapping, ()), 20))
+        )
         gate.execute_job(path, 0)
         return json.loads((root / "result-0.json").read_text())
 
@@ -2202,7 +2253,9 @@ class MutationEvidenceContractsTest(unittest.TestCase):
             project(root, "def answer():\n    return True\n")
             mutants = source.candidates("src/example.py", (root / "src/example.py").read_bytes())[0]
             path = root / "mutations.json"
-            path.write_text(json.dumps(gate.manifest_data(root, mutants, {}, 20)))
+            path.write_text(
+                json.dumps(gate.manifest_data(root, mutants, CoverageEvidence(root, {}, ()), 20))
+            )
             config = pytest.Config.fromdictargs({}, [])
             self.addCleanup(config._ensure_unconfigure)
             collector = probe.pytest_collect_file(path, pytest.Session.from_config(config))
@@ -2309,9 +2362,9 @@ class MutationEvidenceContractsTest(unittest.TestCase):
                 runner.baseline(root, 30)
             project(root, "def answer():\n    return True\n")
             mapping = runner.baseline(root, 30)
-            self.assertEqual(set(mapping), {"unit", "selftest", "fixture"})
+            self.assertEqual(set(mapping.lines), {"unit", "selftest", "fixture"})
             self.assertEqual(
-                runner.selection(mapping, "src/example.py", 2, 2),
+                runner.selection(mapping.lines, "src/example.py", 2, 2),
                 {"unit": ["tests/test_example.py::test_value"]},
             )
 
