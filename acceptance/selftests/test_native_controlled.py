@@ -25,6 +25,8 @@ from nci_sip_acceptance.suite_identity import identity
 NODE = "tests/test_evs.py::test_a_discovered_release_identifies_the_concept_and_its_provenance"
 DISCOVERY = "/api/v1/metadata/terminologies?terminology=ncit&latest=true&tag=monthly"
 CONTENT = "/api/v1/concept/ncit_26.09d/C4817?include=minimal"
+# Enough for a nested pytest summary and traceback without flooding the log.
+DIAGNOSTIC_TAIL = 4000
 RELEASE_ROW = {
     "terminology": "ncit",
     "latest": True,
@@ -123,6 +125,24 @@ def run_native(tree, python, env, *arguments):
     )
 
 
+def nested_diagnostic(tree, outcome):
+    """Describe the nested run for a failed receiver assertion; built only on failure."""
+    lines = [
+        f"nested pytest exit code: {outcome.returncode}",
+        "nested stdout tail:",
+        outcome.stdout[-DIAGNOSTIC_TAIL:],
+        "nested stderr tail:",
+        outcome.stderr[-DIAGNOSTIC_TAIL:],
+    ]
+    directory = tree / "acceptance/tmp"
+    for marker in sorted((directory / "native-run").glob("**/failed")):
+        lines.append(f"failed marker {marker.relative_to(directory)}: {marker.read_text()!r}")
+    report = directory / "native-report.json"
+    content = report.read_text()[-DIAGNOSTIC_TAIL:] if report.exists() else "absent"
+    lines.append(f"native report tail: {content}")
+    return "\n".join(lines)
+
+
 def local_policy(tree, receiver):
     path = tree / "acceptance/fixtures/environments.yaml"
     policy = yaml.safe_load(path.read_text())
@@ -174,7 +194,7 @@ def test_native_serial_node_shares_controller_release_and_budget(native_tree, lo
         assert outcome.returncode == expected_exit, outcome.stdout + outcome.stderr
         assert [
             (method, path, body) for method, path, _headers, body in receiver.requests
-        ] == expected
+        ] == expected, nested_diagnostic(tree, outcome)
         assert receiver.contacts == len(receiver.requests)
         assert [
             {key.lower(): value for key, value in headers}["x-evsrestapi-license-key"]
@@ -280,7 +300,7 @@ def pytest_collection_modifyitems(items):
         assert "owned native publication failure" in outcome.stdout + outcome.stderr
         assert [
             (method, path, body) for method, path, _headers, body in receiver.requests
-        ] == expected
+        ] == expected, nested_diagnostic(tree, outcome)
         assert receiver.contacts == len(expected)
     if late:
         assert destination.read_bytes() == (directory / "initial-native-report.json").read_bytes()
@@ -400,7 +420,7 @@ def pytest_sessionfinish(session):
         outcome = run_native(tree, python, env, NODE, "-p", "framework_fallback_probe", "-n", "0")
         assert [
             (method, path, body) for method, path, _headers, body in receiver.requests
-        ] == expected_requests
+        ] == expected_requests, nested_diagnostic(tree, outcome)
         assert receiver.contacts == len(expected_requests)
     directory = tree / "acceptance/tmp"
     assert (directory / "framework-settlement.txt").read_text() == "False|-1|False|()"
@@ -461,7 +481,7 @@ def pytest_runtestloop(session):
         assert (directory / "finalizer-admission.txt").read_text() == "closed"
         assert [
             (method, path, body) for method, path, _headers, body in receiver.requests
-        ] == expected_requests
+        ] == expected_requests, nested_diagnostic(tree, outcome)
         assert receiver.contacts == len(expected_requests)
     assert outcome.returncode != 0
     assert "owned interruption with residual session finalizer" in outcome.stdout + outcome.stderr
@@ -573,7 +593,7 @@ def pytest_sessionfinish(session):
         outcome = run_native(tree, python, env, NODE, "-p", "native_cleanup_only_probe", "-n", "0")
         assert [
             (method, path, body) for method, path, _headers, body in receiver.requests
-        ] == expected_requests
+        ] == expected_requests, nested_diagnostic(tree, outcome)
         assert receiver.contacts == len(expected_requests)
     report = json.loads((tree / "acceptance/tmp/native-report.json").read_text())
     assert report["tests"] == {NODE: EXPECTED_CASE | {"outcome": "passed"}}
@@ -639,7 +659,7 @@ def pytest_sessionfinish(session):
         outcome = run_native(tree, python, env, NODE, "-p", "native_sessionfinish_probe", "-n", "0")
         assert [
             (method, path, body) for method, path, _headers, body in receiver.requests
-        ] == expected_requests
+        ] == expected_requests, nested_diagnostic(tree, outcome)
         assert receiver.contacts == len(expected_requests)
     directory = tree / "acceptance/tmp"
     observation = json.loads((directory / "sessionfinish-observation.json").read_text())
@@ -886,7 +906,7 @@ StderrTransfer.finish = stderr_finish
         assert "native postspawn failure" in outcome.stdout + outcome.stderr
         assert [(method, path, body) for method, path, _headers, body in receiver.requests] == [
             ("GET", DISCOVERY, b"")
-        ]
+        ], nested_diagnostic(tree, outcome)
         assert receiver.contacts == 1
     directory = tree / "acceptance/tmp"
     receipt = json.loads((directory / "native-postspawn.json").read_text())

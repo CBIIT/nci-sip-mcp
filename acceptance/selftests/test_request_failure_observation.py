@@ -16,6 +16,9 @@ from nci_sip_mcp.http_client import RequestPolicyError
 pytest_plugins = ["pytester"]
 PROPERTY = "accounting_snapshot_diagnostic"
 CANARY = "private-observation-canary"
+# Bounds around the ledger's 0.1 s busy wait: early return tolerance and a stall ceiling.
+MIN_BUSY_WAIT = 0.05
+MAX_BUSY_WAIT = 5
 
 
 def ledger(directory):
@@ -46,6 +49,18 @@ def test_real_snapshot_retains_refusal_before_cleanup(tmp_path, request, capsys)
         assert json.loads(capsys.readouterr().err) == record
     after = run.snapshot()
     assert (after.state, after.transport_entries, after.failure) == ("failed", 0, "accounting")
+
+
+def test_refusal_names_the_failing_ledger_statement_and_the_wait(tmp_path, request):
+    run = ledger(tmp_path)
+    with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+        blocker.execute("BEGIN EXCLUSIVE")
+        with pytest.raises(RequestPolicyError):
+            snapshot(run, request.node)
+    attempt = json.loads(dict(request.node.user_properties)["accounting_snapshot_attempt"])
+    assert attempt["function"] == "ControlledRun._identity"
+    assert attempt["statement"] == 'connection.execute("SELECT entry_pending FROM leases LIMIT 0")'
+    assert MIN_BUSY_WAIT <= attempt["elapsed_seconds"] < MAX_BUSY_WAIT
 
 
 def test_junit_keeps_initiating_record_after_teardown_failure(pytester):
