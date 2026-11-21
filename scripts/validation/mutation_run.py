@@ -548,7 +548,7 @@ def run_domain(
                 mutated_span,
                 scratch,
             )
-            if expected_children:
+            if expected_children and result.get("kind") != "import":
                 owners.update(
                     native_candidate_owners(data_file, scratch, mutated_file, mutated_span)
                 )
@@ -643,8 +643,6 @@ def native_candidate_owners(
 
 
 def attribute_child_result(result: dict, evidence: Path, owners: set[str]) -> dict:
-    if result.get("kind") == "import":
-        return result
     if result["outcome"] == "KILLED":
         if result["node"] in owners:
             return result
