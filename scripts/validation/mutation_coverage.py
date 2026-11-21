@@ -8,16 +8,19 @@ import json
 import os
 import subprocess
 from pathlib import Path, PurePosixPath
+from typing import TypedDict, TypeGuard
 
 from scripts.validation.mutation_child_trace import (
     ChildTrace,
     Producer,
     child_trace_record,
+    lowercase_hex,
     parse_producer,
     parse_trace,
     prepare_run,
     producer_record,
     read_traces,
+    source_matches,
     validate_child_producer,
 )
 from scripts.validation.mutation_run import (
@@ -31,10 +34,24 @@ from scripts.validation.mutation_run import (
 SHARDS = {"unit": 4, "selftest": 8, "fixture": 1}
 SHARD_COMPONENTS = 2
 VERSION = 2
+# A campaign batch is `gha-<repository id>-<run id>-<run attempt>` in CI, or
+# `local-<32 lowercase hex>` for a manual coordinator.
 LOCAL_BATCH_PREFIX = "local-"
 GITHUB_BATCH_PREFIX = "gha-"
 LOCAL_BATCH_LENGTH = 32
 GITHUB_BATCH_FIELDS = 3
+FRAGMENT_KEYS = {"version", "sha", "inputs", "domain", "shard", "mapping", "producer", "children"}
+
+
+class FragmentRecord(TypedDict):
+    version: int
+    sha: str
+    inputs: str
+    domain: str
+    shard: str
+    mapping: object
+    producer: object
+    children: object
 
 
 def git(root: Path, *arguments: str) -> bytes:
@@ -64,10 +81,7 @@ def campaign_batch() -> str:
 
 def valid_batch(value: str) -> bool:
     if value.startswith(LOCAL_BATCH_PREFIX):
-        suffix = value.removeprefix(LOCAL_BATCH_PREFIX)
-        return len(suffix) == LOCAL_BATCH_LENGTH and all(
-            character in "0123456789abcdef" for character in suffix
-        )
+        return lowercase_hex(value.removeprefix(LOCAL_BATCH_PREFIX), LOCAL_BATCH_LENGTH)
     if not value.startswith(GITHUB_BATCH_PREFIX):
         return False
     fields = value.removeprefix(GITHUB_BATCH_PREFIX).split("-")
@@ -150,8 +164,7 @@ def export(root: Path, data: Path, domain: str, shard: str, output: Path) -> Non
     if not valid_shard(shard, domain):
         raise ValueError("Invalid coverage shard membership")
     producer, children = read_traces(data)
-    if (producer.domain, producer.shard, producer.phase) != (domain, shard, "producer"):
-        raise ValueError("Child trace producer does not match coverage shard")
+    require_shard_producer(producer, domain, shard)
     if producer.run_id != producer_run_id(batch, domain, shard):
         raise ValueError("Child trace producer does not match the coverage batch")
     validate_source_digests(root, children)
@@ -168,36 +181,39 @@ def export(root: Path, data: Path, domain: str, shard: str, output: Path) -> Non
     output.write_text(json.dumps(fragment) + "\n")
 
 
+def require_shard_producer(producer: Producer, domain: str, shard: str) -> None:
+    if (producer.domain, producer.shard, producer.phase) != (domain, shard, "producer"):
+        raise ValueError("Child trace producer does not match coverage shard")
+
+
 def read_fragment(path: Path, expected: dict, batch: str) -> dict:
     value = json.loads(path.read_text())
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or not is_fragment_record(value):
         raise ValueError("Invalid coverage fragment schema")
     validate_fragment_identity(value, expected)
     if not valid_membership_types(value):
         raise ValueError("Invalid coverage domain/shard")
     producer, children = parse_fragment_children(value)
-    if (producer.domain, producer.shard, producer.phase) != (
-        value["domain"],
-        value["shard"],
-        "producer",
-    ):
-        raise ValueError("Child trace producer does not match coverage shard")
+    require_shard_producer(producer, value["domain"], value["shard"])
     if producer.run_id != producer_run_id(batch, producer.domain, producer.shard):
         raise ValueError("Coverage fragment producer does not match the campaign batch")
     validate_mapping(value["mapping"], value["domain"])
     return {**value, "producer_record": producer, "child_records": children}
 
 
-def validate_fragment_identity(value: dict, expected: dict) -> None:
-    keys = {"version", "sha", "inputs", "domain", "shard", "mapping", "producer", "children"}
-    if set(value) != keys:
-        raise ValueError("Invalid coverage fragment schema")
+def is_fragment_record(value: dict[str, object]) -> TypeGuard[FragmentRecord]:
+    return set(value) == FRAGMENT_KEYS and all(
+        isinstance(value[key], str) for key in ("sha", "inputs", "domain", "shard")
+    )
+
+
+def validate_fragment_identity(value: FragmentRecord, expected: dict) -> None:
     actual = {key: value[key] for key in expected}
     if type(value["version"]) is not int or (value["version"], actual) != (VERSION, expected):
         raise ValueError("Coverage fragment version or tree identity mismatch")
 
 
-def parse_fragment_children(value: dict) -> tuple[Producer, list[ChildTrace]]:
+def parse_fragment_children(value: FragmentRecord) -> tuple[Producer, list[ChildTrace]]:
     if not isinstance(value["producer"], dict) or not isinstance(value["children"], list):
         raise ValueError("Invalid coverage child trace records")
     producer = parse_producer(value["producer"])
@@ -234,18 +250,12 @@ def validate_source_digests(root: Path, traces: list[ChildTrace]) -> None:
     for trace in traces:
         if trace.outcome != "reached":
             continue
-        source = root / trace.source
-        if hashlib.sha256(source.read_bytes()).hexdigest() != trace.source_digest:
+        if not source_matches(root, trace):
             raise ValueError(f"Installed child source differs from producer: {trace.source}")
 
 
-def valid_membership_types(value: dict) -> bool:
-    return (
-        isinstance(value["domain"], str)
-        and value["domain"] in SHARDS
-        and isinstance(value["shard"], str)
-        and valid_shard(value["shard"], value["domain"])
-    )
+def valid_membership_types(value: FragmentRecord) -> bool:
+    return value["domain"] in SHARDS and valid_shard(value["shard"], value["domain"])
 
 
 def load(root: Path, directory: Path) -> CoverageEvidence:
@@ -255,7 +265,7 @@ def load(root: Path, directory: Path) -> CoverageEvidence:
         raise ValueError(f"Missing coverage directory: {directory}")
     expected = identity(root)
     remaining = shard_keys()
-    result = {domain: {} for domain in SHARDS}
+    result: dict[str, dict[str, dict[int, list[str]]]] = {domain: {} for domain in SHARDS}
     children = []
     producers = set()
     for path in sorted(directory.rglob("*.json")):
@@ -283,11 +293,12 @@ def shard_keys() -> set[tuple[str, str]]:
     }
 
 
-def merge(destination: dict, mapping: dict) -> None:
+def merge(destination: dict[str, dict[int, list[str]]], mapping: dict) -> None:
     for name, lines in mapping.items():
         target = destination.setdefault(name, {})
         for line, contexts in lines.items():
-            target[line] = sorted(set(target.get(line, [])) | set(contexts))
+            number = int(line)
+            target[number] = sorted(set(target.get(number, [])) | set(contexts))
 
 
 def main(argv: list[str] | None = None) -> int:

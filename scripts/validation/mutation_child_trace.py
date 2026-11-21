@@ -14,12 +14,18 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import CodeType, FrameType
-from typing import Literal, TypedDict, TypeGuard
+from typing import Literal, TypedDict, TypeGuard, TypeIs, get_args
 from uuid import uuid4
 
 VERSION = 1
-DOMAINS = {"unit", "selftest", "fixture"}
-PHASES = {"baseline", "candidate", "producer"}
+Domain = Literal["unit", "selftest", "fixture"]
+Phase = Literal["baseline", "candidate", "producer"]
+TestPhase = Literal["run", "setup", "teardown"]
+TraceOutcome = Literal["reached", "unreached", "invalid"]
+DOMAINS = get_args(Domain)
+PHASES = get_args(Phase)
+TEST_PHASES = get_args(TestPhase)
+OUTCOMES = get_args(TraceOutcome)
 RUN_ID_LENGTH = 32
 DIGEST_LENGTH = 64
 MIN_SOURCE_COMPONENTS = 2
@@ -37,9 +43,9 @@ class ChildRoute:
 class Producer:
     version: int
     run_id: str
-    domain: str
+    domain: Domain
     shard: str
-    phase: str
+    phase: Phase
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,10 +53,10 @@ class ChildTrace:
     version: int
     run_id: str
     invocation: str
-    domain: str
+    domain: Domain
     shard: str
-    phase: str
-    test_phase: str
+    phase: Phase
+    test_phase: TestPhase
     node: str
     source: str
     module: str
@@ -60,7 +66,7 @@ class ChildTrace:
     environment: str
     executable: str
     lines: tuple[int, ...]
-    outcome: Literal["reached", "unreached", "invalid"]
+    outcome: TraceOutcome
     detail: str
 
 
@@ -76,10 +82,10 @@ class ChildTraceRecord(TypedDict):
     version: int
     run_id: str
     invocation: str
-    domain: str
+    domain: Domain
     shard: str
-    phase: str
-    test_phase: str
+    phase: Phase
+    test_phase: TestPhase
     node: str
     source: str
     module: str
@@ -89,7 +95,7 @@ class ChildTraceRecord(TypedDict):
     environment: str
     executable: str
     lines: list[int]
-    outcome: Literal["reached", "unreached", "invalid"]
+    outcome: TraceOutcome
     detail: str
 
 
@@ -108,8 +114,8 @@ def stage_hook(directory: Path) -> None:
 def prepare_run(
     data_file: Path,
     hook_directory: Path,
-    domain: str,
-    phase: str,
+    domain: Domain,
+    phase: Phase,
     shard: str,
     *,
     run_id: str | None = None,
@@ -147,12 +153,16 @@ def producer_record(producer: Producer) -> ProducerRecord:
 def parse_producer(value: dict[str, object]) -> Producer:
     if not valid_producer_record(value):
         raise ValueError("Invalid child trace producer record")
-    producer = Producer(
-        value["version"], value["run_id"], value["domain"], value["shard"], value["phase"]
-    )
-    if not valid_producer_identity(producer):
+    domain, phase = value["domain"], value["phase"]
+    if not (
+        is_domain(domain)
+        and is_phase(phase)
+        and value["version"] == VERSION
+        and value["shard"]
+        and valid_run_id(value["run_id"])
+    ):
         raise ValueError("Invalid child trace producer identity")
-    return producer
+    return Producer(value["version"], value["run_id"], domain, value["shard"], phase)
 
 
 def valid_producer_record(value: dict[str, object]) -> TypeGuard[ProducerRecord]:
@@ -167,25 +177,28 @@ def valid_producer_record(value: dict[str, object]) -> TypeGuard[ProducerRecord]
     )
 
 
-def valid_producer_identity(producer: Producer) -> bool:
-    if not valid_producer_fields(producer):
-        return False
-    return valid_run_id(producer.run_id)
-
-
-def valid_producer_fields(producer: Producer) -> bool:
-    return (
-        producer.version == VERSION
-        and producer.domain in DOMAINS
-        and bool(producer.shard)
-        and producer.phase in PHASES
-    )
+def lowercase_hex(value: str, length: int) -> bool:
+    return len(value) == length and all(character in "0123456789abcdef" for character in value)
 
 
 def valid_run_id(value: str) -> bool:
-    return len(value) == RUN_ID_LENGTH and all(
-        character in "0123456789abcdef" for character in value
-    )
+    return lowercase_hex(value, RUN_ID_LENGTH)
+
+
+def is_domain(value: object) -> TypeIs[Domain]:
+    return value in DOMAINS
+
+
+def is_phase(value: object) -> TypeIs[Phase]:
+    return value in PHASES
+
+
+def is_test_phase(value: object) -> TypeIs[TestPhase]:
+    return value in TEST_PHASES
+
+
+def is_outcome(value: object) -> TypeIs[TraceOutcome]:
+    return value in OUTCOMES
 
 
 def child_trace_record(trace: ChildTrace) -> ChildTraceRecord:
@@ -284,12 +297,12 @@ def trace_request(
     if (
         separator != "|"
         or not node
-        or phase not in {"run", "setup", "teardown"}
+        or not is_test_phase(phase)
         or not valid_test_node(node, environment["MUTATION_CHILD_TRACE_DOMAIN"])
     ):
         raise ValueError("Installed child trace has no owning test context")
     invocation = uuid4().hex
-    base = {
+    request = {
         "version": VERSION,
         "run_id": environment["MUTATION_CHILD_TRACE_RUN"],
         "invocation": invocation,
@@ -302,9 +315,8 @@ def trace_request(
         "environment": str(route.environment.resolve()),
         "test_phase": phase,
     }
-    request = base
     config = {
-        **base,
+        **request,
         "record": str(Path(environment["MUTATION_CHILD_TRACE_DIR"]) / f"{invocation}.result.json"),
     }
     return request, config
@@ -412,9 +424,15 @@ def reached_route_is_valid(trace: ChildTrace) -> bool:
 
 
 def valid_digest(value: str) -> bool:
-    return len(value) == DIGEST_LENGTH and all(
-        character in "0123456789abcdef" for character in value
-    )
+    return lowercase_hex(value, DIGEST_LENGTH)
+
+
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def source_matches(root: Path, trace: ChildTrace) -> bool:
+    return file_digest(root / trace.source) == trace.source_digest
 
 
 def read_traces(data_file: Path) -> tuple[Producer, list[ChildTrace]]:
@@ -546,13 +564,22 @@ def parse_trace(value: dict[str, object]) -> ChildTrace:
 
 def is_child_trace_record(value: dict[str, object]) -> TypeGuard[ChildTraceRecord]:
     keys = set(ChildTraceRecord.__annotations__)
-    strings = keys - {"version", "lines", "outcome"}
+    strings = keys - {"version", "lines", "outcome", "domain", "phase", "test_phase"}
     return (
         set(value) == keys
         and type(value["version"]) is int
         and trace_strings_are_valid(value, strings)
+        and trace_choices_are_valid(value)
         and trace_lines_are_valid(value)
-        and trace_outcome_is_valid(value)
+    )
+
+
+def trace_choices_are_valid(value: dict[str, object]) -> bool:
+    return (
+        is_domain(value["domain"])
+        and is_phase(value["phase"])
+        and is_test_phase(value["test_phase"])
+        and is_outcome(value["outcome"])
     )
 
 
@@ -569,11 +596,9 @@ def trace_lines_are_valid(value: dict[str, object]) -> bool:
     )
 
 
-def trace_outcome_is_valid(value: dict[str, object]) -> bool:
-    return value["outcome"] in ("reached", "unreached", "invalid")
-
-
-def verified_module_source(frame, config: dict[str, object]) -> tuple[Path, bytes, CodeType]:
+def verified_module_source(
+    frame: FrameType, config: dict[str, object]
+) -> tuple[Path, bytes, CodeType]:
     path = Path(frame.f_code.co_filename).resolve()
     environment = Path(str(config["environment"])).resolve()
     suffix = source_suffix(str(config["source"])).parts
@@ -616,11 +641,11 @@ class _ChildTracer:
         self.path = ""
         self.source_digest = ""
         self.bytecode_digest = ""
-        self.outcome: Literal["reached", "unreached", "invalid"] = "unreached"
+        self.outcome: TraceOutcome = "unreached"
         self.detail = ""
         self.module_seen = False
 
-    def trace(self, frame, event, _argument):
+    def trace(self, frame: FrameType, event: str, _argument: object):
         try:
             if event == "call" and frame.f_code.co_name == "<module>":
                 self.module_call(frame)
@@ -635,7 +660,7 @@ class _ChildTracer:
         self.outcome = "invalid"
         self.detail = detail
 
-    def module_call(self, frame) -> None:
+    def module_call(self, frame: FrameType) -> None:
         if frame_module(frame) != self.config["module"] or self.outcome == "invalid":
             return
         self.module_seen = True
@@ -659,7 +684,7 @@ class _ChildTracer:
         self.path, self.source_digest, self.bytecode_digest = identity
         self.outcome = "reached"
 
-    def matches(self, frame) -> bool:
+    def matches(self, frame: FrameType) -> bool:
         return (
             self.outcome == "reached"
             and frame_module(frame) == self.config["module"]
@@ -699,7 +724,7 @@ def install_child_trace() -> None:
     paths = trace_config_paths(os.environ["MUTATION_CHILD_TRACE_CONFIG"])
     tracers = [_ChildTracer(read_object(Path(path))) for path in paths]
 
-    def trace(frame, event, argument):
+    def trace(frame: FrameType, event: str, argument: object):
         for tracer in tracers:
             tracer.trace(frame, event, argument)
         return trace

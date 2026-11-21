@@ -33,7 +33,14 @@ from scripts.validation import mutation_run as runner
 from scripts.validation.mutation_coverage import parse_fragment_children
 from scripts.validation.mutation_gate import execute_job
 from scripts.validation.mutation_probe import child_context
-from scripts.validation.mutation_run import coverage_map, program, run_domain, selection, snapshot
+from scripts.validation.mutation_run import (
+    CoverageEvidence,
+    coverage_map,
+    program,
+    run_domain,
+    selection,
+    snapshot,
+)
 from scripts.validation.mutation_source import (
     allowlist,
     candidates,
@@ -44,6 +51,7 @@ from scripts.validation.mutation_source import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+NO_COVERAGE = CoverageEvidence(ROOT, {}, ())
 RECORDED_WAIT_SOURCE = """class StdioOwner:
     async def _wait(self, seconds: float, deadline: CleanupDeadline) -> bool:
         try:
@@ -1689,7 +1697,7 @@ class MutationExecutionTest(unittest.TestCase):
 
         output = io.StringIO()
         with (
-            patch.object(mutation_gate, "imported_coverage", return_value={}),
+            patch.object(mutation_gate, "imported_coverage", return_value=NO_COVERAGE),
             patch.object(mutation_gate, "run_scheduler", side_effect=scheduler),
             contextlib.redirect_stdout(output),
         ):
@@ -1731,7 +1739,13 @@ class MutationExecutionTest(unittest.TestCase):
             project(root, "def answer():\n    return True\n")
             mutants, _ = candidates("src/example.py", (root / "src/example.py").read_bytes())
             manifest = root / "mutations.json"
-            manifest.write_text(json.dumps(mutation_gate.manifest_data(root, mutants[:1], {}, 20)))
+            manifest.write_text(
+                json.dumps(
+                    mutation_gate.manifest_data(
+                        root, mutants[:1], CoverageEvidence(root, {}, ()), 20
+                    )
+                )
+            )
             result = root / "result-0.json"
             original = b'{"previous": true}\n'
             result.write_bytes(original)
@@ -1855,7 +1869,7 @@ class MutationExecutionTest(unittest.TestCase):
 
                 output = io.StringIO()
                 with (
-                    patch.object(mutation_gate, "imported_coverage", return_value={}),
+                    patch.object(mutation_gate, "imported_coverage", return_value=NO_COVERAGE),
                     patch.object(mutation_gate, "run_scheduler", side_effect=scheduler),
                     contextlib.redirect_stdout(output),
                 ):
@@ -1931,7 +1945,7 @@ class MutationExecutionTest(unittest.TestCase):
         output = io.StringIO()
         with (
             patch.object(mutation_gate, "collect", return_value=(mutants, [])),
-            patch.object(mutation_gate, "imported_coverage", return_value={}),
+            patch.object(mutation_gate, "imported_coverage", return_value=NO_COVERAGE),
             patch.object(mutation_gate.random.Random, "shuffle"),
             patch.object(mutation_gate, "run_scheduler", side_effect=scheduler),
             contextlib.redirect_stdout(output),
@@ -2050,9 +2064,15 @@ class MutationExecutionTest(unittest.TestCase):
                 contextlib.redirect_stderr(output),
                 patch.object(mutation_gate, "program", side_effect=scheduler),
             ):
-                first = mutation_gate.schedule(root, mutants[:1], {}, args)
-                second = mutation_gate.schedule(root, mutants[:1], {}, args)
-                third = mutation_gate.schedule(root, mutants[:1], {}, args)
+                first = mutation_gate.schedule(
+                    root, mutants[:1], CoverageEvidence(root, {}, ()), args
+                )
+                second = mutation_gate.schedule(
+                    root, mutants[:1], CoverageEvidence(root, {}, ()), args
+                )
+                third = mutation_gate.schedule(
+                    root, mutants[:1], CoverageEvidence(root, {}, ()), args
+                )
             self.assertEqual(
                 [directory.parent for directory in directories],
                 [root / "tmp/mutation-runs"] * 3,
@@ -2093,7 +2113,10 @@ class MutationExecutionTest(unittest.TestCase):
                         self.assertRaises(mutation_gate.SchedulerError) as failed,
                     ):
                         mutation_gate.schedule(
-                            root, mutants[:1], {}, SimpleNamespace(timeout=20, workers=1)
+                            root,
+                            mutants[:1],
+                            CoverageEvidence(root, {}, ()),
+                            SimpleNamespace(timeout=20, workers=1),
                         )
                     self.assertIs(failed.exception.__cause__, error)
                     self.assertEqual(failed.exception.rows[0]["outcome"], "NO_TESTS")
@@ -2219,6 +2242,7 @@ class MutationExecutionTest(unittest.TestCase):
             "from pathlib import Path\nfrom unittest.mock import patch\n"
             "from scripts.validation import mutation_gate as gate\n"
             "from scripts.validation import mutation_run as run_module\n"
+            "from scripts.validation.mutation_run import CoverageEvidence\n"
             "from scripts.validation.mutation_source import candidates\n"
             f"root = Path({str(root)!r})\n"
             "found, _ = candidates('src/example.py', (root / 'src/example.py').read_bytes())\n"
@@ -2232,7 +2256,8 @@ class MutationExecutionTest(unittest.TestCase):
             "    (root / 'work').write_text(str(cwd))\n"
             "    return original(command, cwd, env, timeout, log, **kwargs)\n"
             "with patch.object(gate, 'collect', return_value=(mutants, [])), "
-            f"patch.object(gate, 'imported_coverage', return_value={mapping!r}), "
+            f"patch.object(gate, 'imported_coverage', "
+            f"return_value=CoverageEvidence(root, {mapping!r}, ())), "
             "patch.object(gate.random.Random, 'shuffle'), patch.object(gate, 'program', run), "
             "patch.object(run_module, '_finish_owned', "
             f"denied_cleanup if {cleanup_denied!r} else finish_owned):\n"
@@ -2919,7 +2944,9 @@ class MutationExecutionTest(unittest.TestCase):
             )
             child_only = [m for m in mutants if m.qualname == "main" and m.before == "return 0"]
             self.assertEqual(len(child_only), 3)
-            routes = mutation_gate.manifest_data(root, child_only, {"unit": mapping}, 30)
+            routes = mutation_gate.manifest_data(
+                root, child_only, CoverageEvidence(root, {"unit": mapping}, ()), 30
+            )
             self.assertEqual(
                 [row["selected"] for row in routes["mutants"]],
                 [{"unit": ["tests/test_example.py::test_child"]}] * 3,
@@ -2967,7 +2994,10 @@ class MutationExecutionTest(unittest.TestCase):
 
             with patch.object(mutation_gate, "program", side_effect=scheduler):
                 rows = mutation_gate.schedule(
-                    root, [mutant], mapping, SimpleNamespace(timeout=20, workers=1)
+                    root,
+                    [mutant],
+                    CoverageEvidence(root, mapping, ()),
+                    SimpleNamespace(timeout=20, workers=1),
                 )
             self.assertEqual(rows, [{**asdict(mutant), "outcome": "KILLED", "restored": True}])
             self.assertEqual(

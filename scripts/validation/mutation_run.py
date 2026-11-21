@@ -23,10 +23,14 @@ from coverage.exceptions import NoDataError
 from pytest import ExitCode
 from scripts.processes import STOP_SECONDS, stop
 from scripts.validation.mutation_child_trace import (
+    TEST_PHASES,
     ChildTrace,
+    Domain,
     Producer,
+    file_digest,
     prepare_run,
     read_traces,
+    source_matches,
 )
 
 # An ordinary runner has STOP_SECONDS of grace plus STOP_SECONDS for final KILL/reap.
@@ -67,7 +71,7 @@ class _Member:
 @dataclass(frozen=True, slots=True)
 class CoverageEvidence:
     root: Path
-    lines: dict
+    lines: dict[str, dict[str, dict[int, list[str]]]]
     children: tuple[ChildTrace, ...]
 
 
@@ -249,7 +253,7 @@ def _finish_owned(
         raise failure
 
 
-DOMAINS = {
+DOMAINS: dict[Domain, tuple[str, str]] = {
     "unit": (".", "tests"),
     "selftest": ("acceptance", "selftests"),
     "fixture": ("acceptance", "tests"),
@@ -517,7 +521,7 @@ def stop_notice(row: dict) -> bool:
 
 def run_domain(
     scratch: Path,
-    domain: str,
+    domain: Domain,
     selected: list[str],
     timeout: float,
     *,
@@ -559,7 +563,7 @@ def run_domain(
 
 def prepare_domain_run(
     scratch: Path,
-    domain: str,
+    domain: Domain,
     selected: list[str],
     baseline: bool,
     *,
@@ -607,7 +611,7 @@ def prepare_domain_run(
 def validate_domain_traces(
     data_file: Path,
     environment: dict[str, str],
-    domain: str,
+    domain: Domain,
     expected: tuple[ChildTrace, ...],
     mutated_file: Path | None,
     mutated_span: tuple[int, int] | None,
@@ -718,10 +722,10 @@ def coverage_map(data_file: Path, scratch: Path) -> dict[str, dict[int, list[str
 
 
 def baseline(root: Path, timeout: float, *, timings: list[dict] | None = None) -> CoverageEvidence:
-    result = {}
+    result: dict[str, dict[str, dict[int, list[str]]]] = {}
     children = []
     with snapshot(root) as scratch:
-        for domain in ("unit", "selftest", "fixture"):
+        for domain in DOMAINS:
             outcome, data = run_domain(scratch, domain, [], timeout, baseline=True)
             if timings is not None:
                 timings.append(
@@ -740,25 +744,22 @@ def validate_baseline_sources(scratch: Path, traces: list[ChildTrace]) -> None:
     for trace in traces:
         if trace.outcome == "unreached":
             continue
-        source = scratch / trace.source
-        if sha256(source.read_bytes()).hexdigest() != trace.source_digest:
+        if not source_matches(scratch, trace):
             raise ValueError(f"Installed child source differs from baseline: {trace.source}")
 
 
 def selection(
-    mapping: dict | CoverageEvidence, file: str, line: int, end_line: int
+    lines: dict[str, dict[str, dict[int, list[str]]]], file: str, line: int, end_line: int
 ) -> dict[str, list[str]]:
-    if isinstance(mapping, CoverageEvidence):
-        mapping = mapping.lines
     result = {}
-    for domain, files in mapping.items():
-        lines = files.get(file, {})
-        contexts = line_contexts(lines, line, end_line)
+    for domain, files in lines.items():
+        file_lines = files.get(file, {})
+        contexts = line_contexts(file_lines, line, end_line)
         if not contexts:
             continue
         if "" in contexts:
             # Collection imports cannot identify every consumer of constants or decorators.
-            contexts = {context for values in lines.values() for context in values}
+            contexts = {context for values in file_lines.values() for context in values}
         result[domain] = context_tests(contexts)
     return result
 
@@ -766,26 +767,25 @@ def selection(
 def child_selection(
     evidence: CoverageEvidence, file: str, line: int, end_line: int
 ) -> list[ChildTrace]:
-    selected = []
-    for trace in evidence.children:
-        if child_trace_owns_span(trace, evidence, file, line, end_line):
-            selected.append(trace)
-    return selected
+    traces = [trace for trace in evidence.children if child_trace_is_baseline_run(trace, file)]
+    if traces:
+        require_baseline_source(evidence.root, file, traces)
+    return [trace for trace in traces if any(line <= number <= end_line for number in trace.lines)]
 
 
-def child_trace_owns_span(
-    trace: ChildTrace, evidence: CoverageEvidence, file: str, line: int, end_line: int
-) -> bool:
-    if not (
+def require_baseline_source(root: Path, file: str, traces: list[ChildTrace]) -> None:
+    current = file_digest(root / file)
+    if any(trace.source_digest != current for trace in traces):
+        raise ValueError(f"Installed child source differs from baseline: {file}")
+
+
+def child_trace_is_baseline_run(trace: ChildTrace, file: str) -> bool:
+    return (
         trace.source == file
         and trace.outcome == "reached"
         and trace.test_phase == "run"
         and trace.phase in {"baseline", "producer"}
-    ):
-        return False
-    if sha256((evidence.root / file).read_bytes()).hexdigest() != trace.source_digest:
-        raise ValueError(f"Installed child source differs from baseline: {file}")
-    return any(line <= number <= end_line for number in trace.lines)
+    )
 
 
 def verify_child_attempts(
@@ -849,7 +849,7 @@ def context_tests(contexts: set[str]) -> list[str]:
         if not context:
             continue
         node, _, phase = context.rpartition("|")
-        if "::" not in node or phase not in {"run", "setup", "teardown"}:
+        if "::" not in node or phase not in TEST_PHASES:
             raise ValueError(f"Unrecognized coverage context: {context!r}")
         if phase == "run":
             tests.add(node)
@@ -857,10 +857,7 @@ def context_tests(contexts: set[str]) -> list[str]:
     return sorted(tests)
 
 
-def line_contexts(lines: dict, start: int, end: int) -> set[str]:
+def line_contexts(lines: dict[int, list[str]], start: int, end: int) -> set[str]:
     return {
-        context
-        for number, values in lines.items()
-        if start <= int(number) <= end
-        for context in values
+        context for number, values in lines.items() if start <= number <= end for context in values
     }

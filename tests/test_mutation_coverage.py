@@ -1199,8 +1199,8 @@ class SharedCoverageTest(unittest.TestCase):
                     export(checkout, export_data, domain, shard, output / f"{domain}-{index}.json")
             imported = load(root, output)
             expected = expected_nodes()
-            self.assertEqual(selection(local, "src/example.py", 2, 2), expected)
-            self.assertEqual(selection(imported, "src/example.py", 2, 2), expected)
+            self.assertEqual(selection(local.lines, "src/example.py", 2, 2), expected)
+            self.assertEqual(selection(imported.lines, "src/example.py", 2, 2), expected)
             mutants, _ = candidates("src/example.py", (root / "src/example.py").read_bytes())
             args = SimpleNamespace(timeout=30, workers=1)
             results = [schedule(root, mutants, mapping, args) for mapping in (local, imported)]
@@ -1447,7 +1447,7 @@ class SharedCoverageTest(unittest.TestCase):
                 json.loads((root / "coverage/unit-1.json").read_text()),
             )
             self.assertEqual(
-                selection(mapping, "src/example.py", 2, 2),
+                selection(mapping.lines, "src/example.py", 2, 2),
                 {
                     "unit": ["tests/test_example.py::test_value"],
                     "selftest": ["selftests/test_harness.py::test_value"],

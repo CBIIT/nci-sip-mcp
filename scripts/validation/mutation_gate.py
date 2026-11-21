@@ -18,8 +18,9 @@ from time import monotonic
 from scripts.operator_files import write_json
 from scripts.processes import exit_on_sigterm
 from scripts.validation.mutation_child_trace import (
+    DOMAINS,
     ChildTrace,
-    ChildTraceRecord,
+    Domain,
     child_trace_record,
     parse_trace,
 )
@@ -36,7 +37,6 @@ from scripts.validation.mutation_run import (
 from scripts.validation.mutation_source import Mutant, allowlist, candidates, digest, scope
 
 OUTCOMES = ("KILLED", "TIMEOUT", "SURVIVED", "NO_TESTS", "INFRA")
-DOMAINS = ("unit", "selftest", "fixture")
 
 
 class SchedulerError(ValueError):
@@ -57,11 +57,7 @@ def execute_job(path: Path, index: int) -> None:
         before=source[item["start"] : item["end"]].decode(),
     )
     child_routes = tuple(parse_trace(route) for route in item.get("child_routes", []))
-    restored = False
-    try:
-        result, restored = mutate_and_measure(jobs, item, mutant, child_routes)
-    except (OSError, subprocess.SubprocessError) as error:
-        result = {"outcome": "INFRA", "message": str(error), "domains": []}
+    result, restored = mutate_and_measure(jobs, item, mutant, child_routes)
     row = {
         **asdict(mutant),
         **result,
@@ -151,7 +147,7 @@ def measure(
 
 def measure_domain(
     scratch: Path,
-    domain: str,
+    domain: Domain,
     tests: list[str],
     timeout: float,
     mutated_file: Path | None,
@@ -196,51 +192,36 @@ def collect(root: Path, selected: dict) -> tuple[list[Mutant], list[dict]]:
 
 
 def manifest_data(
-    root: Path, mutants: list[Mutant], mapping: dict | CoverageEvidence, timeout: float
+    root: Path, mutants: list[Mutant], evidence: CoverageEvidence, timeout: float
 ) -> dict:
     return {
         "root": str(root),
         "sources": {
             file: (root / file).read_bytes().decode() for file in sorted({m.file for m in mutants})
         },
-        "mutants": [
-            {
-                **{key: value for key, value in asdict(mutant).items() if key != "before"},
-                "selected": mutant_selection(mapping, mutant),
-                "child_routes": child_route_records(mapping, mutant),
-            }
-            for mutant in mutants
-        ],
+        "mutants": [mutant_manifest(evidence, mutant) for mutant in mutants],
         "timeout": timeout,
     }
 
 
-def child_route_records(mapping: dict | CoverageEvidence, mutant: Mutant) -> list[ChildTraceRecord]:
-    if not isinstance(mapping, CoverageEvidence):
-        return []
-    return [
-        child_trace_record(trace)
-        for trace in child_selection(mapping, mutant.file, mutant.line, mutant.end_line)
-    ]
-
-
-def mutant_selection(mapping: dict | CoverageEvidence, mutant: Mutant) -> dict[str, list[str]]:
-    selected = selection(mapping, mutant.file, mutant.line, mutant.end_line)
-    if not isinstance(mapping, CoverageEvidence):
-        return selected
-    for trace in child_selection(mapping, mutant.file, mutant.line, mutant.end_line):
+def mutant_manifest(evidence: CoverageEvidence, mutant: Mutant) -> dict:
+    routes = child_selection(evidence, mutant.file, mutant.line, mutant.end_line)
+    selected = selection(evidence.lines, mutant.file, mutant.line, mutant.end_line)
+    for trace in routes:
         selected.setdefault(trace.domain, []).append(trace.node)
-    return {domain: sorted(set(nodes)) for domain, nodes in selected.items()}
+    return {
+        **{key: value for key, value in asdict(mutant).items() if key != "before"},
+        "selected": {domain: sorted(set(nodes)) for domain, nodes in selected.items()},
+        "child_routes": [child_trace_record(trace) for trace in routes],
+    }
 
 
-def schedule(
-    root: Path, mutants: list[Mutant], mapping: dict | CoverageEvidence, args
-) -> list[dict]:
+def schedule(root: Path, mutants: list[Mutant], evidence: CoverageEvidence, args) -> list[dict]:
     destination = root / "tmp/mutation-runs"
     destination.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="run-", dir=destination)).resolve()
     print(json.dumps({"outcome": "EVIDENCE", "directory": str(work)}), file=sys.stderr, flush=True)
-    data = manifest_data(root, mutants, mapping, args.timeout)
+    data = manifest_data(root, mutants, evidence, args.timeout)
     try:
         (work / "scheduler.log").touch()
         status = run_scheduler(root, work, data, args.workers)
@@ -523,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
     exit_on_sigterm()
     exemptions = []
     try:
-        mapping = imported_coverage(root, args.coverage_dir)
+        evidence = imported_coverage(root, args.coverage_dir)
         exemptions = allowlist(root, root / args.allowlist)
         mutants, diagnostics = collect(root, scope(root, args.paths, args.base, args.head))
         for row in diagnostics:
@@ -534,8 +515,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         random.Random(args.seed).shuffle(mutants)  # noqa: S311 - reproducible scheduling
         args.baseline_domains = []
-        mapping = resolve_coverage(root, mapping, args)
-        return report_results(schedule(root, mutants, mapping, args), exemptions, args, started)
+        evidence = resolve_coverage(root, evidence, args)
+        return report_results(schedule(root, mutants, evidence, args), exemptions, args, started)
     except SchedulerError as error:
         report_results(error.rows, exemptions, args, started)
         print(json.dumps({"outcome": "INFRA", "message": str(error)}))
@@ -564,9 +545,9 @@ def imported_coverage(root: Path, directory: Path | None) -> CoverageEvidence | 
     return load(root, directory)
 
 
-def resolve_coverage(root: Path, mapping: CoverageEvidence | None, args) -> CoverageEvidence:
-    if mapping is not None:
-        return mapping
+def resolve_coverage(root: Path, evidence: CoverageEvidence | None, args) -> CoverageEvidence:
+    if evidence is not None:
+        return evidence
     return baseline(root, args.baseline_timeout, timings=args.baseline_domains)
 
 
