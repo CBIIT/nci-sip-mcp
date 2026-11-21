@@ -1,12 +1,20 @@
 """A traced installed child yields evidence only for the process the owning test started."""
 
+import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from scripts.validation import mutation_child_trace as child_trace
 from scripts.validation import mutation_gate
-from scripts.validation.mutation_run import run_domain
+from scripts.validation.mutation_run import (
+    CoverageEvidence,
+    child_selection,
+    native_candidate_owners,
+    run_domain,
+    validate_baseline_sources,
+)
 from scripts.validation.mutation_source import candidates
 
 from test_mutation_gate import INSTALLED_CHILD_TEST, project
@@ -15,6 +23,7 @@ TEST_PATH = "tests/test_installed_child.py"
 NODE = f"{TEST_PATH}::test_value"
 CHILD_COMMAND = "'import example; print(example.__file__)'"
 FIRST_CALL_LINE = 3
+LIST_ELEMENT_LINE = 3
 RUN_CHILD = "    child = subprocess.run(\n"
 GRANDCHILD_SOURCE = (
     "import os, sys, time\n"
@@ -193,3 +202,210 @@ class CandidateEvidenceTest(unittest.TestCase):
             self.assertEqual(
                 result["message"], "Candidate run left no coverage data: No data to combine"
             )
+
+
+def child_routes(root, test, source="value = 1\n"):
+    outcome, data = baseline_run(root, test, source)
+    if outcome["outcome"] != "SURVIVED":
+        raise AssertionError(outcome["log"])
+    return child_trace.read_traces(data)[1]
+
+
+def candidate_run(root, routes, source="value = 2\n", span=(1, 1)):
+    target = root / "src/example.py"
+    target.write_text(source)
+    return run_domain(
+        root,
+        "unit",
+        [TEST_PATH],
+        60,
+        mutated_file=target,
+        mutated_span=span,
+        expected_children=tuple(routes),
+    )[0]
+
+
+class ImportKillAndSourceChecksTest(unittest.TestCase):
+    def test_a_child_that_installs_other_bytes_than_the_mutation_is_infra(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            routes = child_routes(root, INSTALLED_CHILD_TEST)
+            stale = INSTALLED_CHILD_TEST.replace(
+                "package.write_bytes((root / 'src/example.py').read_bytes())",
+                "package.write_bytes(b'value = 1\\n')",
+            )
+            (root / TEST_PATH).write_text(stale)
+            result = candidate_run(root, routes)
+        self.assertEqual(result["outcome"], "INFRA", result)
+        self.assertEqual(result["message"], "Installed child source differs from the mutation")
+
+    def test_a_route_naming_another_source_is_infra(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            routes = child_routes(root, INSTALLED_CHILD_TEST)
+            other = [replace(route, source="src/other.py") for route in routes]
+            result = candidate_run(root, other)
+        self.assertEqual(result["outcome"], "INFRA", result)
+        self.assertEqual(result["message"], "Expected installed child route names another source")
+
+    def test_a_child_mutation_without_its_source_span_is_infra(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            routes = child_routes(root, INSTALLED_CHILD_TEST)
+            (root / "src/example.py").write_text("value = 2\n")
+            result, _ = run_domain(
+                root,
+                "unit",
+                [TEST_PATH],
+                60,
+                mutated_file=root / "src/example.py",
+                expected_children=tuple(routes),
+            )
+            with self.assertRaisesRegex(ValueError, "lacks its source span"):
+                native_candidate_owners(root / ".coverage", root, root / "src/example.py", None)
+            with self.assertRaisesRegex(ValueError, "lacks its source span"):
+                native_candidate_owners(root / ".coverage", root, None, (1, 1))
+        self.assertEqual(result["outcome"], "INFRA", result)
+        self.assertEqual(result["message"], "Installed child mutation lacks its source span")
+
+    def test_a_baseline_child_source_that_changed_since_the_run_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            routes = child_routes(root, INSTALLED_CHILD_TEST)
+            (root / "src/example.py").write_text("value = 3\n")
+            with self.assertRaisesRegex(
+                ValueError, "^Installed child source differs from baseline: src/example.py$"
+            ):
+                validate_baseline_sources(root, routes)
+            evidence = CoverageEvidence(root, {}, tuple(routes))
+            with self.assertRaisesRegex(
+                ValueError, "^Installed child source differs from baseline: src/example.py$"
+            ):
+                child_selection(evidence, "src/example.py", 1, 1)
+
+
+EXPANDING_SOURCE = "def f(a):\n    return [\n        a == 1,\n    ]\nx = 1\n"
+CALL_F = "import example; example.f(1); print(example.__file__)"
+IMPORT_ONLY = "import example; print(example.__file__)"
+
+
+def in_fixture(test):
+    # The child then starts during pytest's setup phase, not in the test call.
+    return (
+        test.replace("def test_value():\n", "import pytest\n@pytest.fixture\ndef started():\n")
+        + "def test_value(started):\n    assert True\n"
+    )
+
+
+class SpanAndPhaseAttributionTest(unittest.TestCase):
+    def measure_expanded_mutant(self, root, routes, code):
+        mutants, _ = candidates("src/example.py", EXPANDING_SOURCE.encode())
+        mutant = next(
+            m for m in mutants if m.operator == "comparison:0" and m.line == LIST_ELEMENT_LINE
+        )
+        # The mutant's own first line holds no instruction; its second line does the work.
+        expanded = replace(mutant, after="(\n            a != 1)")
+        (root / TEST_PATH).write_text(installed_child_test(code))
+        result, _ = mutation_gate.mutate_and_measure(
+            {"root": str(root), "timeout": 60},
+            {"selected": {"unit": [NODE]}},
+            expanded,
+            tuple(routes),
+        )
+        return result["outcome"]
+
+    def test_a_line_inside_an_expanded_mutant_is_credited_and_one_past_it_is_not(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            routes = child_routes(root, installed_child_test(IMPORT_ONLY), EXPANDING_SOURCE)
+            reaching = self.measure_expanded_mutant(root, routes, CALL_F)
+            past = self.measure_expanded_mutant(root, routes, IMPORT_ONLY)
+        self.assertEqual((reaching, past), ("SURVIVED", "NO_TESTS"))
+
+    def test_a_child_started_in_the_setup_phase_is_not_a_run_attempt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            routes = child_routes(root, installed_child_test(IMPORT_ONLY))
+            (root / TEST_PATH).write_text(in_fixture(installed_child_test(IMPORT_ONLY)))
+            result = candidate_run(root, routes)
+        self.assertEqual(result["outcome"], "NO_TESTS", result)
+
+
+UNREACHED_CHILD = INSTALLED_CHILD_TEST.replace(
+    "'import example; print(example.__file__)'",
+    "('pass' if 'value = 2' in package.read_text() else 'import example; print(example.__file__)')",
+).replace(
+    "    imported = Path(child.stdout.strip()).resolve()\n"
+    "    assert imported.is_relative_to(environment.resolve())\n",
+    "    assert child.returncode == 0\n",
+)
+SKIPPING_AFTER_CHILD = (
+    "import pytest\n"
+    + INSTALLED_CHILD_TEST
+    + "    pytest.skip('the call neither passed nor failed')\n"
+)
+
+
+class RecordAndPhaseEvidenceTest(unittest.TestCase):
+    def test_an_unreached_record_that_carries_evidence_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            routes = child_routes(root, UNREACHED_CHILD)
+            target = root / "src/example.py"
+            target.write_text("value = 2\n")
+            result, data = run_domain(
+                root,
+                "unit",
+                [TEST_PATH],
+                60,
+                mutated_file=target,
+                mutated_span=(1, 1),
+                expected_children=tuple(routes),
+            )
+            self.assertEqual(result["outcome"], "NO_TESTS", result)
+            _, traces = child_trace.read_traces(data)
+            self.assertEqual([trace.outcome for trace in traces], ["unreached"])
+            record = next(child_trace.trace_directory(data).glob("*.result.json"))
+            original = json.loads(record.read_text())
+            for key, value in (("source_digest", "a" * 64), ("lines", [1])):
+                with self.subTest(key=key):
+                    record.write_text(json.dumps({**original, key: value}))
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "^Installed child trace belongs to another producer or route$",
+                    ):
+                        child_trace.read_traces(data)
+
+    def test_a_setup_phase_baseline_child_is_not_a_candidate_for_selection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            routes = child_routes(root, in_fixture(installed_child_test(IMPORT_ONLY)))
+            self.assertEqual([trace.test_phase for trace in routes], ["setup"])
+            evidence = CoverageEvidence(root, {}, tuple(routes))
+            self.assertEqual(child_selection(evidence, "src/example.py", 1, 1), [])
+
+    def test_a_setup_pass_is_not_a_call_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, "value = 1\n")
+            (root / TEST_PATH).write_text(
+                "import pytest\ndef test_skipped():\n    pytest.skip('no call pass')\n"
+            )
+            only_skipped, _ = run_domain(root, "unit", [TEST_PATH], 60)
+            routes = child_routes(root, INSTALLED_CHILD_TEST)
+            (root / TEST_PATH).write_text(SKIPPING_AFTER_CHILD)
+            (root / "tests/test_example.py").write_text("def test_other():\n    assert True\n")
+            target = root / "src/example.py"
+            target.write_text("value = 2\n")
+            owner_skipped, _ = run_domain(
+                root,
+                "unit",
+                [TEST_PATH, "tests/test_example.py"],
+                60,
+                mutated_file=target,
+                mutated_span=(1, 1),
+                expected_children=tuple(routes),
+            )
+        self.assertEqual(only_skipped["outcome"], "NO_TESTS", only_skipped)
+        # test_other passed its call, but the owner reached the mutation and passed only setup.
+        self.assertEqual(owner_skipped["outcome"], "NO_TESTS", owner_skipped)

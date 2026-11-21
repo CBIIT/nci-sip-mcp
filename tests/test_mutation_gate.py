@@ -1347,6 +1347,55 @@ class MutationExecutionTest(unittest.TestCase):
                     }.get(failing, []),
                 )
 
+    def test_a_passing_unreached_child_route_leaves_an_ordinary_owner_survived(self):
+        # Given a child route the mutation never reaches and a passing in-process test of
+        # the mutated module, the ordinary owner decides: SURVIVED, not NO_TESTS.
+        unreached = INSTALLED_CHILD_TEST.replace(
+            "'import example; print(example.__file__)'",
+            "('pass' if 'value = 2' in package.read_text() "
+            "else 'import example; print(example.__file__)')",
+        ).replace(
+            "    imported = Path(child.stdout.strip()).resolve()\n"
+            "    assert imported.is_relative_to(environment.resolve())\n",
+            "    assert child.returncode == 0\n",
+        )
+        ordinary = "def test_ordinary():\n    import example\n    assert example.value > 0\n"
+        path = "tests/test_installed_child.py"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, "value = 1\n", contract="import example\n    assert example.value == 1")
+            (root / path).write_text(unreached + ordinary)
+            base, data = run_domain(root, "unit", [path], 60, baseline=True)
+            self.assertEqual(base["outcome"], "SURVIVED", base["log"])
+            _, routes = child_trace.read_traces(data)
+            target = root / "src/example.py"
+            target.write_text("value = 2\n")
+            span = {"mutated_file": target, "mutated_span": (1, 1)}
+            result, _ = run_domain(
+                root, "unit", [path], 60, expected_children=tuple(routes), **span
+            )
+            self.assertEqual(result["outcome"], "SURVIVED", result)
+
+            (root / path).write_text(unreached)
+            result, _ = run_domain(
+                root, "unit", [path], 60, expected_children=tuple(routes), **span
+            )
+            self.assertEqual(result["outcome"], "NO_TESTS", result)
+
+            measured = mutation_gate.measure(
+                root,
+                {"unit": [path], "fixture": ["tests/test_contract.py::test_contract"]},
+                60,
+                expected_children=tuple(routes),
+                **span,
+            )
+        self.assertEqual(measured["outcome"], "KILLED", measured)
+        self.assertEqual(measured["node"], "tests/test_contract.py::test_contract")
+        self.assertEqual(
+            [(row["domain"], row["outcome"]) for row in measured["domains"]],
+            [("unit", "NO_TESTS"), ("fixture", "KILLED")],
+        )
+
     def test_configured_child_environment_passes_the_staged_trace_config(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
