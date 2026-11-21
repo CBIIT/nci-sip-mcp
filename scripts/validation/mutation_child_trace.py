@@ -1,4 +1,10 @@
-"""Opt-in evidence for code executed from an independently installed child environment."""
+"""Opt-in evidence for code executed from an independently installed child environment.
+
+For each route (an installed source and module) and owning test, a traced child records the
+installed path, the source and bytecode digests, and the executed lines. The gate reads these
+records in `mutation_run.attribute_child_result`; CONTRIBUTING.md (Mutation gate) gives the
+outcome rules.
+"""
 
 from __future__ import annotations
 
