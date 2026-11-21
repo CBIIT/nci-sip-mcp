@@ -441,8 +441,8 @@ A child reaches a mutation only on the lines the mutated file holds: a mutation 
 a multi-line statement is judged against its shorter span, so a statement that shifted into the
 old span earns no credit. An import-kind kill keeps its classification without child attribution.
 A Python process the traced child starts is not traced and cannot overwrite its record; a module
-executed from more than one source, or a failure inside the tracer, makes the record invalid.
-A candidate run that leaves no coverage data is `INFRA`.
+executed with different bytes (path, source or bytecode digest), or a failure inside the tracer, makes the record invalid.
+A run of a candidate with expected child routes that leaves no coverage data is `INFRA`.
 Malformed or missing trace evidence is `INFRA`; a timed-out run remains `TIMEOUT`.
 An opted-in child may declare several exact source/module routes for the same owning call and
 environment; each emits separate evidence. A module run with `python -m` is matched by its

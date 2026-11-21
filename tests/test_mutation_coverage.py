@@ -426,9 +426,17 @@ class SharedCoverageTest(unittest.TestCase):
         return output
 
     def test_real_wheel_mutant_outcomes_match_local_and_imported_coverage(self):
+        hooks = '        hooks = work / "sentinel-hooks"\n'
+        declaration = (
+            "        with patch.dict(os.environ, child_env, clear=True):\n"
+            '            route3 = ChildRoute("src/wheel_sample/unimported.py",\n'
+            '                                "wheel_sample.unimported", environment)\n'
+            "            child_env = child_environment(route3)\n"
+        )
+        child_test = composed_wheel_child_test().replace(hooks, declaration + hooks)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            wheel_verdict_project(root, composed_wheel_child_test())
+            wheel_verdict_project(root, child_test)
             module = root / "src/wheel_sample/cli.py"
             imported = self.imported_wheel_coverage(root)
             unused_line = module.read_text().splitlines().index("    return 17") + 1
@@ -436,6 +444,8 @@ class SharedCoverageTest(unittest.TestCase):
                 ("src/wheel_sample/cli.py", 3, "return:False", "KILLED", 0),
                 ("src/wheel_sample/__init__.py", 1, "boolean:literal", "SURVIVED", 1),
                 ("src/wheel_sample/cli.py", unused_line, "return:False", "NO_TESTS", 1),
+                # Declared as a child route, but the child never imports it.
+                ("src/wheel_sample/unimported.py", 2, "return:False", "NO_TESTS", 1),
             )
             for name, line, operator, expected, exit_code in cases:
                 target, shard = wheel_candidate(root, name, line, operator)
@@ -487,38 +497,6 @@ class SharedCoverageTest(unittest.TestCase):
                     self.assertEqual(len(rows), 1, result.stdout)
                     self.assertEqual(rows[0]["outcome"], "INFRA")
                     self.assertIn("Loaded bytecode does not match", rows[0]["message"])
-
-    def test_declared_unimported_wheel_route_is_no_tests_in_both_coverage_modes(self):
-        hooks = '        hooks = work / "sentinel-hooks"\n'
-        declaration = (
-            "        with patch.dict(os.environ, child_env, clear=True):\n"
-            '            route3 = ChildRoute("src/wheel_sample/unimported.py",\n'
-            '                                "wheel_sample.unimported", environment)\n'
-            "            child_env = child_environment(route3)\n"
-        )
-        child_test = composed_wheel_child_test().replace(hooks, declaration + hooks)
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            wheel_verdict_project(root, child_test)
-            imported = self.imported_wheel_coverage(root)
-            name = "src/wheel_sample/unimported.py"
-            target, shard = wheel_candidate(root, name, 2, "return:False")
-            allowlist = root / "wheel-allowlist.json"
-            allowlist.write_text(json.dumps([{**target.key(), "reason": "contract canary"}]))
-            for mode in ("local", "imported"):
-                with self.subTest(mode=mode):
-                    arguments = ["--paths", name, "--shard", shard, "-n", "1"]
-                    arguments += ["--allowlist", str(allowlist)]
-                    if mode == "imported":
-                        arguments += ["--coverage-dir", str(imported)]
-                    result = cli(root, *arguments)
-                    rows = cli_mutants(result)
-                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                    self.assertEqual(len(rows), 1, result.stdout)
-                    self.assertEqual(
-                        (rows[0]["file"], rows[0]["line"], rows[0]["outcome"]),
-                        (name, 2, "NO_TESTS"),
-                    )
 
     def test_configure_binds_producer_to_the_external_batch_and_slot(self):
         for batch in (TEST_BATCH, "gha-123-456-7"):
