@@ -1502,6 +1502,25 @@ class SharedCoverageTest(unittest.TestCase):
             )
             self.assertEqual(json.loads(result.stdout)["outcome"], "INFRA")
 
+    def test_a_non_ascii_digit_line_key_is_an_invalid_fragment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            repository(root)
+            fragments(root, root / "coverage")
+            path = root / "coverage/unit-1.json"
+            fragment = json.loads(path.read_text())
+            fragment["mapping"] = {"src/example.py": {"\u00b2": ["tests/t.py::test_x|run"]}}
+            path.write_text(json.dumps(fragment))
+            result = cli(
+                root, "--base", "HEAD", "--head", "HEAD", "--coverage-dir", str(root / "coverage")
+            )
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            row = json.loads(result.stdout)
+            self.assertEqual(
+                (row["outcome"], row["message"]),
+                ("INFRA", "Invalid coverage line/context shape"),
+            )
+
     def test_explicit_missing_coverage_is_infrastructure_even_with_no_changed_sites(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
