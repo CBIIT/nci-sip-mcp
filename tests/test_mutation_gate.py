@@ -2925,6 +2925,8 @@ class MutationExecutionTest(unittest.TestCase):
                 .read_text()
                 .split("class MutationOperatorsTest")[0]
             )
+            # The copied helper module imports its shared helpers from fakes.
+            shutil.copyfile(ROOT / "tests/fakes.py", root / "tests/fakes.py")
             shutil.copytree(ROOT / "scripts", root / "scripts")
             # This tiny independent project owns no reviewed production equivalents.
             (root / "allow.yaml").write_text("[]\n")
