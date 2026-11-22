@@ -20,13 +20,23 @@ def _git(root: Path, *arguments: str, env: dict[str, str] | None = None) -> byte
     ).stdout
 
 
+class WheelBuildError(subprocess.CalledProcessError):
+    """A failed offline wheel build whose message carries pip's own error output."""
+
+    def __str__(self) -> str:
+        return f"{super().__str__()}\n{self.stderr.decode(errors='replace').strip()}"
+
+
 def exact_tree_wheel(root: Path, dist_dir: Path, subdir: str = ".") -> Path:
     """Wheel of `root/subdir` built offline from a tree object of the working tree.
 
     A temporary index takes every non-ignored file, so uncommitted edits and untracked files
     are included and the repository's own index and history are untouched. The archive has no
-    git metadata, so a version derived from tags falls back to its configured value.
+    git metadata, so a version derived from tags falls back to its configured value. `dist_dir`
+    must be empty; a failed pip build raises `WheelBuildError` carrying pip's stderr.
     """
+    if dist_dir.exists() and any(dist_dir.iterdir()):
+        raise ValueError(f"dist_dir must be empty, but {dist_dir} has content")
     with tempfile.TemporaryDirectory() as scratch:
         index = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
         _git(root, "add", "-A", env=index)
@@ -36,7 +46,7 @@ def exact_tree_wheel(root: Path, dist_dir: Path, subdir: str = ".") -> Path:
         archive = _git(root, "archive", "--format=tar", tree)
         with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
             tar.extractall(source, filter="data")
-        subprocess.run(  # noqa: S603 - offline wheel build of a fresh archive
+        built = subprocess.run(  # noqa: S603 - offline wheel build of a fresh archive
             [
                 sys.executable,
                 "-m",
@@ -49,9 +59,11 @@ def exact_tree_wheel(root: Path, dist_dir: Path, subdir: str = ".") -> Path:
                 str(dist_dir),
                 str(source / subdir),
             ],
-            check=True,
+            check=False,
             capture_output=True,
             env={**os.environ, "PIP_CONFIG_FILE": os.devnull, "PIP_NO_INDEX": "1"},
         )
+        if built.returncode != 0:
+            raise WheelBuildError(built.returncode, built.args, built.stdout, built.stderr)
     (wheel,) = dist_dir.glob("*.whl")
     return wheel
