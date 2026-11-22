@@ -57,6 +57,80 @@ def calls():
         assert not call.thread.is_alive()
 
 
+def test_recovered_terminal_read_still_publishes_final_failure_summary(
+    tmp_path, monkeypatch, calls
+):
+    owner = supervisor(tmp_path / "run")
+    resource = calls(lambda: b"owned completion finished")
+    close_failure = RequestPolicyError("accounting")
+    lock = sqlite3.connect(owner.run.directory / "ledger.sqlite")
+    summary = owner.run.directory / "summary.json"
+    actual_close, actual_finish, actual_snapshot, actual_check_wait = (
+        owner.run.close,
+        resource.finish,
+        owner.run.snapshot,
+        owner.run.check_wait,
+    )
+    facts = {}
+
+    def close():
+        actual_close()
+        raise close_failure
+
+    def snapshot():
+        # WAL readers are never refused: the terminal read fails as a real writer-versus-writer
+        # SQLITE_BUSY refusal, then the lock is released and later reads recover.
+        try:
+            return actual_check_wait(0)
+        except RequestPolicyError as error:
+            facts["storage_refusal"] = error
+            lock.rollback()
+            monkeypatch.setattr(owner.run, "snapshot", actual_snapshot)
+            raise
+
+    def finish(deadline):
+        actual_finish(deadline)
+        lock.execute("BEGIN IMMEDIATE")
+        facts.update(
+            completion=(resource.thread.is_alive(), resource.result.result(timeout=0)),
+            locked=lock.in_transaction,
+        )
+        monkeypatch.setattr(owner.run, "snapshot", snapshot)
+
+    monkeypatch.setattr(owner.run, "close", close)
+    monkeypatch.setattr(resource, "finish", finish)
+    outward, initial = None, None
+    try:
+        try:
+            with owner:
+                owner.register_completion(resource, participant="transient-summary")
+                resource.start()
+                initial = summary.read_bytes()
+        except BaseException as error:  # noqa: BLE001 - assert real causes and metadata outside capture.
+            outward = error
+        assert initial is not None
+        assert facts.get("completion") == (False, b"owned completion finished")
+        assert (
+            resource.thread.ident is not None,
+            resource.thread.is_alive(),
+            owner._observer.is_alive(),
+            owner.pending_owners,
+        ) == (True, False, False, ())
+        refusal = facts.get("storage_refusal")
+        assert isinstance(refusal, RequestPolicyError) and refusal.reason == "accounting"
+        assert (facts.get("locked"), lock.in_transaction) == (True, False)
+        assert outward is not None
+        leaves = failure_leaves(outward)
+        assert any(error is close_failure for error in leaves)
+        assert any(error is refusal for error in leaves)
+        report = json.loads(summary.read_text())
+        assert report["state"] == "failed"
+        assert report["observationComplete"] is True
+    finally:
+        lock.rollback()
+        lock.close()
+
+
 def test_observer_failure_is_not_repeated_after_recovered_terminal_lookup(
     tmp_path, monkeypatch, calls
 ):
