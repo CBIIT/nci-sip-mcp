@@ -42,7 +42,6 @@ def exact_tree_wheel(root: Path, dist_dir: Path, subdir: str = ".") -> Path:
         _git(root, "add", "-A", env=index)
         tree = _git(root, "write-tree", env=index).decode().strip()
         source = Path(scratch) / "tree"
-        source.mkdir()
         archive = _git(root, "archive", "--format=tar", tree)
         with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
             tar.extractall(source, filter="data")
