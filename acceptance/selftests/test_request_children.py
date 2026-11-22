@@ -87,7 +87,8 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
     def finish(deadline):
         actual_finish(deadline)
         facts["completion"] = (resource.thread.is_alive(), resource.result.result(timeout=0))
-        lock.execute("BEGIN EXCLUSIVE")
+        # WAL readers are never refused, so refuse the snapshot in rollback mode.
+        lock.executescript("PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE")
         facts["locked"] = lock.in_transaction
         monkeypatch.setattr(owner.run, "snapshot", snapshot)
 

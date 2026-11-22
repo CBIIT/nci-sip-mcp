@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from contextlib import ExitStack, closing, contextmanager
@@ -439,6 +440,82 @@ def test_snapshot_reads_committed_counters_without_reserving_a_writer(tmp_path):
         ) == ("open", 0, 0, 0, 0, True, None)
         after = run.snapshot()
         assert (after.logical, after.failure) == (0, None)
+
+
+def test_failed_marker_detail_names_the_sqlite_cause(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+            blocker.execute("BEGIN IMMEDIATE")
+            with pytest.raises(RequestPolicyError) as refused:
+                run.check_wait(0)
+        assert refused.value.reason == "accounting"
+        assert (run.directory / "failed").read_text() == "accounting"
+        assert json.loads((run.directory / "failed.detail").read_text()) == {
+            "type": "OperationalError",
+            "sqliteErrorcode": 5,
+            "sqliteErrorname": "SQLITE_BUSY",
+        }
+
+
+def test_failed_marker_detail_names_a_non_sqlite_cause_without_a_code(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        original = (run.directory / "key").read_bytes()
+        (run.directory / "key").write_bytes(b"short")
+        try:
+            with pytest.raises(RequestPolicyError):
+                run.check_wait(0)
+        finally:
+            (run.directory / "key").write_bytes(original)
+        assert (run.directory / "failed").read_text() == "authorization"
+        assert json.loads((run.directory / "failed.detail").read_text()) == {
+            "type": "RequestPolicyError"
+        }
+
+
+def test_ledger_uses_write_ahead_logging(tmp_path):
+    with (
+        tiny_run(tmp_path) as (run, _grant, _limits, _upstream),
+        closing(sqlite3.connect(run.directory / "ledger.sqlite")) as reader,
+    ):
+        assert reader.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+
+
+def test_snapshot_reads_while_a_writer_commit_waits_for_a_reader(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        ledger = run.directory / "ledger.sqlite"
+        with closing(sqlite3.connect(ledger)) as reader:
+            reader.execute("BEGIN")
+            reader.execute("SELECT * FROM run").fetchall()
+            commit = threading.Thread(target=commit_logical_write, args=(ledger,))
+            commit.start()
+            try:
+                # In a rollback journal the writer's pending commit refuses new readers.
+                for _attempt in range(200):
+                    if not new_reader_succeeds(ledger):
+                        break
+                try:
+                    observed = run.snapshot()
+                except RequestPolicyError as error:
+                    observed = error
+            finally:
+                reader.rollback()
+                commit.join()
+        assert isinstance(observed, LedgerSnapshot), observed
+
+
+def commit_logical_write(ledger):
+    with closing(sqlite3.connect(ledger, timeout=5)) as writer, writer:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("UPDATE run SET logical=logical")
+
+
+def new_reader_succeeds(ledger):
+    with closing(sqlite3.connect(ledger, timeout=0.1)) as probe:
+        try:
+            probe.execute("SELECT * FROM run").fetchall()
+        except sqlite3.OperationalError:
+            return False
+    return True
 
 
 def test_real_sqlite_contention_closes_admission(tmp_path):

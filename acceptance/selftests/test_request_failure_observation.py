@@ -35,6 +35,7 @@ def retained(node):
 def test_real_snapshot_retains_refusal_before_cleanup(tmp_path, request, capsys):
     run = ledger(tmp_path)
     with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+        blocker.execute("PRAGMA journal_mode=DELETE")  # WAL readers are never refused.
         blocker.execute("BEGIN EXCLUSIVE")
         with pytest.raises(RequestPolicyError) as caught:
             snapshot(run, request.node)
@@ -54,6 +55,7 @@ def test_real_snapshot_retains_refusal_before_cleanup(tmp_path, request, capsys)
 def test_refusal_names_the_failing_ledger_statement_and_the_wait(tmp_path, request):
     run = ledger(tmp_path)
     with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+        blocker.execute("PRAGMA journal_mode=DELETE")  # WAL readers are never refused.
         blocker.execute("BEGIN EXCLUSIVE")
         with pytest.raises(RequestPolicyError):
             snapshot(run, request.node)
@@ -90,6 +92,7 @@ def controlled_refusal(monkeypatch):
         if not injected and current_thread() is main_thread() and ready:
             injected = True
             with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+                blocker.execute("PRAGMA journal_mode=DELETE")  # WAL readers are never refused.
                 blocker.execute("BEGIN EXCLUSIVE")
                 try:
                     return original(run)
