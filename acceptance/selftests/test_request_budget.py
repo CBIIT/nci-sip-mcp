@@ -450,9 +450,9 @@ def test_failed_marker_detail_names_the_sqlite_cause(tmp_path):
         assert refused.value.reason == "accounting"
         assert (run.directory / "failed").read_text() == "accounting"
         assert json.loads((run.directory / "failed.detail").read_text()) == {
-            "type": "OperationalError",
-            "sqliteErrorcode": 5,
-            "sqliteErrorname": "SQLITE_BUSY",
+            "category": "sqlite",
+            "sqlite_errorcode": 5,
+            "sqlite_errorname": "SQLITE_BUSY",
         }
 
 
@@ -466,9 +466,84 @@ def test_failed_marker_detail_names_a_non_sqlite_cause_without_a_code(tmp_path):
         finally:
             (run.directory / "key").write_bytes(original)
         assert (run.directory / "failed").read_text() == "authorization"
-        assert json.loads((run.directory / "failed.detail").read_text()) == {
-            "type": "RequestPolicyError"
-        }
+        assert json.loads((run.directory / "failed.detail").read_text()) == {"category": "other"}
+
+
+PRIVATE_CANARY = "private-detail-canary"
+
+
+class PrivateClassValueError(ValueError):
+    pass
+
+
+def refused_connect(error):
+    def connect(*args, **kwargs):
+        raise error
+
+    return connect
+
+
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        (PrivateClassValueError(PRIVATE_CANARY), {"category": "other"}),
+        (OSError(PRIVATE_CANARY), {"category": "other"}),
+        (sqlite3.OperationalError(PRIVATE_CANARY), {"category": "sqlite"}),
+    ],
+)
+def test_failed_detail_is_a_closed_category_without_private_text(
+    tmp_path, monkeypatch, error, expected
+):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        monkeypatch.setattr(request_budget_module.sqlite3, "connect", refused_connect(error))
+        with pytest.raises(RequestPolicyError):
+            run.check_wait(0)
+        monkeypatch.undo()
+        text = (run.directory / "failed.detail").read_text()
+        assert json.loads(text) == expected
+        assert PRIVATE_CANARY not in text and "PrivateClass" not in text
+
+
+@pytest.mark.parametrize(
+    "code,name",
+    [(999, "SQLITE_BUSY"), (True, "SQLITE_BUSY"), (5, PRIVATE_CANARY), (5, None), (None, None)],
+)
+def test_failed_detail_names_a_sqlite_code_only_when_both_parts_are_well_formed(
+    tmp_path, monkeypatch, code, name
+):
+    error = sqlite3.OperationalError(PRIVATE_CANARY)
+    vars(error).update(sqlite_errorcode=code, sqlite_errorname=name)
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        monkeypatch.setattr(request_budget_module.sqlite3, "connect", refused_connect(error))
+        with pytest.raises(RequestPolicyError):
+            run.check_wait(0)
+        monkeypatch.undo()
+        assert json.loads((run.directory / "failed.detail").read_text()) == {"category": "sqlite"}
+
+
+@pytest.mark.parametrize(
+    "written,expected",
+    [
+        ({"category": "other"}, {"category": "other"}),
+        (
+            {"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_BUSY"},
+            {"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_BUSY"},
+        ),
+        ({"category": "sqlite"}, {"category": "sqlite"}),
+        ({"category": PRIVATE_CANARY}, None),
+        ({"category": "other", "type": "Anything"}, None),
+        ({"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_FULL"}, None),
+        ({"category": "sqlite", "sqlite_errorcode": 5}, None),
+        ([], None),
+    ],
+)
+def test_failure_detail_reads_back_only_a_well_formed_record(tmp_path, written, expected):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        assert run.failure_detail() is None
+        (run.directory / "failed.detail").write_text(json.dumps(written))
+        assert run.failure_detail() == expected
+        (run.directory / "failed.detail").write_text("{")
+        assert run.failure_detail() is None
 
 
 def test_unwritable_failure_detail_still_latches_the_reason(tmp_path):
