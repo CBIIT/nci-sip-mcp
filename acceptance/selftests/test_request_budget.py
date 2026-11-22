@@ -441,6 +441,36 @@ def test_snapshot_reads_committed_counters_without_reserving_a_writer(tmp_path):
         assert (after.logical, after.failure) == (0, None)
 
 
+def test_failed_marker_detail_names_the_sqlite_cause(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+            blocker.execute("BEGIN IMMEDIATE")
+            with pytest.raises(RequestPolicyError) as refused:
+                run.check_wait(0)
+        assert refused.value.reason == "accounting"
+        assert (run.directory / "failed").read_text() == "accounting"
+        assert json.loads((run.directory / "failed.detail").read_text()) == {
+            "type": "OperationalError",
+            "sqliteErrorcode": 5,
+            "sqliteErrorname": "SQLITE_BUSY",
+        }
+
+
+def test_failed_marker_detail_names_a_non_sqlite_cause_without_a_code(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        original = (run.directory / "key").read_bytes()
+        (run.directory / "key").write_bytes(b"short")
+        try:
+            with pytest.raises(RequestPolicyError):
+                run.check_wait(0)
+        finally:
+            (run.directory / "key").write_bytes(original)
+        assert (run.directory / "failed").read_text() == "authorization"
+        assert json.loads((run.directory / "failed.detail").read_text()) == {
+            "type": "RequestPolicyError"
+        }
+
+
 def test_real_sqlite_contention_closes_admission(tmp_path):
     actor = tmp_path / "blocked.py"
     actor.write_text(HELD_ACTOR)
