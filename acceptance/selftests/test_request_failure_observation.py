@@ -32,11 +32,16 @@ def retained(node):
     return json.loads(values[PROPERTY])
 
 
-def test_real_snapshot_retains_refusal_before_cleanup(tmp_path, request, capsys):
+def refuse_through_a_writer(run, monkeypatch):
+    # WAL readers are never refused, so a real SQLite refusal comes from writer against writer.
+    monkeypatch.setattr(run, "snapshot", lambda: run.check_wait(0))
+
+
+def test_real_ledger_refusal_is_retained_before_cleanup(tmp_path, request, capsys, monkeypatch):
     run = ledger(tmp_path)
+    refuse_through_a_writer(run, monkeypatch)
     with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
-        blocker.execute("PRAGMA journal_mode=DELETE")  # WAL readers are never refused.
-        blocker.execute("BEGIN EXCLUSIVE")
+        blocker.execute("BEGIN IMMEDIATE")
         with pytest.raises(RequestPolicyError) as caught:
             snapshot(run, request.node)
         assert caught.value.reason == "accounting" and caught.value.__suppress_context__
@@ -48,20 +53,20 @@ def test_real_snapshot_retains_refusal_before_cleanup(tmp_path, request, capsys)
             "ending": "end",
         }
         assert json.loads(capsys.readouterr().err) == record
-    after = run.snapshot()
+    after = ControlledRun.snapshot(run)
     assert (after.state, after.transport_entries, after.failure) == ("failed", 0, "accounting")
 
 
-def test_refusal_names_the_failing_ledger_statement_and_the_wait(tmp_path, request):
+def test_refusal_names_the_failing_ledger_statement_and_the_wait(tmp_path, request, monkeypatch):
     run = ledger(tmp_path)
+    refuse_through_a_writer(run, monkeypatch)
     with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
-        blocker.execute("PRAGMA journal_mode=DELETE")  # WAL readers are never refused.
-        blocker.execute("BEGIN EXCLUSIVE")
+        blocker.execute("BEGIN IMMEDIATE")
         with pytest.raises(RequestPolicyError):
             snapshot(run, request.node)
     attempt = json.loads(dict(request.node.user_properties)["accounting_snapshot_attempt"])
-    assert attempt["function"] == "ControlledRun._identity"
-    assert attempt["statement"] == 'connection.execute("SELECT entry_pending FROM leases LIMIT 0")'
+    assert attempt["function"] == "ControlledRun._connection"
+    assert attempt["statement"] == 'connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")'
     assert MIN_BUSY_WAIT <= attempt["elapsed_seconds"] < MAX_BUSY_WAIT
 
 
@@ -92,10 +97,9 @@ def controlled_refusal(monkeypatch):
         if not injected and current_thread() is main_thread() and ready:
             injected = True
             with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
-                blocker.execute("PRAGMA journal_mode=DELETE")  # WAL readers are never refused.
-                blocker.execute("BEGIN EXCLUSIVE")
+                blocker.execute("BEGIN IMMEDIATE")
                 try:
-                    return original(run)
+                    return run.check_wait(0)
                 except RequestPolicyError as error:
                     assert isinstance(error.__context__, sqlite3.OperationalError)
                     error.__context__.args = (PRIVATE_CANARY,)
