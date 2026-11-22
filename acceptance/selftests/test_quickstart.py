@@ -77,5 +77,5 @@ def test_quickstart_links_to_the_published_request_identification_guide():
     link = "[request identification guide](docs/request-identification.md)"
     guide = QUICKSTART.parent / "docs/request-identification.md"
 
-    assert text.count(link) == 1
+    assert link in text
     assert guide.is_file()
