@@ -127,6 +127,9 @@ class ControlledRun:
 
     def _initialize(self, key: bytes) -> None:
         with closing(sqlite3.connect(self.directory / "ledger.sqlite")) as connection, connection:
+            # Persistent in the file: readers then never block on, or are refused by, a writer's
+            # commit. Writer-versus-writer contention is unchanged.
+            connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript("""
                 CREATE TABLE run (
                     id TEXT, policy TEXT, binding BLOB, started REAL, state TEXT,
