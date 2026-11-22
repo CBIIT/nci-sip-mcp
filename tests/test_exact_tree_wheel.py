@@ -139,7 +139,7 @@ class ExactTreeWheelTest(unittest.TestCase):
 
     def test_the_callers_pip_configuration_does_not_affect_the_build(self):
         configuration = self.root.parent / "pip.conf"
-        configuration.write_text("[global\nnot a valid pip configuration\n")
+        configuration.write_text("[global]\nretries = not-a-number\n")
 
         with patch.dict(os.environ, {"PIP_CONFIG_FILE": str(configuration)}):
             self.assertEqual(self.built_source(), "VALUE = 'committed'\n")
