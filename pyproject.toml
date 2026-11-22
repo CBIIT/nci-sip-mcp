@@ -245,6 +245,8 @@ ignore_names = [
     "targetName", "targetTermType", "targetTerminologyVersion",
     "active_index_compatible", "evs_api", "selected_release", "active_index",
     "__annotations__",
+    # Python invokes module-level PEP 562 hooks for missing attributes.
+    "__getattr__",
     "pytest_*", "do_*", "log_message", "close_connection",
     # Pytest invokes the mutation item; allowlist identity is serialized through asdict.
     "runtest", "mutated",

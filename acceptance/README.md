@@ -29,6 +29,9 @@ pdm run acceptance-stories --check                   # verify its mapping and ge
 pdm run spec-render                                  # regenerate docs/specification.md from spec/
 ```
 
+The [request identification guide](../docs/request-identification.md) describes the acceptance
+distribution's separate local identity utility. It does not label acceptance requests yet.
+
 ## Managed live environments
 
 Local live acceptance requires `NCI_SIP_ACCEPTANCE_ENVIRONMENT=evs-only`, selecting the reviewed

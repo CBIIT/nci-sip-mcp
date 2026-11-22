@@ -157,6 +157,7 @@ last two and the suite's CI; each family below is operational, and what depends 
 | Benchmarks and evaluation | `benchmark*.py`, `http_measurement.py`, `assisted_evaluation.py`, `assisted_scoring.py` | `pdm run benchmark-http`; the companion's workers | `docs/benchmark.md`, `docs/assisted-evaluation.md` |
 | Shared process helpers | `processes.py` | imported by the acceptance, container, companion, operator and benchmark scripts | every script that owns or waits for a process |
 | Shared formats, vocabularies, lock lines and files | `formats.py`, `vocabulary.py`, `requirements_lock.py`, `operator_files.py` | imported by the evidence, portal, docs, operator, benchmark and lock scripts | every script that checks a hash, job id or release tag, every run and job stop reason and state, both requirement locks, and every atomic JSON write |
+| Test wheel builds | `exact_tree_wheel.py` | imported by the identity wheel smoke tests | `tests/test_traffic_identity_cli.py`, `acceptance/selftests/test_traffic_identity_cli.py` (a wheel of the exact working tree, uncommitted edits included) |
 | README badges | `coverage_badges.py` | the CI `coverage-badges` job | the README |
 | Test reports | `junit_summary.py` | CI unit and self-test report steps | per-run summaries and JUnit artifacts |
 | Workflow setup | `github_setup.py` | `pdm run github-setup` | repository maintainers; the live workflow's credential inventory |

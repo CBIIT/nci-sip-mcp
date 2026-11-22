@@ -980,6 +980,49 @@ class DocumentationTest(unittest.TestCase):
             " ".join(target_interface.read_text(encoding="utf-8").split()),
         )
 
+    def test_request_identification_guide_is_linked_from_entry_documents(self):
+        guide = "docs/request-identification.md"
+        guide_text = " ".join(read(guide).split())
+
+        self.assertTrue((ROOT / guide).is_file())
+        self.assertIn(f"[request identification guide]({guide})", read("README.md"))
+        self.assertIn(
+            f"[request identification guide](../{guide})",
+            read("acceptance/README.md"),
+        )
+        self.assertIn(
+            '"$SERVER_VENV/bin/python" -m nci_sip_mcp.traffic_identity show',
+            guide_text,
+        )
+        self.assertIn(
+            '"$ACCEPTANCE_VENV/bin/python" -m nci_sip_acceptance.traffic_identity show',
+            guide_text,
+        )
+        self.assertIn(
+            "The server does not yet read this identity or include it in HTTP requests",
+            guide_text,
+        )
+        self.assertNotIn("pdm run --working-dir acceptance", guide_text)
+        self.assertIn(
+            "pdm run python -m nci_sip_acceptance.traffic_identity show",
+            guide_text,
+        )
+
+    def test_quickstart_export_example_does_not_use_a_literal_identity(self):
+        exports = [
+            line.strip()
+            for line in QUICKSTART.splitlines()
+            if line.strip().startswith("export NCI_SIP_INSTALLATION_ID=")
+        ]
+
+        self.assertTrue(exports, "QUICKSTART should show the identity setting")
+        for export in exports:
+            with self.subTest(export=export):
+                self.assertNotRegex(
+                    export,
+                    r"=(?:[0-9a-f]{32}|'[0-9a-f]{32}'|\"[0-9a-f]{32}\")(?=$|[\s#;&|])",
+                )
+
     def test_every_repository_url_in_the_documents_names_this_repository(self):
         # Both canonical names remain in use during the released-installer transition.
         tracked = subprocess.run(
