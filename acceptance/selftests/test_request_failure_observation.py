@@ -70,6 +70,33 @@ def test_refusal_names_the_failing_ledger_statement_and_the_wait(tmp_path, reque
     assert MIN_BUSY_WAIT <= attempt["elapsed_seconds"] < MAX_BUSY_WAIT
 
 
+def test_final_failure_report_prints_the_ledger_failure_detail(pytester):
+    pytester.makepyfile(
+        test_inner="""
+import sqlite3
+from contextlib import closing
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_mcp.http_client import RequestPolicyError
+
+def test_refused_ledger(tmp_path):
+    grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
+    owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
+    with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as holder, owner:
+        holder.execute("BEGIN IMMEDIATE")
+        try:
+            owner.run.check_wait(0)
+        except RequestPolicyError:
+            pass
+        holder.rollback()
+"""
+    )
+    result = pytester.runpytest_subprocess("-q", "-p", "no:cacheprovider", timeout=60)
+    result.assert_outcomes(failed=1)
+    detail = {"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_BUSY"}
+    assert f"ledger failure detail: {json.dumps(detail)}" in result.stdout.str()
+
+
 def test_junit_keeps_initiating_record_after_teardown_failure(pytester):
     for name in (
         "request_failure_observation.py",
