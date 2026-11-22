@@ -558,6 +558,24 @@ def test_heartbeat_waits_out_a_writer_lock_beyond_the_request_path_bound(tmp_pat
         assert not (owner.run.directory / "failed").exists()
 
 
+def test_heartbeat_still_latches_accounting_when_the_lock_outlasts_its_bound(tmp_path, monkeypatch):
+    monkeypatch.setattr(request_supervision, "PULSE_SECONDS", 3600)
+    monkeypatch.setattr(request_budget, "HEARTBEAT_BUSY_SECONDS", 0.2)
+    owner = supervisor(tmp_path)
+    with (
+        closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as holder,
+        pytest.raises(RequestPolicyError) as leaving,
+        owner,
+    ):
+        holder.execute("BEGIN IMMEDIATE")
+        with pytest.raises(RequestPolicyError) as refused:
+            owner.run.heartbeat()
+        holder.rollback()
+        assert refused.value.reason == "accounting"
+        assert (owner.run.directory / "failed").read_text() == "accounting"
+    assert leaving.value.reason == "accounting"
+
+
 @pytest.mark.parametrize("elapsed", [0, 1.5, 2])
 def test_heartbeat_refresh_preserves_inclusive_freshness_window(tmp_path, monkeypatch, elapsed):
     owner = supervisor(tmp_path)
