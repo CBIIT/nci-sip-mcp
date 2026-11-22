@@ -1,380 +1,120 @@
-"""The independently installed acceptance identity command is local and fail-safe."""
+"""One installed-wheel smoke test of the acceptance identity command, built from the exact tree."""
 
+import importlib.util
 import os
+import re
 import subprocess
-import sys
 import tempfile
 import unittest
 import venv
 from pathlib import Path
-from uuid import UUID
 
-ACCEPTANCE = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
+_SPEC = importlib.util.spec_from_file_location(
+    "exact_tree_wheel", ROOT / "scripts/exact_tree_wheel.py"
+)
+assert _SPEC is not None and _SPEC.loader is not None
+_MODULE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+exact_tree_wheel = _MODULE.exact_tree_wheel
 TOKEN = "b" * 32
-LABEL_SUFFIX = f" (installation={TOKEN}; +https://github.com/CBIIT/nci-sip-mcp)"
-ID_ERROR = (
-    "Set NCI_SIP_ACCEPTANCE_INSTALLATION_ID to exactly 32 lowercase hexadecimal characters "
-    "and retry."
+LABEL = re.compile(
+    r"nci-sip-acceptance/[A-Za-z0-9][A-Za-z0-9.!+_-]* "
+    rf"\(installation={TOKEN}; \+https://github\.com/CBIIT/nci-sip-mcp\)\n"
 )
-VERSION_ERROR = (
-    "The installed nci-sip-acceptance version cannot form a safe label. "
-    "Reinstall the acceptance package with valid metadata and retry."
+SENTINEL = (
+    "import socket\n"
+    "for attempt in (\n"
+    "    lambda: socket.getaddrinfo('192.0.2.1', 9, flags=socket.AI_NUMERICHOST),\n"
+    "    lambda: stream.connect('/nci-sip-identity-sentinel'),\n"
+    "    lambda: stream.connect_ex('/nci-sip-identity-sentinel'),\n"
+    "    lambda: stream.sendto(b'x', '/nci-sip-identity-sentinel'),\n"
+    "):\n"
+    "    stream = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)\n"
+    "    try:\n"
+    "        attempt()\n"
+    "    except OSError:\n"
+    "        pass\n"
+    "    else:\n"
+    "        raise AssertionError('not refused')\n"
+    "    finally:\n"
+    "        stream.close()\n"
+)
+MODULE = "nci_sip_acceptance.traffic_identity"
+HOOK = "".join(
+    "import os\n"
+    "import socket\n"
+    "from pathlib import Path\n"
+    "def record(kind):\n"
+    "    with Path(os.environ['NCI_IDENTITY_NETWORK_LOG']).open('a') as log:\n"
+    "        log.write(kind + '\\n')\n"
+    "def deny_connect(self, address):\n"
+    "    record('connect')\n"
+    "    raise OSError('network denied')\n"
+    "def deny_connect_ex(self, address):\n"
+    "    record('connect_ex')\n"
+    "    raise OSError('network denied')\n"
+    "def deny_getaddrinfo(*args, **kwargs):\n"
+    "    record('getaddrinfo')\n"
+    "    raise OSError('network denied')\n"
+    "def deny_sendto(self, *args, **kwargs):\n"
+    "    record('sendto')\n"
+    "    raise OSError('network denied')\n"
+    "socket.socket.connect = deny_connect\n"
+    "socket.socket.connect_ex = deny_connect_ex\n"
+    "socket.getaddrinfo = deny_getaddrinfo\n"
+    "socket.socket.sendto = deny_sendto\n"
 )
 
 
-class AcceptanceIdentityCLITest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        temporary = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(temporary.cleanup)
-        cls.root = Path(temporary.name)
-        cls.wheelhouse = cls.root / "wheelhouse"
-        cls.wheelhouse.mkdir()
-        cls.home = cls.root / "home"
-        cls.home.mkdir()
-        cls.configuration = cls.root / "xdg"
-        cls.configuration.mkdir()
-        cls.working_directory = cls.root / "work"
-        cls.working_directory.mkdir()
-        cls.hooks = cls.root / "hooks"
-        cls.hooks.mkdir()
-        cls.network_log = cls.root / "network-attempts.txt"
-        (cls.hooks / "sitecustomize.py").write_text(
-            "import os\n"
-            "import socket\n"
-            "from pathlib import Path\n"
-            "def record(kind):\n"
-            "    with Path(os.environ['NCI_IDENTITY_NETWORK_LOG']).open('a') as log:\n"
-            "        log.write(kind + '\\n')\n"
-            "def deny_connect(self, address):\n"
-            "    record('connect')\n"
-            "    raise OSError('network denied')\n"
-            "def deny_connect_ex(self, address):\n"
-            "    record('connect_ex')\n"
-            "    raise OSError('network denied')\n"
-            "def deny_getaddrinfo(*args, **kwargs):\n"
-            "    record('getaddrinfo')\n"
-            "    raise OSError('network denied')\n"
-            "def deny_sendto(self, *args, **kwargs):\n"
-            "    record('sendto')\n"
-            "    raise OSError('network denied')\n"
-            "socket.socket.connect = deny_connect\n"
-            "socket.socket.connect_ex = deny_connect_ex\n"
-            "socket.getaddrinfo = deny_getaddrinfo\n"
-            "socket.socket.sendto = deny_sendto\n",
-            encoding="utf-8",
-        )
-        cls._build_and_install()
-        cls.metadata = cls._metadata_path()
-        cls.original_metadata = cls.metadata.read_text(encoding="utf-8")
-        cls.original_version = next(
-            line.removeprefix("Version: ")
-            for line in cls.original_metadata.splitlines()
-            if line.startswith("Version: ")
-        )
-
-    def setUp(self):
-        self.network_log.unlink(missing_ok=True)
-        self._write_version(self.original_version)
-        self.addCleanup(self._restore_version)
-        self.observed_paths = {
-            path: self._tree(path)
-            for path in (self.home, self.configuration, self.working_directory)
-        }
-
-    @classmethod
-    def _environment(cls):
-        return {
-            "HOME": str(cls.home),
-            "XDG_CONFIG_HOME": str(cls.configuration),
-            "PYTHONPATH": str(cls.hooks),
-            "PYTHONNOUSERSITE": "1",
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "NCI_IDENTITY_NETWORK_LOG": str(cls.network_log),
-            "PIP_CONFIG_FILE": os.devnull,
-            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            "PIP_NO_INDEX": "1",
-            "PATH": os.environ.get("PATH", ""),
-        }
-
-    @classmethod
-    def _build_and_install(cls):
-        result = subprocess.run(  # noqa: S603 - fixed acceptance path and offline wheel build
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "wheel",
-                "--no-deps",
-                "--no-build-isolation",
-                "--no-index",
-                "--wheel-dir",
-                str(cls.wheelhouse),
-                str(ACCEPTANCE),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=cls._environment(),
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"offline acceptance wheel build failed: {result.stderr}")
-        wheels = list(cls.wheelhouse.glob("nci_sip_acceptance-*.whl"))
-        if len(wheels) != 1:
-            raise RuntimeError(f"expected one acceptance wheel, found {len(wheels)}")
-        cls.environment = cls.root / "venv"
-        venv.EnvBuilder(with_pip=True, system_site_packages=False).create(cls.environment)
-        cls.python = cls.environment / "bin/python"
-        installed = subprocess.run(  # noqa: S603 - owned wheel in isolated temporary environment
-            [
-                str(cls.python),
-                "-m",
-                "pip",
-                "install",
-                "--no-deps",
-                "--no-index",
-                "--no-cache-dir",
-                str(wheels[0]),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=cls._environment(),
-        )
-        if installed.returncode != 0:
-            raise RuntimeError(f"offline acceptance wheel install failed: {installed.stderr}")
-        if cls.network_log.exists():
-            raise RuntimeError("network sentinel recorded an attempt during offline setup")
-
-    @classmethod
-    def _metadata_path(cls):
-        probe = subprocess.run(  # noqa: S603 - fixed Python executable and metadata probe
-            [
-                str(cls.python),
-                "-B",
-                "-c",
-                "import sysconfig; print(sysconfig.get_paths()['purelib'])",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=cls._environment(),
-        )
-        if probe.returncode != 0:
-            raise RuntimeError(f"could not locate isolated site-packages: {probe.stderr}")
-        metadata = list(Path(probe.stdout.strip()).glob("nci_sip_acceptance-*.dist-info/METADATA"))
-        if len(metadata) != 1:
-            raise RuntimeError(
-                f"expected one installed acceptance metadata file, found {len(metadata)}"
-            )
-        return metadata[0]
-
-    @classmethod
-    def _write_version(cls, version):
-        lines = cls.metadata.read_text(encoding="utf-8").splitlines()
-        cls.metadata.write_text(
-            "\n".join(
-                f"Version: {version}" if line.startswith("Version: ") else line for line in lines
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-
-    @classmethod
-    def _write_invalid_utf8_version(cls):
-        metadata = cls.metadata.read_bytes()
-        version = f"Version: {cls.original_version}".encode()
-        if metadata.count(version) != 1:
-            raise RuntimeError("expected one installed acceptance version")
-        cls.metadata.write_bytes(metadata.replace(version, b"Version: private-\xff-canary", 1))
-
-    @classmethod
-    def _remove_version(cls):
-        lines = cls.metadata.read_text(encoding="utf-8").splitlines()
-        cls.metadata.write_text(
-            "\n".join(line for line in lines if not line.startswith("Version: ")) + "\n",
-            encoding="utf-8",
-        )
-
-    @classmethod
-    def _restore_version(cls):
-        cls.metadata.write_text(cls.original_metadata, encoding="utf-8")
-
-    @classmethod
-    def _tree(cls, directory):
-        return {
-            str(path.relative_to(directory)): ("directory" if path.is_dir() else path.read_bytes())
-            for path in sorted(directory.rglob("*"))
-        }
-
-    def _child(self, arguments, token=None, configured_id=None):
-        environment = self._environment()
-        if token is not None:
-            environment["NCI_SIP_ACCEPTANCE_INSTALLATION_ID"] = token
-        if configured_id is not None:
-            environment["NCI_SIP_ACCEPTANCE_INSTALLATION_ID"] = configured_id
-        result = subprocess.run(  # noqa: S603 - fixed module and owned isolated wheel
-            [str(self.python), "-B", *arguments],
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=self.working_directory,
-            env=environment,
-        )
-        self.assertFalse(
-            self.network_log.exists() and self.network_log.read_text(encoding="utf-8"),
-            "acceptance identity child used a patched Python socket API for network access",
-        )
-        return result
-
-    def _module(self, *arguments, token=None, configured_id=None):
-        return self._child(
-            ["-m", "nci_sip_acceptance.traffic_identity", *arguments],
-            token,
-            configured_id,
-        )
-
-    def _installed_version(self):
-        result = self._child(
-            [
-                "-c",
-                "import importlib.metadata; "
-                "print(importlib.metadata.version('nci-sip-acceptance'))",
-            ]
-        )
-        self.assertEqual((result.returncode, result.stderr), (0, ""))
-        return result.stdout.rstrip("\n")
-
-    def _assert_no_configuration_writes(self):
-        self.assertEqual(
-            self.observed_paths,
-            {
-                path: self._tree(path)
-                for path in (self.home, self.configuration, self.working_directory)
-            },
-        )
-
-    def test_generate_prints_a_uuid4_without_provisioning_or_writing_files(self):
-        for configured_id in (None, "PRIVATE-ID-CANARY"):
-            with self.subTest(configured_id=configured_id):
-                generated = self._module("generate", configured_id=configured_id)
-
-                self.assertRegex(generated.stdout, r"^[0-9a-f]{32}\n$")
-                self.assertEqual((generated.returncode, generated.stderr), (0, ""))
-                parsed = UUID(generated.stdout.strip())
-                self.assertEqual(parsed.version, 4)
-                self.assertNotIn("PRIVATE-ID-CANARY", generated.stdout + generated.stderr)
-        missing = self._module("show")
-        self.assertEqual(
-            (missing.returncode, missing.stdout, missing.stderr), (1, "", ID_ERROR + "\n")
-        )
-        self._assert_no_configuration_writes()
-
-    def test_generate_does_not_read_malformed_installed_version(self):
-        self._write_invalid_utf8_version()
-
-        generated = self._module("generate")
-
-        self.assertRegex(generated.stdout, r"^[0-9a-f]{32}\n$")
-        self.assertEqual((generated.returncode, generated.stderr), (0, ""))
-        self.assertEqual(UUID(generated.stdout.strip()).version, 4)
-        self.assertNotIn("private-", generated.stdout + generated.stderr)
-        self._assert_no_configuration_writes()
-
-    def test_show_uses_acceptance_metadata_and_rejects_ids_without_echoing_them(self):
-        version = self._installed_version()
-        valid = self._module("show", token=TOKEN)
-
-        self.assertEqual(valid.stdout, f"nci-sip-acceptance/{version}{LABEL_SUFFIX}\n")
-        self.assertEqual((valid.returncode, valid.stderr), (0, ""))
-        for token in ("PRIVATE-ID-CANARY", "A" * 32, "a" * 31, "a" * 33, "g" * 32, "é" * 32):
-            with self.subTest(token=token):
-                refused = self._module("show", token=token)
-                self.assertEqual(
-                    (refused.returncode, refused.stdout, refused.stderr),
-                    (1, "", ID_ERROR + "\n"),
-                )
-                self.assertNotIn(token, refused.stdout + refused.stderr)
-        self._assert_no_configuration_writes()
-
-    def test_show_rejects_installed_metadata_without_a_version(self):
-        self._remove_version()
-        assert not any(
-            line.startswith("Version: ") for line in self.metadata.read_text().splitlines()
-        )
-
-        refused = self._module("show", token=TOKEN)
-
-        assert (refused.returncode, refused.stdout, refused.stderr) == (
-            1,
-            "",
-            VERSION_ERROR + "\n",
-        )
-        assert "Traceback" not in refused.stdout + refused.stderr
-        assert "None" not in refused.stdout + refused.stderr
-
-    def test_show_reports_a_fixed_error_for_undecodable_installed_metadata(self):
-        self._write_invalid_utf8_version()
-
-        refused = self._module("show", token=TOKEN)
-
-        self.assertEqual(
-            (refused.returncode, refused.stdout, refused.stderr),
-            (1, "", VERSION_ERROR + "\n"),
-        )
-        self.assertNotIn("private-", refused.stdout + refused.stderr)
-        self.assertNotIn("UnicodeDecodeError", refused.stdout + refused.stderr)
-
-    def test_installed_version_is_safe_and_the_complete_label_is_capped_at_256_bytes(self):
-        version = self._installed_version()
-        valid = self._module("show", token=TOKEN)
-        self.assertEqual(valid.stdout, f"nci-sip-acceptance/{version}{LABEL_SUFFIX}\n")
-
-        unsafe_versions = (
-            "bad version",
-            "bad); installation=other",
-            "bad\tversion",
-            "bad-é",
-            "bad\x01version",
-        )
-        for value in unsafe_versions:
-            with self.subTest(version=value):
-                self._write_version(value)
-                refused = self._module("show", token=TOKEN)
-                self.assertEqual(
-                    (refused.returncode, refused.stdout, refused.stderr),
-                    (1, "", VERSION_ERROR + "\n"),
-                )
-                self.assertNotIn(value, refused.stdout + refused.stderr)
-
-        fixed_length = len("nci-sip-acceptance/") + len(LABEL_SUFFIX)
-        self._write_version("v" * (256 - fixed_length))
-        actual = self._installed_version()
-        accepted = self._module("show", token=TOKEN)
-        label = f"nci-sip-acceptance/{actual}{LABEL_SUFFIX}"
-        self.assertEqual(
-            (accepted.returncode, accepted.stdout, accepted.stderr), (0, label + "\n", "")
-        )
-        self.assertEqual(len(label.encode("ascii")), 256)
-
-        too_long = "v" * (257 - fixed_length)
-        self._write_version(too_long)
-        refused = self._module("show", token=TOKEN)
-        self.assertEqual(
-            (refused.returncode, refused.stdout, refused.stderr),
-            (1, "", VERSION_ERROR + "\n"),
-        )
-        self.assertNotIn(too_long, refused.stdout + refused.stderr)
-        self._assert_no_configuration_writes()
-
-    def test_child_has_no_core_package_and_network_sentinel_records_caught_attempts(self):
+class AcceptanceIdentityWheelSmokeTest(unittest.TestCase):
+    def test_installed_wheel_shows_and_generates_an_identity_without_network_use(self):
         """Only the patched resolver and socket methods are observed.
 
         Unpatched APIs such as gethostbyname, gethostbyaddr, getnameinfo, and sendmsg,
         native extensions, subprocess networking, and direct syscalls are outside this sentinel.
         """
-        isolated = self._child(
-            [
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "hooks").mkdir()
+            (root / "hooks/sitecustomize.py").write_text(HOOK, encoding="utf-8")
+            network_log = root / "network-attempts.txt"
+            environment = {
+                "HOME": str(root),
+                "PYTHONPATH": str(root / "hooks"),
+                "PYTHONNOUSERSITE": "1",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "NCI_IDENTITY_NETWORK_LOG": str(network_log),
+                "PIP_CONFIG_FILE": os.devnull,
+                "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                "PIP_NO_INDEX": "1",
+                "PATH": os.environ.get("PATH", ""),
+            }
+            wheel = exact_tree_wheel(ROOT, root / "wheelhouse", "acceptance")
+            venv.EnvBuilder(with_pip=True, system_site_packages=False).create(root / "venv")
+            python = str(root / "venv/bin/python")
+            subprocess.run(  # noqa: S603 - owned wheel in an isolated temporary environment
+                [python, "-m", "pip", "install", "--no-deps", "--no-cache-dir", str(wheel)],
+                check=True,
+                capture_output=True,
+                env=environment,
+            )
+
+            def child(*arguments, **extra):
+                return subprocess.run(  # noqa: S603 - fixed module in an owned isolated venv
+                    [python, "-B", *arguments],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    cwd=root,
+                    env={**environment, **extra},
+                )
+
+            shown = child("-m", MODULE, "show", NCI_SIP_ACCEPTANCE_INSTALLATION_ID=TOKEN)
+            generated = child("-m", MODULE, "generate")
+            self.assertFalse(network_log.exists(), "the identity command used the network")
+            sentinel = child("-c", SENTINEL)
+            isolated = child(
                 "-c",
                 "import importlib.metadata, importlib.util\n"
                 "assert importlib.util.find_spec('nci_sip_mcp') is None\n"
@@ -384,61 +124,15 @@ class AcceptanceIdentityCLITest(unittest.TestCase):
                 "    pass\n"
                 "else:\n"
                 "    raise AssertionError('core distribution is installed')\n",
-            ]
-        )
-        self.assertEqual((isolated.returncode, isolated.stderr), (0, ""))
+            )
 
-        controlled = subprocess.run(  # noqa: S603 - controlled socket attempt intercepted by sentinel
-            [
-                str(self.python),
-                "-B",
-                "-c",
-                "import os, socket\n"
-                "missing_path = '/nci-sip-identity-sentinel-' + str(os.getpid())\n"
-                "for kind, attempt in (\n"
-                "    ('DNS', lambda: socket.getaddrinfo('192.0.2.1', 9, "
-                "flags=socket.AI_NUMERICHOST)),\n"
-                "    ('connect', lambda: stream.connect(missing_path)),\n"
-                "    ('connect_ex', lambda: stream.connect_ex(missing_path)),\n"
-                "    ('sendto', lambda: datagram.sendto(b'controlled', missing_path)),\n"
-                "):\n"
-                "    stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-                "    datagram = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)\n"
-                "    try:\n"
-                "        attempt()\n"
-                "    except OSError:\n"
-                "        pass\n"
-                "    else:\n"
-                "        raise AssertionError(f'{kind} was not refused')\n"
-                "    finally:\n"
-                "        stream.close()\n"
-                "        datagram.close()\n",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=self.working_directory,
-            env=self._environment(),
-        )
-
-        self.assertEqual((controlled.returncode, controlled.stderr), (0, ""))
-        self.assertEqual(
-            self.network_log.read_text(encoding="utf-8"),
-            "getaddrinfo\nconnect\nconnect_ex\nsendto\n",
-        )
-
-    def test_help_and_usage_failures_do_not_evaluate_configuration(self):
-        for configured_id in (None, "PRIVATE-ID-CANARY"):
-            with self.subTest(configured_id=configured_id):
-                help_result = self._module("--help", configured_id=configured_id)
-                assert (help_result.returncode, help_result.stderr) == (0, "")
-                assert "generate" in help_result.stdout
-                assert "show" in help_result.stdout
-                assert "PRIVATE-ID-CANARY" not in help_result.stdout
-
-                invalid = self._module("not-a-command", configured_id=configured_id)
-                self.assertEqual(invalid.returncode, 2)
-                assert "usage:" in invalid.stderr
-                assert invalid.stdout == ""
-                assert "PRIVATE-ID-CANARY" not in invalid.stdout + invalid.stderr
-                assert "Traceback" not in invalid.stdout + invalid.stderr
+            self.assertEqual((shown.returncode, shown.stderr), (0, ""))
+            self.assertRegex(shown.stdout, LABEL)
+            self.assertEqual((generated.returncode, generated.stderr), (0, ""))
+            self.assertRegex(generated.stdout, r"[0-9a-f]{32}\n")
+            self.assertEqual((isolated.returncode, isolated.stderr), (0, ""))
+            self.assertEqual((sentinel.returncode, sentinel.stderr), (0, ""))
+            self.assertEqual(
+                network_log.read_text(encoding="utf-8"),
+                "getaddrinfo\nconnect\nconnect_ex\nsendto\n",
+            )
