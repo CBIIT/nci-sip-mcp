@@ -7,7 +7,6 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import traceback
 from contextlib import ExitStack, closing, contextmanager
@@ -480,42 +479,22 @@ def test_ledger_uses_write_ahead_logging(tmp_path):
         assert reader.execute("PRAGMA journal_mode").fetchone() == ("wal",)
 
 
-def test_snapshot_reads_while_a_writer_commit_waits_for_a_reader(tmp_path):
+def test_snapshot_reads_while_a_writer_commits_over_an_open_reader(tmp_path):
     with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
         ledger = run.directory / "ledger.sqlite"
-        with closing(sqlite3.connect(ledger)) as reader:
+        with (
+            closing(sqlite3.connect(ledger)) as reader,
+            closing(sqlite3.connect(ledger, timeout=0)) as writer,
+        ):
             reader.execute("BEGIN")
             reader.execute("SELECT * FROM run").fetchall()
-            commit = threading.Thread(target=commit_logical_write, args=(ledger,))
-            commit.start()
-            try:
-                # In a rollback journal the writer's pending commit refuses new readers.
-                for _attempt in range(200):
-                    if not new_reader_succeeds(ledger):
-                        break
-                try:
-                    observed = run.snapshot()
-                except RequestPolicyError as error:
-                    observed = error
-            finally:
-                reader.rollback()
-                commit.join()
-        assert isinstance(observed, LedgerSnapshot), observed
-
-
-def commit_logical_write(ledger):
-    with closing(sqlite3.connect(ledger, timeout=5)) as writer, writer:
-        writer.execute("BEGIN IMMEDIATE")
-        writer.execute("UPDATE run SET logical=logical")
-
-
-def new_reader_succeeds(ledger):
-    with closing(sqlite3.connect(ledger, timeout=0.1)) as probe:
-        try:
-            probe.execute("SELECT * FROM run").fetchall()
-        except sqlite3.OperationalError:
-            return False
-    return True
+            writer.execute("BEGIN IMMEDIATE")
+            writer.execute("UPDATE run SET logical=logical")
+            # A rollback journal refuses this commit while the reader holds its lock.
+            writer.commit()
+            observed = run.snapshot()
+            reader.rollback()
+        assert (observed.state, observed.logical, observed.failure) == ("open", 0, None)
 
 
 def test_real_sqlite_contention_closes_admission(tmp_path):
