@@ -9,13 +9,14 @@ import math
 import os
 import re
 import sqlite3
+import sys
 import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn, NotRequired, Self, TypedDict, get_args
+from typing import TYPE_CHECKING, Literal, NoReturn, NotRequired, Self, TypedDict, get_args
 
 from nci_sip_acceptance.request_authorization import (
     MAX_COUNTER,
@@ -42,10 +43,56 @@ STATES: dict[str, LedgerState] = {value: value for value in get_args(LedgerState
 REASONS: dict[str, PolicyReason] = {value: value for value in get_args(PolicyReason.__value__)}
 
 
+# The only SQLite error codes a failure detail may name; any other code is recorded as absent.
+SQLITE_NAMES = {
+    5: "SQLITE_BUSY",
+    261: "SQLITE_BUSY_RECOVERY",
+    517: "SQLITE_BUSY_SNAPSHOT",
+    773: "SQLITE_BUSY_TIMEOUT",
+    6: "SQLITE_LOCKED",
+    262: "SQLITE_LOCKED_SHAREDCACHE",
+    518: "SQLITE_LOCKED_VTAB",
+    10: "SQLITE_IOERR",
+    14: "SQLITE_CANTOPEN",
+    11: "SQLITE_CORRUPT",
+    26: "SQLITE_NOTADB",
+    8: "SQLITE_READONLY",
+    13: "SQLITE_FULL",
+    7: "SQLITE_NOMEM",
+}
+
+
 class FailureDetail(TypedDict):
-    type: str
-    sqliteErrorcode: NotRequired[int]
-    sqliteErrorname: NotRequired[str]
+    category: Literal["sqlite", "other"]
+    sqlite_errorcode: NotRequired[int]
+    sqlite_errorname: NotRequired[str]
+
+
+def _failure_detail(cause: BaseException | None) -> FailureDetail:
+    detail: FailureDetail = {"category": "other"}
+    if isinstance(cause, sqlite3.Error):
+        detail["category"] = "sqlite"
+        code = getattr(cause, "sqlite_errorcode", None)
+        name = getattr(cause, "sqlite_errorname", None)
+        if type(code) is int and SQLITE_NAMES.get(code) == name:
+            detail["sqlite_errorcode"], detail["sqlite_errorname"] = code, SQLITE_NAMES[code]
+    return detail
+
+
+def _validated_detail(value: object) -> FailureDetail | None:
+    if not isinstance(value, dict):
+        return None
+    candidate: FailureDetail
+    if value.get("category") == "other":
+        candidate = {"category": "other"}
+    elif value.get("category") == "sqlite":
+        candidate = {"category": "sqlite"}
+        code = value.get("sqlite_errorcode")
+        if type(code) is int and code in SQLITE_NAMES:
+            candidate["sqlite_errorcode"], candidate["sqlite_errorname"] = code, SQLITE_NAMES[code]
+    else:
+        return None
+    return candidate if value == candidate else None
 
 
 def _clock() -> float:
@@ -319,8 +366,8 @@ class ControlledRun:
                 connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
                 self._identity(connection)
                 yield connection
-        except (sqlite3.Error, OSError, ValueError, TypeError, OverflowError) as error:
-            self._deny("accounting", cause=error)
+        except sqlite3.Error, OSError, ValueError, TypeError, OverflowError:
+            self._deny("accounting")
         finally:
             if connection is not None:
                 connection.close()
@@ -330,7 +377,6 @@ class ControlledRun:
         reason: PolicyReason,
         *,
         event: BaseException | None = None,
-        cause: BaseException | None = None,
     ) -> None:
         # One built-in string key atomically latches the immutable pair; never check then assign.
         local_reason, local_event = self._local_failure.setdefault("first", (reason, event))
@@ -338,9 +384,7 @@ class ControlledRun:
             with (self.directory / "failed").open("x") as stream:
                 self._marker_failure = local_event
                 stream.write(local_reason)
-            detailed = cause if cause is not None else local_event
-            if detailed is not None:
-                self._write_detail(detailed)
+            self._write_detail()
         except FileExistsError:
             # An existing marker already closes admission; do not replace it.
             pass
@@ -348,22 +392,25 @@ class ControlledRun:
             # This participant still refuses; inability to publish never authorizes traffic.
             raise RequestPolicyError("accounting") from None
 
-    def _write_detail(self, cause: BaseException) -> None:
-        # Diagnostic only: names the exception class and SQLite code, never a message or path,
-        # and is never read on a fail-closed path, so the reason marker stays the authority.
-        detail: FailureDetail = {"type": type(cause).__name__}
-        code = getattr(cause, "sqlite_errorcode", None)
-        name = getattr(cause, "sqlite_errorname", None)
-        if isinstance(code, int) and isinstance(name, str):
-            detail["sqliteErrorcode"] = code
-            detail["sqliteErrorname"] = name
-        with suppress(OSError):
-            (self.directory / "failed.detail").write_text(json.dumps(detail))
+    def _write_detail(self) -> None:
+        # Diagnostic only, never read on a fail-closed path and never replacing the reason:
+        # a closed category and a validated SQLite code, no message, class name or path.
+        # The exception being handled is the cause when a ledger call is denied from its handler.
+        detail = json.dumps(_failure_detail(sys.exception()))
+        with suppress(OSError), (self.directory / "failed.detail").open("x") as stream:
+            stream.write(detail)
 
-    def _deny(self, reason: PolicyReason, *, cause: BaseException | None = None) -> NoReturn:
+    def _deny(self, reason: PolicyReason) -> NoReturn:
         error = RequestPolicyError(reason)
-        self._mark_failed(reason, event=error, cause=cause)
+        self._mark_failed(reason, event=error)
         raise error from None
+
+    def failure_detail(self) -> FailureDetail | None:
+        """The validated diagnostic beside the failed marker, or None when absent or unreadable."""
+        try:
+            return _validated_detail(json.loads((self.directory / "failed.detail").read_text()))
+        except OSError, ValueError:
+            return None
 
     def _count(self, value: object) -> int:
         if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= MAX_COUNTER:
