@@ -244,14 +244,20 @@ custom_dir = "overrides"
         fixture_source = self.root / page
         fixture_source.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, fixture_source)
+        guide = "docs/local-guide.md"
+        self.assertEqual(pages.count(guide), 1)
+        self.assertRegex((ROOT / guide).read_text(encoding="utf-8"), r"(?m)^## Server$")
+        (self.root / guide).write_text("# Run locally\n\n## Server\n\nStub.\n")
         staged = self.root / "staged"
-        stage_pages(self.root, staged, [page])
+        stage_pages(self.root, staged, [page, guide])
         self.assertEqual((staged / page).read_bytes(), source.read_bytes())
+        self.assertEqual((staged / guide).read_bytes(), (self.root / guide).read_bytes())
 
         (self.root / "README.md").write_text("# Public overview\n")
         config = self.config().replace(
             'nav = [{ Overview = "README.md" }, { Story = "docs/story.md" }]',
             'nav = [{ Overview = "README.md" }, '
+            '{ "Run locally" = "docs/local-guide.md" }, '
             '{ "Request identification" = "docs/request-identification.md" }]',
         )
         (self.root / "docs/site-assets/zensical.toml").write_text(config)

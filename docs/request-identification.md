@@ -46,7 +46,7 @@ package. Neither utility contacts an upstream service.
 
 ## Run from installed environments
 
-The Server section of the local guide (`docs/local-guide.md`) names the installed server environment
+The [local server guide](local-guide.md#server) names the installed server environment
 `SERVER_VENV`. Set `ACCEPTANCE_VENV` to the environment where you installed the standalone
 acceptance distribution. Use each environment's Python directly:
 
