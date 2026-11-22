@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn, Self, get_args
+from typing import TYPE_CHECKING, NoReturn, NotRequired, Self, TypedDict, get_args
 
 from nci_sip_acceptance.request_authorization import (
     MAX_COUNTER,
@@ -44,6 +44,12 @@ STALE_SECONDS = 2.0
 HEARTBEAT_BUSY_SECONDS = 1.0
 STATES: dict[str, LedgerState] = {value: value for value in get_args(LedgerState.__value__)}
 REASONS: dict[str, PolicyReason] = {value: value for value in get_args(PolicyReason.__value__)}
+
+
+class FailureDetail(TypedDict):
+    type: str
+    sqliteErrorcode: NotRequired[int]
+    sqliteErrorname: NotRequired[str]
 
 
 def _clock() -> float:
@@ -338,7 +344,9 @@ class ControlledRun:
             with (self.directory / "failed").open("x") as stream:
                 self._marker_failure = local_event
                 stream.write(local_reason)
-            self._write_detail(cause if cause is not None else local_event)
+            detailed = cause if cause is not None else local_event
+            if detailed is not None:
+                self._write_detail(detailed)
         except FileExistsError:
             # An existing marker already closes admission; do not replace it.
             pass
@@ -346,10 +354,10 @@ class ControlledRun:
             # This participant still refuses; inability to publish never authorizes traffic.
             raise RequestPolicyError("accounting") from None
 
-    def _write_detail(self, cause: BaseException | None) -> None:
+    def _write_detail(self, cause: BaseException) -> None:
         # Diagnostic only: names the exception class and SQLite code, never a message or path,
         # and is never read on a fail-closed path, so the reason marker stays the authority.
-        detail: dict[str, str | int] = {"type": type(cause).__name__}
+        detail: FailureDetail = {"type": type(cause).__name__}
         code = getattr(cause, "sqlite_errorcode", None)
         name = getattr(cause, "sqlite_errorname", None)
         if isinstance(code, int) and isinstance(name, str):
