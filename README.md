@@ -123,6 +123,9 @@ UAT/PROD administration. UAT has not run.
 - **Working on this repository**: [CONTRIBUTING.md](CONTRIBUTING.md) for the commands, standards
   and gates; [ARCHITECTURE.md](ARCHITECTURE.md) for how the server is built.
   Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+- **Operators configuring stable identity**: the
+  [request identification guide](docs/request-identification.md) covers local provisioning and
+  lifecycle; the current utilities do not label requests.
 
 ## License
 

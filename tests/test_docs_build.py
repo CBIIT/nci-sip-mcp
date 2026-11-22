@@ -3,12 +3,20 @@
 import json
 import re
 import shutil
+import tomllib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from scripts.docs_site import build_identity, build_site, main, source_identity
+from scripts.docs_site import (
+    build_identity,
+    build_site,
+    main,
+    navigation_pages,
+    source_identity,
+    stage_pages,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -219,3 +227,44 @@ custom_dir = "overrides"
         ):
             main()
         self.assertEqual((self.output / "human.txt").read_text(), "Keep")
+
+    def test_request_identification_page_is_staged_and_published_from_public_navigation(self):
+        source_config = ROOT / "docs/site-assets/zensical.toml"
+        navigation = tomllib.loads(source_config.read_text(encoding="utf-8"))["project"]["nav"]
+        pages = navigation_pages(navigation)
+        page = "docs/request-identification.md"
+        self.assertEqual(
+            pages.count(page),
+            1,
+            "production navigation must include the request-identification page exactly once",
+        )
+
+        source = ROOT / page
+        self.assertTrue(source.is_file())
+        fixture_source = self.root / page
+        fixture_source.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, fixture_source)
+        guide = "docs/local-guide.md"
+        self.assertEqual(pages.count(guide), 1)
+        self.assertRegex((ROOT / guide).read_text(encoding="utf-8"), r"(?m)^## Server$")
+        (self.root / guide).write_text("# Run locally\n\n## Server\n\nStub.\n")
+        staged = self.root / "staged"
+        stage_pages(self.root, staged, [page, guide])
+        self.assertEqual((staged / page).read_bytes(), source.read_bytes())
+        self.assertEqual((staged / guide).read_bytes(), (self.root / guide).read_bytes())
+
+        (self.root / "README.md").write_text("# Public overview\n")
+        config = self.config().replace(
+            'nav = [{ Overview = "README.md" }, { Story = "docs/story.md" }]',
+            'nav = [{ Overview = "README.md" }, '
+            '{ "Run locally" = "docs/local-guide.md" }, '
+            '{ "Request identification" = "docs/request-identification.md" }]',
+        )
+        (self.root / "docs/site-assets/zensical.toml").write_text(config)
+        self.build()
+        published_page = self.output / "docs/request-identification.html"
+        self.assertTrue(published_page.is_file())
+        self.assertIn(
+            'href="./docs/request-identification.html"', (self.output / "index.html").read_text()
+        )
+        self.assertIn("Stable installation identity", published_page.read_text())
