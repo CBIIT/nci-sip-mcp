@@ -82,6 +82,11 @@ records request accounting and whether resource observation completed.
 Accounting snapshots read identity, counters and related rows in one committed read
 transaction without reserving the writer. Admissions, mutations and receipts retain atomic
 write transactions; exclusive/commit contention and storage failures still fail closed.
+The ledger runs in WAL mode, so a writer's commit never refuses a snapshot reader. Request-path
+writers wait at most 0.1 s for the writer lock; the supervisor heartbeat waits at most 1.0 s,
+derived from the staleness window (2.0 s less the 1.0 s pulse), not measured. A refusal latches the
+`failed` marker holding exactly its reason; a sibling `failed.detail` records the exception type
+and SQLite error code for diagnosis and is never read on a fail-closed path.
 
 Controlled transport normalizes expected failures without retaining raw exception chains,
 including TLS certificate details. Cleanup failures retain sanitized initiating and cleanup
