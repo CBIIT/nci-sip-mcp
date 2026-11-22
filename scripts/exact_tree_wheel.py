@@ -60,7 +60,7 @@ def exact_tree_wheel(root: Path, dist_dir: Path, subdir: str = ".") -> Path:
             ],
             check=False,
             capture_output=True,
-            env={**os.environ, "PIP_CONFIG_FILE": os.devnull, "PIP_NO_INDEX": "1"},
+            env={**os.environ, "PIP_CONFIG_FILE": os.devnull},
         )
         if built.returncode != 0:
             raise WheelBuildError(built.returncode, built.args, built.stdout, built.stderr)
