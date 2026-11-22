@@ -38,10 +38,6 @@ BUSY_SECONDS = 0.1
 KEY_BYTES = 32
 # Observe cooperative owner loss within two seconds, allowing one missed one-second pulse.
 STALE_SECONDS = 2.0
-# The supervisor thread, not the request path, writes the heartbeat. Waiting longer than the
-# staleness window minus one pulse would stamp an already-stale value. 1.0 s is derived from
-# that window (STALE_SECONDS - PULSE_SECONDS), not measured; the request path keeps BUSY_SECONDS.
-HEARTBEAT_BUSY_SECONDS = 1.0
 STATES: dict[str, LedgerState] = {value: value for value in get_args(LedgerState.__value__)}
 REASONS: dict[str, PolicyReason] = {value: value for value in get_args(PolicyReason.__value__)}
 
@@ -304,9 +300,7 @@ class ControlledRun:
         return key
 
     @contextmanager
-    def _connection(
-        self, *, write: bool = True, busy: float = BUSY_SECONDS
-    ) -> Iterator[sqlite3.Connection]:
+    def _connection(self, *, write: bool = True) -> Iterator[sqlite3.Connection]:
         connection = None
         try:
             try:
@@ -318,7 +312,7 @@ class ControlledRun:
             connection = sqlite3.connect(
                 (self.directory / "ledger.sqlite").as_uri() + "?mode=rw",
                 uri=True,
-                timeout=max(0, min(busy, remaining)),
+                timeout=max(0, min(BUSY_SECONDS, remaining)),
             )
             connection.row_factory = sqlite3.Row
             with connection:
@@ -437,7 +431,7 @@ class ControlledRun:
             )
 
     def heartbeat(self) -> None:
-        with self._connection(busy=HEARTBEAT_BUSY_SECONDS) as connection:
+        with self._connection() as connection:
             if not self._owner:
                 self._deny("authorization")
             if connection.execute("SELECT state FROM run").fetchone()[0] in ("closed", "failed"):
