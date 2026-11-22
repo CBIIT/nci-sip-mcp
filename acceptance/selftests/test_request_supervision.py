@@ -513,6 +513,51 @@ def test_stale_owner_cannot_revive_admission(tmp_path, monkeypatch):
     assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "failed"
 
 
+def run_heartbeat_against_a_held_writer(owner, monkeypatch, outcome):
+    """Hold the writer lock until the heartbeat has waited longer than the request-path bound."""
+    ledger = owner.run.directory / "ledger.sqlite"
+    entered = threading.Event()
+    connect = sqlite3.connect
+
+    def noting_connect(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        if threading.current_thread() is not threading.main_thread():
+            entered.set()
+        return connection
+
+    def heartbeat():
+        try:
+            owner.run.heartbeat()
+        except RequestPolicyError as error:
+            outcome.append(error)
+
+    with closing(connect(ledger)) as holder, closing(connect(ledger, timeout=0.15)) as probe:
+        monkeypatch.setattr(sqlite3, "connect", noting_connect)
+        holder.execute("BEGIN IMMEDIATE")
+        worker = threading.Thread(target=heartbeat)
+        worker.start()
+        try:
+            assert entered.wait(10)
+            # The probe's 0.15 s wait outlasts the 0.1 s request-path bound.
+            with pytest.raises(sqlite3.OperationalError):
+                probe.execute("BEGIN IMMEDIATE")
+        finally:
+            holder.rollback()
+            worker.join(10)
+    assert not worker.is_alive()
+
+
+def test_heartbeat_waits_out_a_writer_lock_beyond_the_request_path_bound(tmp_path, monkeypatch):
+    monkeypatch.setattr(request_supervision, "PULSE_SECONDS", 3600)
+    owner = supervisor(tmp_path)
+    outcome = []
+    with owner:
+        run_heartbeat_against_a_held_writer(owner, monkeypatch, outcome)
+        assert outcome == []
+        assert owner.run.snapshot().failure is None
+        assert not (owner.run.directory / "failed").exists()
+
+
 @pytest.mark.parametrize("elapsed", [0, 1.5, 2])
 def test_heartbeat_refresh_preserves_inclusive_freshness_window(tmp_path, monkeypatch, elapsed):
     owner = supervisor(tmp_path)
