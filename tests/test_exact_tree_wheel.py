@@ -103,3 +103,20 @@ class ExactTreeWheelTest(unittest.TestCase):
 
         self.assertIn("inner_pkg/__init__.py", names)
         self.assertNotIn("inner_pkg/secret.py", names)
+
+    def test_a_failed_build_reports_pips_error(self):
+        (self.root / "pyproject.toml").write_text("not [valid toml", encoding="utf-8")
+
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            self.build()
+
+        stderr = raised.exception.stderr.decode()
+        self.assertIn("TOMLDecodeError", stderr)
+        self.assertIn(stderr.strip(), str(raised.exception))
+
+    def test_a_non_empty_dist_dir_is_refused(self):
+        self.dist.mkdir()
+        (self.dist / "stale-1.0-py3-none-any.whl").write_bytes(b"")
+
+        with self.assertRaisesRegex(ValueError, "dist_dir must be empty"):
+            self.build()
