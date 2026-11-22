@@ -3,8 +3,11 @@
 import contextlib
 import io
 import os
+import runpy
+import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 from uuid import UUID
@@ -152,3 +155,38 @@ class AcceptanceIdentityMainTest(unittest.TestCase):
                 run("show", configured="bad")
 
             self.assertEqual(list(home.iterdir()), [])
+
+    def test_a_missing_command_is_a_usage_error(self):
+        err = io.StringIO()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            contextlib.redirect_stderr(err),
+            self.assertRaises(SystemExit) as refused,
+        ):
+            main([])
+
+        self.assertEqual(refused.exception.code, 2)
+        self.assertIn("usage:", err.getvalue())
+
+    def run_as_script(self, command, environment):
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(sys, "argv", ["identity", command]),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            contextlib.redirect_stderr(io.StringIO()),
+            warnings.catch_warnings(),
+            self.assertRaises(SystemExit) as exited,
+        ):
+            warnings.simplefilter("ignore", RuntimeWarning)
+            runpy.run_module("nci_sip_acceptance.traffic_identity", run_name="__main__")
+        return exited.exception.code, out.getvalue()
+
+    def test_running_the_module_exits_with_the_command_status(self):
+        generated = self.run_as_script("generate", {})
+        refused = self.run_as_script("show", {})
+        shown = self.run_as_script("show", {INSTALLATION_ID_ENV: TOKEN})
+
+        self.assertEqual(generated[0], 0)
+        self.assertRegex(generated[1], r"^[0-9a-f]{32}\n$")
+        self.assertEqual(refused[0], 1)
+        self.assertEqual(shown[0], 0)

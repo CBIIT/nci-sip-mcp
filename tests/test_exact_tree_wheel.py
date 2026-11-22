@@ -1,10 +1,12 @@
 """Smoke wheels contain the working tree's bytes, committed or not."""
 
+import os
 import subprocess
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 PYPROJECT = (
     '[build-system]\nrequires = ["pdm-backend>=2.4"]\nbuild-backend = "pdm.backend"\n'
@@ -120,3 +122,24 @@ class ExactTreeWheelTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "dist_dir must be empty"):
             self.build()
+
+    def test_an_existing_empty_dist_dir_is_accepted(self):
+        self.dist.mkdir()
+
+        self.assertEqual(self.built_source(), "VALUE = 'committed'\n")
+
+    def test_a_git_failure_is_raised_as_such(self):
+        self.root = self.root.parent / "not-a-repository"
+        self.root.mkdir()
+
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            self.build()
+
+        self.assertEqual(raised.exception.cmd[:3], ["git", "-C", str(self.root)])
+
+    def test_the_callers_pip_configuration_does_not_affect_the_build(self):
+        configuration = self.root.parent / "pip.conf"
+        configuration.write_text("[global\nnot a valid pip configuration\n")
+
+        with patch.dict(os.environ, {"PIP_CONFIG_FILE": str(configuration)}):
+            self.assertEqual(self.built_source(), "VALUE = 'committed'\n")

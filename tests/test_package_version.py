@@ -39,8 +39,11 @@ class PackageVersionTest(unittest.TestCase):
     def test_corrupt_metadata_fails_a_reload_and_leaves_no_stale_version(self):
         self.reload_with(lambda name: "1.2.3")
 
-        with self.assertRaises(UnicodeDecodeError):
-            self.reload_with(lambda name: (_ for _ in ()).throw(BAD))
+        with (
+            patch("importlib.metadata.version", side_effect=BAD),
+            self.assertRaises(UnicodeDecodeError),
+        ):
+            importlib.reload(nci_sip_mcp)
 
         self.assertNotIn("__version__", vars(nci_sip_mcp))
 
