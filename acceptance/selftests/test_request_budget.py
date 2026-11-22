@@ -471,6 +471,20 @@ def test_failed_marker_detail_names_a_non_sqlite_cause_without_a_code(tmp_path):
         }
 
 
+def test_unwritable_failure_detail_still_latches_the_reason(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        (run.directory / "failed.detail").mkdir()
+        original = (run.directory / "key").read_bytes()
+        (run.directory / "key").write_bytes(b"short")
+        try:
+            with pytest.raises(RequestPolicyError) as refused:
+                run.check_wait(0)
+        finally:
+            (run.directory / "key").write_bytes(original)
+        assert refused.value.reason == "authorization"
+        assert (run.directory / "failed").read_text() == "authorization"
+
+
 def test_ledger_uses_write_ahead_logging(tmp_path):
     with (
         tiny_run(tmp_path) as (run, _grant, _limits, _upstream),
