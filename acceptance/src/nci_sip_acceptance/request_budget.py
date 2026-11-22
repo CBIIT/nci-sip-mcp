@@ -12,7 +12,7 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Self, get_args
@@ -310,19 +310,26 @@ class ControlledRun:
                 connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
                 self._identity(connection)
                 yield connection
-        except sqlite3.Error, OSError, ValueError, TypeError, OverflowError:
-            self._deny("accounting")
+        except (sqlite3.Error, OSError, ValueError, TypeError, OverflowError) as error:
+            self._deny("accounting", cause=error)
         finally:
             if connection is not None:
                 connection.close()
 
-    def _mark_failed(self, reason: PolicyReason, *, event: BaseException | None = None) -> None:
+    def _mark_failed(
+        self,
+        reason: PolicyReason,
+        *,
+        event: BaseException | None = None,
+        cause: BaseException | None = None,
+    ) -> None:
         # One built-in string key atomically latches the immutable pair; never check then assign.
         local_reason, local_event = self._local_failure.setdefault("first", (reason, event))
         try:
             with (self.directory / "failed").open("x") as stream:
                 self._marker_failure = local_event
                 stream.write(local_reason)
+            self._write_detail(cause if cause is not None else local_event)
         except FileExistsError:
             # An existing marker already closes admission; do not replace it.
             pass
@@ -330,9 +337,21 @@ class ControlledRun:
             # This participant still refuses; inability to publish never authorizes traffic.
             raise RequestPolicyError("accounting") from None
 
-    def _deny(self, reason: PolicyReason) -> NoReturn:
+    def _write_detail(self, cause: BaseException | None) -> None:
+        # Diagnostic only: names the exception class and SQLite code, never a message or path,
+        # and is never read on a fail-closed path, so the reason marker stays the authority.
+        detail: dict[str, str | int] = {"type": type(cause).__name__}
+        code = getattr(cause, "sqlite_errorcode", None)
+        name = getattr(cause, "sqlite_errorname", None)
+        if isinstance(code, int) and isinstance(name, str):
+            detail["sqliteErrorcode"] = code
+            detail["sqliteErrorname"] = name
+        with suppress(OSError):
+            (self.directory / "failed.detail").write_text(json.dumps(detail))
+
+    def _deny(self, reason: PolicyReason, *, cause: BaseException | None = None) -> NoReturn:
         error = RequestPolicyError(reason)
-        self._mark_failed(reason, event=error)
+        self._mark_failed(reason, event=error, cause=cause)
         raise error from None
 
     def _count(self, value: object) -> int:
