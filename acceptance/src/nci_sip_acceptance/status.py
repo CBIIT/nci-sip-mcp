@@ -197,6 +197,12 @@ def _entry_tools(entry: dict[str, Any], requirements: dict[str, Any]) -> tuple[s
     return owners, basis & TOOLS.keys()
 
 
+STAGING_CREDENTIAL_CONTEXT = (
+    "credential issued for staging; protected access unverified "
+    "([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383))"
+)
+
+
 def skip_contexts() -> dict[str, str]:
     """Current blocker context, never a reconstruction of a historical skip mechanism.
 
@@ -211,7 +217,7 @@ def skip_contexts() -> dict[str, str]:
         link = f"[{entry['id']}](docs/upstream/{entry['team']}.md#{entry['id']})"
         owners, basis = _entry_tools(entry, requirements)
         if entry["id"] == "cadsr-access":
-            credentials.update(dict.fromkeys(owners, f"credentials not issued ({link})"))
+            credentials.update(dict.fromkeys(owners, f"{STAGING_CREDENTIAL_CONTEXT} ({link})"))
         else:
             for name in owners | basis:
                 gaps.setdefault(name, []).append(link)
