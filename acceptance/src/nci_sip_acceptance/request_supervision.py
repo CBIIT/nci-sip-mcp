@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 from collections.abc import Callable, Iterable
@@ -271,10 +272,17 @@ class SupervisedRun:
         errors.extend(self._collect([lambda: self._finalize(not errors)]))
         if errors:
             self._state = "failed"
+            self._note_failure_detail(errors[0])
         if len(errors) > (initiating is not None):
             if len(errors) == 1:
                 raise errors[0] from None
             raise BaseExceptionGroup("Controlled run failed.", errors) from None
+
+    def _note_failure_detail(self, error: BaseException) -> None:
+        # The final failure is what CI prints; the sibling file dies with the run directory.
+        detail = self.run.failure_detail()
+        if detail is not None:
+            error.add_note(f"ledger failure detail: {json.dumps(detail)}")
 
     def _cleanup(self, errors: list[BaseException], *, terminal: bool) -> None:
         # Capture once before closure; mode can become visible atomically with a racing offer.

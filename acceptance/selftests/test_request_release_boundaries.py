@@ -196,12 +196,28 @@ def test_selected_content_refuses_undeclared_forms(tmp_path, path, params):
             return client(receiver, owner).get_json(path, params)
 
         result = invoke(owner, read)
-        assert result["error"]["code"] == "upstream_unavailable"
-        assert receiver.contacts == 1 and len(receiver.requests) == 1
+        # Diagnostics only (#545): name the refusal and the latched ledger cause in a failure
+        # message. A diagnostic read that fails is reported, never raised over the assertion.
+        why = _diagnosis(result, owner)
+        assert result["error"]["code"] == "upstream_unavailable", why
+        assert receiver.contacts == 1 and len(receiver.requests) == 1, why
         snapshot = owner.run.snapshot()
-        assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (1, 1, 1)
-        assert bindings(owner) == [("ncit", "monthly", "26.09d", "ncit_26.09e")]
-        assert owner.snapshot()["state"] == "failed"
+        assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (1, 1, 1), why
+        assert bindings(owner) == [("ncit", "monthly", "26.09d", "ncit_26.09e")], why
+        assert owner.snapshot()["state"] == "failed", why
+
+
+def _diagnosis(result, owner):
+    parts = [f"error={result.get('error')!r}"]
+    for name, read in (
+        ("latched", lambda: owner.run.snapshot().failure),
+        ("detail", owner.run.failure_detail),
+    ):
+        try:
+            parts.append(f"{name}={read()!r}")
+        except Exception as error:  # noqa: BLE001 - a failed diagnostic read is itself reported
+            parts.append(f"{name}=<unreadable: {type(error).__name__}>")
+    return "; ".join(parts)
 
 
 def test_valid_segment_without_controller_selection_never_opens_content(tmp_path):

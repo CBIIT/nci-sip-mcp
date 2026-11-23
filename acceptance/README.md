@@ -82,6 +82,11 @@ records request accounting and whether resource observation completed.
 Accounting snapshots read identity, counters and related rows in one committed read
 transaction without reserving the writer. Admissions, mutations and receipts retain atomic
 write transactions; exclusive/commit contention and storage failures still fail closed.
+A request-path write waits at most 0.1 s for the writer lock and then
+fails closed. A refusal
+latches the `failed` marker holding exactly its reason; a sibling `failed.detail` records a closed
+category (`sqlite` or `other`) and, for SQLite, a validated error code and name. It is never read
+on a fail-closed path, and the supervisor's final failure prints it as a note.
 
 Controlled transport normalizes expected failures without retaining raw exception chains,
 including TLS certificate details. Cleanup failures retain sanitized initiating and cleanup

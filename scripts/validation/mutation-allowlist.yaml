@@ -702,11 +702,12 @@
 
 # Reviewer-approved #468 equivalence: issuecomment-6737964204; SURVIVED at 7b74cc0.
 # Reviewed #507 rekey: issuecomment-6958389395; only the existing host-conditional URI site.
+# Reviewed #496 rekey: issuecomment-7105163280; except-clause change only; unchanged uri=True site and predicate.
 - file: "acceptance/src/nci_sip_acceptance/request_budget.py"
   qualname: "ControlledRun._connection"
   operator: "boolean:literal"
   site: "/body/1/body/1/value/0/keywords/0/value/0"
-  context: "e0f919dab3e08b75aea847f9f7c1c02856dd9a1dec0df6fc6f8e9908fc7cca8f"
+  context: "2038cdd72cc4e2b1eb282e8622c029fda46919917aae4818c3086478035e9278"
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Conditional host equivalence: when SQLite is compiled with USE_URI, URI parsing already applies even with uri=False; native positive/missing-mode=rw controls are identical. Keep uri=True for portability: on a build where this flag matters, existing successful-run and missing-state controls kill this mutation. This is not a universal URI equivalence."
