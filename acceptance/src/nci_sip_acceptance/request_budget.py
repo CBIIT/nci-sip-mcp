@@ -181,9 +181,6 @@ class ControlledRun:
 
     def _initialize(self, key: bytes) -> None:
         with closing(sqlite3.connect(self.directory / "ledger.sqlite")) as connection, connection:
-            # Persistent in the file: ordinary concurrent reads then do not block on a writer's
-            # commit. Writer-versus-writer contention and SQLite's recovery-time BUSY remain.
-            connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript("""
                 CREATE TABLE run (
                     id TEXT, policy TEXT, binding BLOB, started REAL, state TEXT,
