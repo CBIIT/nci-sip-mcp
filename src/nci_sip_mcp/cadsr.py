@@ -9,9 +9,10 @@ from functools import partial
 from html.parser import HTMLParser
 from http import HTTPStatus
 from typing import Any
+from urllib.parse import urlsplit
 
 from .audit import secrets
-from .config import Settings
+from .config import CADSR_STAGING_ORIGIN, Settings
 from .errors import PlatformError
 from .http_client import HttpClient, UpstreamRejectedError
 from .release import RegistryMetadataError, RegistryState, registry_state
@@ -203,6 +204,16 @@ def search_request(query: str, size: int, pin: str | None) -> tuple[str, dict[st
     }
 
 
+def _is_staging(base_url: str) -> bool:
+    """Whether `base_url` addresses the staging origin: scheme, host and effective port."""
+
+    def origin(url: str) -> tuple[str, str | None, int | None]:
+        parts = urlsplit(url)
+        return parts.scheme, parts.hostname, parts.port or 443
+
+    return origin(base_url) == origin(CADSR_STAGING_ORIGIN)
+
+
 class CaDSRClient:
     def __init__(self, settings: Settings) -> None:
         credential = settings.cadsr_credential
@@ -211,6 +222,7 @@ class CaDSRClient:
             if credential
             else {}
         )
+        hint = "check the NIH VPN for caDSR staging" if _is_staging(settings.cadsr_base_url) else ""
         transport = partial(
             HttpClient,
             label="CADSR",
@@ -224,12 +236,14 @@ class CaDSRClient:
             timeout_seconds=settings.timeout_seconds,
             credentials=headers,
             redact_values=secrets(None, credential),
+            unresolved_hint=hint,
         )
         self.match_http = transport(
             settings.cadsr_base_url,
             timeout_seconds=settings.match_timeout_seconds,
             credentials=headers,
             redact_values=secrets(None, credential),
+            unresolved_hint=hint,
         )
         self.export_http = transport(
             settings.cadsr_ftp_url,
