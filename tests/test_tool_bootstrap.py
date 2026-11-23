@@ -155,13 +155,17 @@ class BootstrapPipEvidenceTest(unittest.TestCase):
             (None, "Missing"),
             ("", "Incomplete"),
             ("unrelated installation details\n", "Incomplete"),
-            ("time Using pip 26.2.2 from /tool/pip (python 3.14)\n", "Incomplete"),
         ):
             with self.subTest(content=content):
                 result = self.execute(content)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stderr, reason + " bootstrap pip version evidence\n")
                 self.assertEqual(result.stdout, "")
+
+    def test_one_record_from_each_actual_invocation_is_enough(self):
+        result = self.execute("time Using pip 26.2.2 from /tool/pip (python 3.14)\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '["26.2.2"]\n')
 
     def test_unrecognized_pip_evidence_is_not_silently_dropped(self):
         result = self.execute(
