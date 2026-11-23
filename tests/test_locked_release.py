@@ -208,8 +208,10 @@ ln -sf ../venv/bin/pdm "$PDM_HOME/bin/pdm"
 echo "$PDM_HOME/bin" >> "$GITHUB_PATH"
 """  # noqa: E501
 LD_PRELOAD_RUN = 'echo "LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1" >> "$GITHUB_ENV"'
-CACHE_PATHS_RUN = """echo "cache-dir=$(pdm config cache_dir)" >> "$GITHUB_OUTPUT"
-echo "venv-location=$(pdm config venv.location)" >> "$GITHUB_OUTPUT"
+CACHE_PATHS_RUN = """cache_dir="$(pdm config cache_dir)"
+venv_location="$(pdm config venv.location)"
+echo "cache-dir=$cache_dir" >> "$GITHUB_OUTPUT"
+echo "venv-location=$venv_location" >> "$GITHUB_OUTPUT"
 """
 
 
