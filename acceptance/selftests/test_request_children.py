@@ -78,8 +78,8 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
         raise close_failure
 
     def snapshot():
-        # WAL readers are never refused: the terminal read fails as a real writer-versus-writer
-        # SQLITE_BUSY refusal, then the lock is released and later reads recover.
+        # The terminal read is refused by a real writer-versus-writer SQLITE_BUSY while the
+        # writer lock is held; the lock is then released and later reads recover.
         try:
             return actual_check_wait(0)
         except RequestPolicyError as error:
