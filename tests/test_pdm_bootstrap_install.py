@@ -136,3 +136,39 @@ class BootstrapInstallTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(published, [])
                 self.assertFalse(executable)
+
+
+class CachePathLookupTest(unittest.TestCase):
+    """The step publishes both paths from `pdm config`, or fails without publishing any."""
+
+    def run_step(self, config_exit):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake = root / "bin/pdm"
+            fake.parent.mkdir()
+            fake.write_text(
+                f'#!/bin/sh\n[ "$2" = cache_dir ] && echo /cache && exit {config_exit}\n'
+                f"echo /venvs\nexit {config_exit}\n"
+            )
+            fake.chmod(0o700)
+            output = root / "github_output"
+            output.write_text("")
+            result = subprocess.run(  # noqa: S603 - the actual repository-owned step with a fake pdm.
+                ["/bin/bash", "-euo", "pipefail", "-c", step("Locate PDM caches")["run"]],
+                env={"PATH": f"{fake.parent}:/usr/bin:/bin", "GITHUB_OUTPUT": str(output)},
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            return result, output.read_text()
+
+    def test_both_paths_are_published_from_pdm_config(self):
+        result, published = self.run_step(0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(published, "cache-dir=/cache\nvenv-location=/venvs\n")
+
+    def test_a_failing_pdm_config_fails_the_step_and_publishes_nothing(self):
+        result, published = self.run_step(3)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(published, "")
