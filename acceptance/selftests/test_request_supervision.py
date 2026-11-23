@@ -1666,6 +1666,44 @@ def test_competing_local_failure_keeps_first_completed_latch(tmp_path, monkeypat
     assert not owner._observer.is_alive()
 
 
+def test_competing_failure_writes_the_detail_of_the_first_latched_cause(tmp_path):
+    run = request_budget.ControlledRun.create(authorization(), tmp_path)
+    run.open()
+    arrived, release = threading.Event(), threading.Event()
+
+    def actor():
+        with pytest.raises(RequestPolicyError):
+            run.check_wait(float("nan"))
+
+    thread = threading.Thread(target=actor)
+    source, first = inspect.getsourcelines(run._mark_failed)
+    attempt = next(
+        node
+        for node in ast.parse(textwrap.dedent("".join(source))).body[0].body
+        if isinstance(node, ast.Try)
+    )
+    line = first + attempt.body[0].lineno - 1
+    with pause_handoff(run._mark_failed, "before", thread, arrived, release, line=line):
+        thread.start()
+        try:
+            assert arrived.wait(3), "The actor did not latch its first failure"
+            with (
+                closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker,
+                blocker,
+                pytest.raises(RequestPolicyError) as inner,
+            ):
+                blocker.execute("BEGIN IMMEDIATE")
+                run.check_wait(0)
+            assert inner.value.reason == "accounting"
+        finally:
+            release.set()
+            thread.join(timeout=3)
+            assert not thread.is_alive()
+    assert run.snapshot().failure == "authorization"
+    assert run.failure_detail() == {"category": "other"}
+    run.close()
+
+
 def test_marker_interruption_keeps_initiating_close_failure(tmp_path, monkeypatch):
     owner = supervisor(tmp_path)
     active = threading.Event()
