@@ -9,7 +9,6 @@ import math
 import os
 import re
 import sqlite3
-import sys
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -366,8 +365,8 @@ class ControlledRun:
                 connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
                 self._identity(connection)
                 yield connection
-        except sqlite3.Error, OSError, ValueError, TypeError, OverflowError:
-            self._deny("accounting")
+        except (sqlite3.Error, OSError, ValueError, TypeError, OverflowError) as error:
+            self._deny("accounting", cause=error)
         finally:
             if connection is not None:
                 connection.close()
@@ -377,6 +376,7 @@ class ControlledRun:
         reason: PolicyReason,
         *,
         event: BaseException | None = None,
+        cause: BaseException | None = None,
     ) -> None:
         # One built-in string key atomically latches the immutable pair; never check then assign.
         local_reason, local_event = self._local_failure.setdefault("first", (reason, event))
@@ -384,7 +384,7 @@ class ControlledRun:
             with (self.directory / "failed").open("x") as stream:
                 self._marker_failure = local_event
                 stream.write(local_reason)
-            self._write_detail()
+            self._write_detail(cause)
         except FileExistsError:
             # An existing marker already closes admission; do not replace it.
             pass
@@ -392,17 +392,16 @@ class ControlledRun:
             # This participant still refuses; inability to publish never authorizes traffic.
             raise RequestPolicyError("accounting") from None
 
-    def _write_detail(self) -> None:
+    def _write_detail(self, cause: BaseException | None) -> None:
         # Diagnostic only, never read on a fail-closed path and never replacing the reason:
         # a closed category and a validated SQLite code, no message, class name or path.
-        # The exception being handled is the cause when a ledger call is denied from its handler.
-        detail = json.dumps(_failure_detail(sys.exception()))
+        detail = json.dumps(_failure_detail(cause))
         with suppress(OSError), (self.directory / "failed.detail").open("x") as stream:
             stream.write(detail)
 
-    def _deny(self, reason: PolicyReason) -> NoReturn:
+    def _deny(self, reason: PolicyReason, *, cause: BaseException | None = None) -> NoReturn:
         error = RequestPolicyError(reason)
-        self._mark_failed(reason, event=error)
+        self._mark_failed(reason, event=error, cause=cause)
         raise error from None
 
     def failure_detail(self) -> FailureDetail | None:
