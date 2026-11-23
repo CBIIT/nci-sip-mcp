@@ -506,7 +506,14 @@ def test_failed_detail_is_a_closed_category_without_private_text(
 
 @pytest.mark.parametrize(
     "code,name",
-    [(999, "SQLITE_BUSY"), (True, "SQLITE_BUSY"), (5, PRIVATE_CANARY), (5, None), (None, None)],
+    [
+        (999, "SQLITE_BUSY"),
+        (999, None),
+        (True, "SQLITE_BUSY"),
+        (5, PRIVATE_CANARY),
+        (5, None),
+        (None, None),
+    ],
 )
 def test_failed_detail_names_a_sqlite_code_only_when_both_parts_are_well_formed(
     tmp_path, monkeypatch, code, name
