@@ -1044,9 +1044,11 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
     barrier = threading.Barrier(2)
     original = owner._registered
     results = []
+    arrivals = []
 
     def competing(process, participant):
         registered = original(process, participant)
+        arrivals.append(participant)
         barrier.wait(timeout=3)
         return registered
 
@@ -1058,9 +1060,11 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
         def register(participant):
             try:
                 owner.register_child(child, participant=participant, role="service")
-                results.append("accepted")
-            except RequestPolicyError:
-                results.append("rejected")
+                results.append(("accepted", participant))
+            except RequestPolicyError as error:
+                results.append(("rejected", error.reason))
+            except Exception as error:  # noqa: BLE001 - record it so the outcome check fails visibly.
+                results.append(("error", type(error).__name__))
 
         failure = None
         try:
@@ -1075,8 +1079,13 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
                     assert not thread.is_alive()
         except (RequestPolicyError, BaseExceptionGroup) as error:
             failure = error
-        assert sorted(results) == ["accepted", "rejected"]
-        assert failure is None
+        try:
+            latched = (owner.run.snapshot().failure, owner.run.failure_detail())
+        except Exception as error:  # noqa: BLE001 - a diagnostic read must not mask the assertion.
+            latched = f"unreadable: {type(error).__name__}"
+        diagnostics = f"outcomes={results} arrivals={arrivals} latched={latched}"
+        assert sorted(kind for kind, _ in results) == ["accepted", "rejected"], diagnostics
+        assert failure is None, diagnostics
         assert child.poll() is not None and child.stdin.closed
 
 
