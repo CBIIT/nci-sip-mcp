@@ -147,7 +147,9 @@ class ControlledRun:
         if not math.isfinite(self.started + authorization.limits.seconds):
             raise RequestPolicyError("accounting") from None
         self._owner = False
-        self._local_failure: dict[str, tuple[PolicyReason, BaseException | None]] = {}
+        self._local_failure: dict[
+            str, tuple[PolicyReason, BaseException | None, BaseException | None]
+        ] = {}
         self._marker_failure: BaseException | None = None
 
     @classmethod
@@ -378,13 +380,15 @@ class ControlledRun:
         event: BaseException | None = None,
         cause: BaseException | None = None,
     ) -> None:
-        # One built-in string key atomically latches the immutable pair; never check then assign.
-        local_reason, local_event = self._local_failure.setdefault("first", (reason, event))
+        # One built-in string key atomically latches the immutable triple; never check then assign.
+        local_reason, local_event, local_cause = self._local_failure.setdefault(
+            "first", (reason, event, cause)
+        )
         try:
             with (self.directory / "failed").open("x") as stream:
                 self._marker_failure = local_event
                 stream.write(local_reason)
-            self._write_detail(cause)
+            self._write_detail(local_cause)
         except FileExistsError:
             # An existing marker already closes admission; do not replace it.
             pass
@@ -423,7 +427,8 @@ class ControlledRun:
         try:
             text = (self.directory / "failed").read_text()
         except FileNotFoundError:
-            return self._local_failure.get("first", (None, None))
+            reason, event, _ = self._local_failure.get("first", (None, None, None))
+            return reason, event
         if text not in REASONS:
             self._deny("accounting")
         return REASONS[text], self._marker_failure
