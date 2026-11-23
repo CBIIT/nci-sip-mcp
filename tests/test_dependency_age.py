@@ -41,6 +41,7 @@ def lock_fixture(root):
         "pdm.lock": '[[package]]\nname = "certifi"\nversion = "2026.10.19"\n',
         "container/requirements-amd64.txt": "demo==1\n",
         "container/companion-requirements.txt": "demo==1\n",
+        "container/pdm-bootstrap-requirements.txt": "demo==1\n",
         "docs/site-assets/package-lock.json": json.dumps(
             {
                 "packages": {
@@ -185,6 +186,9 @@ class DependencyAgeTest(unittest.TestCase):
             requirement = "other_pkg==2.0 \\\n+    --hash=sha256:a\n"
             for name in ("requirements-amd64.txt", "companion-requirements.txt"):
                 (container / name).write_text(requirement, encoding="utf-8")
+            (container / "pdm-bootstrap-requirements.txt").write_text(
+                "bootstrap_pkg==3.0 \\\n    --hash=sha256:a\n", encoding="utf-8"
+            )
             assets = root / "docs" / "site-assets"
             assets.mkdir(parents=True)
             (assets / "package-lock.json").write_text(
@@ -206,6 +210,7 @@ class DependencyAgeTest(unittest.TestCase):
                 module.locked_packages(root),
                 [
                     module.Package("npm", "@scope/tool", "3.0"),
+                    module.Package("pypi", "bootstrap-pkg", "3.0"),
                     module.Package("pypi", "other-pkg", "2.0"),
                     module.Package("pypi", "shared-name", "1.0"),
                 ],
@@ -476,6 +481,7 @@ class DependencyAgeTest(unittest.TestCase):
             lock_fixture(root)
             root.joinpath("container/requirements-amd64.txt").write_text("server==1\n")
             root.joinpath("container/companion-requirements.txt").write_text("companion==1\n")
+            root.joinpath("container/pdm-bootstrap-requirements.txt").write_text("bootstrap==1\n")
 
             def fetch(url):
                 uploaded = NOW.isoformat() if young in url else "2026-10-01T00:00:00Z"
@@ -500,6 +506,7 @@ class DependencyAgeTest(unittest.TestCase):
             "pdm.lock: 1 releases checked, 0 exceptions\n"
             "container/requirements-amd64.txt: 1 releases checked, 0 exceptions\n"
             "container/companion-requirements.txt: 1 releases checked, 0 exceptions\n"
+            "container/pdm-bootstrap-requirements.txt: 1 releases checked, 0 exceptions\n"
             "docs/site-assets/package-lock.json: 1 releases checked, 0 exceptions\n",
         )
 
@@ -537,6 +544,7 @@ class DependencyAgeTest(unittest.TestCase):
             "pdm.lock: 1 releases checked, 1 exception (certifi 2026.10.19, GHSA-6q48-6c7w-9gw2)\n"
             "container/requirements-amd64.txt: 2 releases checked, 0 exceptions\n"
             "container/companion-requirements.txt: 1 releases checked, 0 exceptions\n"
+            "container/pdm-bootstrap-requirements.txt: 1 releases checked, 0 exceptions\n"
             "docs/site-assets/package-lock.json: 1 releases checked, 0 exceptions\n",
         )
 
@@ -546,6 +554,7 @@ class DependencyAgeTest(unittest.TestCase):
             "pdm.lock": "package = []\n",
             "container/requirements-amd64.txt": "# no releases\n",
             "container/companion-requirements.txt": "# no releases\n",
+            "container/pdm-bootstrap-requirements.txt": "# no releases\n",
             "docs/site-assets/package-lock.json": '{"packages": {}}',
         }
         for name, contents in empty.items():
