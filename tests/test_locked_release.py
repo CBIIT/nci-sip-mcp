@@ -207,6 +207,7 @@ mkdir -p "$PDM_HOME/bin"
 ln -sf ../venv/bin/pdm "$PDM_HOME/bin/pdm"
 echo "$PDM_HOME/bin" >> "$GITHUB_PATH"
 """  # noqa: E501
+LD_PRELOAD_RUN = 'echo "LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1" >> "$GITHUB_ENV"\n'
 CACHE_PATHS_RUN = """echo "cache-dir=$(pdm config cache_dir)" >> "$GITHUB_OUTPUT"
 echo "venv-location=$(pdm config venv.location)" >> "$GITHUB_OUTPUT"
 """
@@ -317,6 +318,12 @@ class ReleaseWorkflowTest(unittest.TestCase):
                         "uses": "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
                         "id": "py",
                         "with": {"python-version": "3.14"},
+                    },
+                    {
+                        "name": "Preload the compiler runtime",
+                        "if": "runner.os == 'Linux'",
+                        "shell": "bash",
+                        "run": LD_PRELOAD_RUN,
                     },
                     {
                         "name": "Install PDM from hashed requirements",
