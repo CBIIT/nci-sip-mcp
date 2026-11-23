@@ -4,6 +4,7 @@ See fixtures/cadsr/README.md for contract URLs. No fixture is a runtime data sou
 """
 
 import base64
+import itertools
 import json
 import socket
 import ssl
@@ -540,6 +541,10 @@ def dns_failure():
     return socket.gaierror(socket.EAI_NONAME, "synthetic-resolver-detail")
 
 
+def wrapped_dns_failure():
+    return URLError(dns_failure())
+
+
 class AnyTargetPolicy(ScriptedPolicy):
     """Scripted outcomes for whatever origin the client was configured with; nothing is sent."""
 
@@ -552,7 +557,7 @@ class AnyTargetPolicy(ScriptedPolicy):
 class StagingHintTest(unittest.TestCase):
     """The hint is the server's own wording for one case: the staging origin, DNS failure."""
 
-    def run_call(self, base, outcomes, *, export=False, **options):
+    def run_call(self, base, outcomes, *, export=False, matching=False, **options):
         policy = AnyTargetPolicy("", outcomes)
         with using_request_policy(policy):
             client = CaDSRClient(
@@ -563,16 +568,25 @@ class StagingHintTest(unittest.TestCase):
         with self.assertRaises(Exception) as raised:
             if export:
                 client.export_http.get_text("/x")
+            elif matching:
+                client.match_data_element({"entity": "Fixture"}, {})
             else:
                 client.list_contexts()
         with correlated():
             return error_record(raised.exception)["error"], policy
 
     def test_staging_dns_failure_suggests_checking_the_vpn_and_keeps_its_contract(self):
-        for base in (STAGING, "HTTPS://CadsrAPI-Stage.cancer.gov:443"):
-            with self.subTest(base=base):
+        for base, failure, matching in itertools.product(
+            (STAGING, "HTTPS://CadsrAPI-Stage.cancer.gov:443"),
+            (dns_failure, wrapped_dns_failure),
+            (False, True),
+        ):
+            with self.subTest(base=base, failure=failure.__name__, matching=matching):
                 error, policy = self.run_call(
-                    base, [dns_failure()] * 3, cadsr_credential=CREDENTIAL
+                    base,
+                    [failure() for _ in range(3)],
+                    matching=matching,
+                    cadsr_credential=CREDENTIAL,
                 )
                 self.assertEqual(error["code"], "upstream_unavailable")
                 self.assertEqual(error["details"], {"surface": "cadsr", "attempts": 3})
