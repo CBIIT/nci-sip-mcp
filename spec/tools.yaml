@@ -290,6 +290,9 @@ match_data_elements:
     platform does not take, are an invalid request when given. At most 10 entities a call: the
     contract states no maximum, and one entity took 28.9 s (10 September 2026) against a match
     timeout of 45 s.
+    Requires a caDSR credential accepted by the configured endpoint; the credential issued to
+    this project is for caDSR staging and must be paired with the staging address and the NIH
+    VPN.
 match_value_meanings:
   title: Value meaning candidates
   group: cadsr
@@ -352,7 +355,11 @@ list_contexts:
   returns: "{ contexts[context], nextCursor? }"
   items: ["contexts[]"]
   bounds: {limit: {default: 100, maximum: 1000}}
-  summary: The registry's contexts, by name.
+  summary: >-
+    The registry's contexts, by name.
+    Requires a caDSR credential accepted by the configured endpoint; the credential issued to
+    this project is for caDSR staging and must be paired with the staging address and the NIH
+    VPN.
 list_classification_schemes:
   title: Classification schemes
   group: cadsr
@@ -512,3 +519,6 @@ harmonize_data_dictionary:
     as the entity, its description as entityUserTip), and each column's sample values aligned to
     value meanings (vmMatch); unmatched names the columns without a match; every match names
     one registry state.
+    Its CDE matching calls require a caDSR credential accepted by the configured endpoint; the
+    credential issued to this project is for caDSR staging and must be paired with the staging
+    address and the NIH VPN.
