@@ -509,6 +509,7 @@ def test_failed_detail_is_a_closed_category_without_private_text(
     [
         (999, "SQLITE_BUSY"),
         (999, None),
+        (5.0, "SQLITE_BUSY"),
         (True, "SQLITE_BUSY"),
         (5, PRIVATE_CANARY),
         (5, None),
