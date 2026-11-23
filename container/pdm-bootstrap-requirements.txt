@@ -12,7 +12,8 @@
 #   PDM_IGNORE_ACTIVE_VENV=1 tool/bin/pdm lock --python 3.14 --platform manylinux_2_39_x86_64 --exclude-newer 5d
 #   PDM_IGNORE_ACTIVE_VENV=1 tool/bin/pdm export -f requirements -o raw.txt --no-markers
 #   Keep each package's pin and only the sha256 of its `.whl` files listed in pdm.lock
-#   (drop the sdist hashes), in raw.txt's order, in this file's format.
+#   (drop the sdist hashes) and drop extras such as `[httpx]` from the names (--no-deps installs
+#   the closure as listed, and the age check reads plain `name==version`), in raw.txt's order.
 #
 # pyproject.toml of the scratch project:
 #   [project]
@@ -43,8 +44,12 @@ findpython==0.9.0 \
     --hash=sha256:0d58e63106cab47a48793cc7b51faba3956caa46b3b8043c92d738bfef5e2a33
 h11==0.16.0 \
     --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+hishel==1.2.1 \
+    --hash=sha256:5e1c1e38f4c970eeef69bc8528e85fd5c02eab15a22f9845d30fc880da32b881
 httpcore==1.0.9 \
     --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
+httpx==0.28.1 \
+    --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
 id==1.6.1 \
     --hash=sha256:f5ec41ed2629a508f5d0988eda142e190c9c6da971100612c4de9ad9f9b237ca
 idna==3.20 \

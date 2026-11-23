@@ -181,7 +181,8 @@ class BootstrapRequirementsTest(unittest.TestCase):
     def requirements(self):
         text = (ROOT / "container/pdm-bootstrap-requirements.txt").read_text()
         joined = text.replace("\\\n", " ")
-        return [line for line in joined.splitlines() if line.strip() and line[0] != "#"]
+        lines = [line for line in joined.splitlines() if line.strip() and line[0] != "#"]
+        return [" ".join(line.split()) for line in lines]
 
     def test_the_four_roots_equal_every_pin_the_bootstrap_is_checked_against(self):
         pins = {}
