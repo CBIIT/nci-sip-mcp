@@ -3,11 +3,14 @@
 # It is independent of pdm.lock. Edit it only by the recipe below; re-resolving on a later date
 # can yield different dependency versions, which the five-day age check (scripts/dependency_age.py) covers.
 #
-# Resolved 2026-11-23 with PDM 2.29.2 on CPython 3.14.10, `--exclude-newer 5d`.
+# Resolved 2026-11-23 with PDM 2.29.2 on CPython 3.14.10 (pip 26.2.2, which honours
+# PIP_UPLOADED_PRIOR_TO), `--exclude-newer 5d`. The resolver venv is seeded from the four roots under
+# the same five-day cutoff, not from this file: its hashes are Linux x86_64 wheels and do not install
+# on macOS.
 #
 # Refresh recipe, in an empty scratch directory:
 #   python3.14 -m venv tool
-#   tool/bin/pip install --only-binary :all: pdm==2.29.2 hishel==1.2.1 unearth==0.18.2 virtualenv==21.15.2
+#   PIP_UPLOADED_PRIOR_TO=P5D tool/bin/pip install --only-binary :all: pdm==2.29.2 hishel==1.2.1 unearth==0.18.2 virtualenv==21.15.2
 #   (write the pyproject.toml below)
 #   PDM_IGNORE_ACTIVE_VENV=1 tool/bin/pdm lock --python 3.14 --platform manylinux_2_39_x86_64 --exclude-newer 5d
 #   PDM_IGNORE_ACTIVE_VENV=1 tool/bin/pdm export -f requirements -o raw.txt --no-markers
