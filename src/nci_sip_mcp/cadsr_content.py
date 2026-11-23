@@ -624,6 +624,10 @@ def list_contexts(
 ) -> dict[str, Any]:
     """List the caDSR contexts, the owner groups under which data elements are registered, by name.
 
+    Requires a caDSR credential accepted by the configured endpoint; the credential issued to
+    this project is for caDSR staging and must be paired with the staging address and the NIH
+    VPN.
+
     registryRelease is left unset today (C-1).
 
     Returns contexts in platform order, each its name with registry provenance, and nextCursor,

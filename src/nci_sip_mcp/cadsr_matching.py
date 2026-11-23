@@ -204,6 +204,10 @@ def match_data_elements(
     """Find the caDSR data elements that best match described entities, such as the columns of a
     data dictionary; the discovery route while keyword search is unavailable.
 
+    Requires a caDSR credential accepted by the configured endpoint; the credential issued to
+    this project is for caDSR staging and must be paired with the staging address and the NIH
+    VPN.
+
     modelVariant and similarityThreshold are invalid_request until the match contract has them
     (C-6). registryRelease is left unset: published pins cannot yet address matching (C-1).
     Each entity name, userTip and permissible value is bounded by its inputSchema maxLength;
