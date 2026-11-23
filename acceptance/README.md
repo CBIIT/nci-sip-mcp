@@ -82,10 +82,8 @@ records request accounting and whether resource observation completed.
 Accounting snapshots read identity, counters and related rows in one committed read
 transaction without reserving the writer. Admissions, mutations and receipts retain atomic
 write transactions; exclusive/commit contention and storage failures still fail closed.
-The ledger runs in WAL mode; the tests exercise a snapshot read succeeding while a writer
-commits over an open reader. A request-path write waits at most 0.1 s for the writer lock and then
-fails closed. Its `-wal` and `-shm` files are
-private (0600, in the 0700 run directory) and removed after a clean last close (a crash can leave them). A refusal
+A request-path write waits at most 0.1 s for the writer lock and then
+fails closed. A refusal
 latches the `failed` marker holding exactly its reason; a sibling `failed.detail` records a closed
 category (`sqlite` or `other`) and, for SQLite, a validated error code and name. It is never read
 on a fail-closed path, and the supervisor's final failure prints it as a note.
