@@ -553,6 +553,24 @@ def test_failure_detail_reads_back_only_a_well_formed_record(tmp_path, written, 
         assert run.failure_detail() is None
 
 
+def test_failed_detail_ignores_an_unrelated_exception_the_caller_is_handling(tmp_path):
+    handled = sqlite3.OperationalError(PRIVATE_CANARY)
+    vars(handled).update(sqlite_errorcode=5, sqlite_errorname="SQLITE_BUSY")
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        original = (run.directory / "key").read_bytes()
+        (run.directory / "key").write_bytes(b"short")
+        try:
+            try:
+                raise handled
+            except sqlite3.Error:
+                with pytest.raises(RequestPolicyError) as refused:
+                    run.check_wait(0)
+        finally:
+            (run.directory / "key").write_bytes(original)
+        assert refused.value.reason == "authorization"
+        assert json.loads((run.directory / "failed.detail").read_text()) == {"category": "other"}
+
+
 def test_unwritable_failure_detail_still_latches_the_reason(tmp_path):
     with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
         (run.directory / "failed.detail").mkdir()
