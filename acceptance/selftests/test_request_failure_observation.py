@@ -33,7 +33,9 @@ def retained(node):
 
 
 def refuse_through_a_writer(run, monkeypatch):
-    # WAL readers are never refused, so a real SQLite refusal comes from writer against writer.
+    # Writer-versus-writer contention is forced here: a held BEGIN IMMEDIATE refuses the next
+    # writer deterministically, whereas reader refusals (for example during last-connection
+    # recovery) cannot be provoked on demand.
     monkeypatch.setattr(run, "snapshot", lambda: run.check_wait(0))
 
 
