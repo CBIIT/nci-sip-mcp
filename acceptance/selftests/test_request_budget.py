@@ -589,11 +589,26 @@ def test_unwritable_failure_detail_still_latches_the_reason(tmp_path):
         assert (run.directory / "failed").read_text() == "authorization"
 
 
-def test_ledger_uses_write_ahead_logging(tmp_path):
+def _sqlite3_extension() -> str:
+    import _sqlite3  # noqa: PLC0415 - CPython's extension module, named for the #545 identity record
+
+    return _sqlite3.__file__
+
+
+def test_ledger_uses_write_ahead_logging(tmp_path, record_property):
     with (
         tiny_run(tmp_path) as (run, _grant, _limits, _upstream),
         closing(sqlite3.connect(run.directory / "ledger.sqlite")) as reader,
     ):
+        # Runtime identity for the WAL-reset advisory comparison (#545): the executing SQLite,
+        # not proof of which shared library or vendor patch set supplied it.
+        record_property("sqlite_version", sqlite3.sqlite_version)
+        record_property(
+            "sqlite_source_id", reader.execute("SELECT sqlite_source_id()").fetchone()[0]
+        )
+        options = [row[0] for row in reader.execute("PRAGMA compile_options")]
+        record_property("sqlite_compile_options", " ".join(options))
+        record_property("sqlite3_extension", _sqlite3_extension())
         assert reader.execute("PRAGMA journal_mode").fetchone() == ("wal",)
 
 
