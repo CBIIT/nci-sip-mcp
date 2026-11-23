@@ -541,6 +541,9 @@ def test_failed_detail_names_a_sqlite_code_only_when_both_parts_are_well_formed(
         ({"category": "other", "type": "Anything"}, None),
         ({"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_FULL"}, None),
         ({"category": "sqlite", "sqlite_errorcode": 5}, None),
+        ({"category": "sqlite", "sqlite_errorcode": 5.0, "sqlite_errorname": "SQLITE_BUSY"}, None),
+        ({"category": "sqlite", "sqlite_errorcode": 999, "sqlite_errorname": "SQLITE_BUSY"}, None),
+        ({"category": "sqlite", "sqlite_errorcode": 999}, None),
         ([], None),
     ],
 )
