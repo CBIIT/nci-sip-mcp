@@ -369,7 +369,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                                 "${{ steps.pdm-paths.outputs.venv-location }}"
                             ),
                             "key": (
-                                "setup-pdm-${{ runner.os }}-${{ runner.arch }}-python-"
+                                "pdm-bootstrap-v1-${{ runner.os }}-${{ runner.arch }}-python-"
                                 "${{ steps.py.outputs.python-version }}-"
                                 "${{ hashFiles('pdm.lock') }}"
                             ),
