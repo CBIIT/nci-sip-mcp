@@ -13,6 +13,11 @@ runs:
       id: py
       with:
         python-version: "3.14"
+    # setup-pdm exported this for the Linux callers; it persists into the later steps.
+    - name: Preload the compiler runtime
+      if: runner.os == 'Linux'
+      shell: bash
+      run: echo "LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1" >> "$GITHUB_ENV"  # zizmor: ignore[github-env]
     # PDM and its closure come from the tracked, hash-pinned requirements file, kept apart from
     # pdm.lock, which governs the project environment. The executable is published only after the
     # install, `pip check` and the version check have succeeded.
