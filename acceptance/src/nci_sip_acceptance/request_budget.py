@@ -74,7 +74,7 @@ def _failure_detail(cause: BaseException | None) -> FailureDetail:
         detail["category"] = "sqlite"
         code = getattr(cause, "sqlite_errorcode", None)
         name = getattr(cause, "sqlite_errorname", None)
-        if type(code) is int and SQLITE_NAMES.get(code) == name:
+        if type(code) is int and code in SQLITE_NAMES and SQLITE_NAMES[code] == name:
             detail["sqlite_errorcode"], detail["sqlite_errorname"] = code, SQLITE_NAMES[code]
     return detail
 
