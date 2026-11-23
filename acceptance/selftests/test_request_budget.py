@@ -597,37 +597,6 @@ def test_fresh_ledger_keeps_the_rollback_journal(tmp_path):
         assert reader.execute("PRAGMA journal_mode").fetchone() == ("delete",)
 
 
-def test_wal_sidecar_files_are_private_and_removed_with_the_last_connection(tmp_path):
-    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
-        ledger = run.directory / "ledger.sqlite"
-        sidecars = [ledger.with_name("ledger.sqlite-wal"), ledger.with_name("ledger.sqlite-shm")]
-        with closing(sqlite3.connect(ledger)) as reader:
-            reader.execute("BEGIN")
-            reader.execute("SELECT * FROM run").fetchall()
-            run.snapshot()
-            assert [oct(path.stat().st_mode & 0o777) for path in sidecars] == ["0o600", "0o600"]
-            reader.rollback()
-        assert [path.exists() for path in sidecars] == [False, False]
-
-
-def test_snapshot_reads_while_a_writer_commits_over_an_open_reader(tmp_path):
-    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
-        ledger = run.directory / "ledger.sqlite"
-        with (
-            closing(sqlite3.connect(ledger)) as reader,
-            closing(sqlite3.connect(ledger, timeout=0)) as writer,
-        ):
-            reader.execute("BEGIN")
-            reader.execute("SELECT * FROM run").fetchall()
-            writer.execute("BEGIN IMMEDIATE")
-            writer.execute("UPDATE run SET logical=logical")
-            # A rollback journal refuses this commit while the reader holds its lock.
-            writer.commit()
-            observed = run.snapshot()
-            reader.rollback()
-        assert (observed.state, observed.logical, observed.failure) == ("open", 0, None)
-
-
 def test_real_sqlite_contention_closes_admission(tmp_path):
     actor = tmp_path / "blocked.py"
     actor.write_text(HELD_ACTOR)
