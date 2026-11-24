@@ -1,4 +1,5 @@
 import unittest
+from contextlib import nullcontext
 from email.message import Message
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -89,6 +90,19 @@ class AggregatePrerequisiteTest(unittest.TestCase):
                 patch("nci_sip_mcp.installer.platform.system", return_value=system),
             ):
                 self.assertEqual(os_check.observe(), expected)
+
+    def test_the_probe_waits_at_most_five_seconds_for_an_endpoint(self):
+        timeouts = []
+
+        def opener(request, timeout):
+            timeouts.append(timeout)
+            return nullcontext()
+
+        with patch("nci_sip_mcp.installer.urlopen", opener):
+            reachable = API.reachability_prerequisite("x", "http://example", "fix").observe()
+
+        self.assertTrue(reachable)
+        self.assertEqual(timeouts, [5])
 
     def test_an_http_error_still_proves_endpoint_reachability(self):
         http_error = HTTPError("http://example", 401, "denied", Message(), None)
