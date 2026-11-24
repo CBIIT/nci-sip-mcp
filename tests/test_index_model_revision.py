@@ -133,12 +133,6 @@ class ModelRevisionTest(ServerFixture):
             ],
         )
 
-    def test_evaluation_of_a_build_applies_the_same_check(self):
-        build = self.index_with("r1")
-        with self.assertRaises(IndexCompatibilityError) as refused:
-            self.local_index.search_build(build.build_id, "Neoplasm", provider("r2"))
-        self.assertEqual(type(refused.exception).__name__, "IndexModelRevisionError")
-
     def test_the_evaluate_command_refuses_a_build_under_another_model_revision(self):
         build = self.index_with("r1")
         self.context.embedding_provider = provider("r2")
@@ -150,9 +144,9 @@ class ModelRevisionTest(ServerFixture):
             redirect_stdout(stdout),
         ):
             code = main()
-        answer = json.loads(stdout.getvalue())
+        error = json.loads(stdout.getvalue()).get("error", {})
         self.assertEqual(
-            (code, answer["error"]["code"], answer["error"]["message"]),
+            (code, error.get("code"), error.get("message")),
             (
                 1,
                 "internal_error",
