@@ -188,7 +188,7 @@ Platform requirement/operation: **C-6; OP-M01; OP-C13**.
 Specification requirements: `match_data_elements-1`, `list_contexts-1`, `harmonize_data_dictionary-1`.
 Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/42#issuecomment-5966334217).
 
-**Observation.** Anonymous calls are recorded 401. A credential has been issued for caDSR staging only; protected staging attempts were last recorded as 401 on 23 November 2026 (issue 383), cause not inferred, and access is unverified. Credentialed fixture answers follow published contracts and are crafted. Live matching and harmonization measurements returned upstream errors. The [CDE AI Engine evaluation dated 25 October 2026](cadsr-ai-engine.md) found no Engine contract or documented anonymous Stage endpoint in the reviewed sources; its access policy is unknown, not inferred from Match 2.0.
+**Observation.** Anonymous calls are recorded 401. A credential has been issued for caDSR staging only; protected staging attempts were last recorded as 401 on 23 November 2026 (https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427), cause not inferred, and access is unverified. Credentialed fixture answers follow published contracts and are crafted. Live matching and harmonization measurements returned upstream errors. The [CDE AI Engine evaluation dated 25 October 2026](cadsr-ai-engine.md) found no Engine contract or documented anonymous Stage endpoint in the reviewed sources; its access policy is unknown, not inferred from Match 2.0.
 
 **Reproduction.** Repeat the recorded anonymous requests; after access is provided, re-record with an environment-supplied credential and never write its value to evidence.
 
