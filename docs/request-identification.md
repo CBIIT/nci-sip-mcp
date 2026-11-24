@@ -96,8 +96,9 @@ value is not a credential.
 The server reads this identity once at start-up and sends it in the `User-Agent` of every platform
 request it makes (convention A6.2b): `nci-sip-mcp/<version> (installation=<id>; +https://github.com/CBIIT/nci-sip-mcp)`.
 With no `NCI_SIP_INSTALLATION_ID` configured it sends the product label alone,
-`nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`; a configured value that is not 32 lowercase hexadecimal characters stops
-start-up with an error naming the variable, before any upstream is contacted. The `generate`
+`nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`; a configured value that is not 32 lowercase hexadecimal characters, or installed metadata that
+cannot form a safe label, stops start-up with an error naming the variable or the installed
+version, before any upstream is contacted. The `generate`
 and `show` commands remain local and send nothing. Governed acceptance requests
 (the exact-request grants of a controlled run, and the release preflight) send the product label
 alone, `nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`, whatever

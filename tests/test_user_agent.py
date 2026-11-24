@@ -357,57 +357,40 @@ class ContainerEntryTest(ReceiverCase):
         self.assertEqual(code, 1)
         serve.assert_not_called()
         self.assertEqual(
-            [(r["event"], r["asset"], r["errorType"], r["parameter"]) for r in records],
+            [(r["event"], r["asset"], r["errorType"], r["code"], r["parameter"]) for r in records],
             [
                 (
                     "container_startup_failed",
                     "identity",
                     "PlatformError",
+                    "invalid_request",
                     "NCI_SIP_INSTALLATION_ID",
                 )
             ],
         )
         self.assertNotIn("secret", json.dumps(records))
 
-    def test_a_refused_identity_is_logged_with_its_code_and_parameter(self):
+    def test_an_unsafe_installed_version_stops_startup_naming_the_version(self):
         logging.disable(logging.NOTSET)
         settings = Settings(data_dir=self.path, transport="streamable-http")
         index = LocalIndexAdapter(LocalIndex(self.path))
-        cases = (
-            (
-                "malformed id",
-                {"NCI_SIP_INSTALLATION_ID": "not-an-id"},
-                None,
-                "NCI_SIP_INSTALLATION_ID",
-            ),
-            ("unsafe version", {}, "not a version", "nci-sip-mcp installed version"),
-        )
-        for name, environment, unsafe_version, parameter in cases:
-            with ExitStack() as stack, self.subTest(name):
-                stack.enter_context(patch.dict(os.environ, environment))
-                stack.enter_context(
-                    patch.object(container_entry.Settings, "from_env", return_value=settings)
-                )
-                stack.enter_context(patch.object(container_entry, "configure_logging"))
-                stack.enter_context(
-                    patch.object(container_entry, "prepared_index", return_value=index)
-                )
-                stack.enter_context(patch.object(container_entry, "run_http"))
-                if unsafe_version:
-                    stack.enter_context(
-                        patch.object(traffic_identity, "version", return_value=unsafe_version)
-                    )
-                logs = stack.enter_context(
-                    self.assertLogs("nci_sip_mcp.container_entry", level="ERROR")
-                )
-                code = container_entry.main()
+        with (
+            patch.object(container_entry.Settings, "from_env", return_value=settings),
+            patch.object(container_entry, "configure_logging"),
+            patch.object(container_entry, "prepared_index", return_value=index),
+            patch.object(container_entry, "run_http") as serve,
+            patch.object(traffic_identity, "version", return_value="not a version"),
+            self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as logs,
+        ):
+            code = container_entry.main()
 
-                records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
-                self.assertEqual(code, 1)
-                self.assertEqual(
-                    [(r["asset"], r.get("code"), r["parameter"]) for r in records],
-                    [("identity", "invalid_request", parameter)],
-                )
+        records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
+        self.assertEqual(code, 1)
+        serve.assert_not_called()
+        self.assertEqual(
+            [(r["asset"], r["code"], r["parameter"]) for r in records],
+            [("identity", "invalid_request", "nci-sip-mcp installed version")],
+        )
 
 
 class EveryClientRequiresALabelTest(unittest.TestCase):

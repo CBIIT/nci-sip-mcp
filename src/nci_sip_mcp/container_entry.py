@@ -29,7 +29,7 @@ def startup_failure(asset: str, error: Exception) -> None:
     # Library exceptions can contain paths, URLs or secrets; retain only a setting's name.
     configure_logging("ERROR")
     logger.setLevel(logging.ERROR)  # A fatal startup diagnostic survives CRITICAL verbosity.
-    fields: dict[str, str | None] = {}
+    fields: dict[str, str | None]
     if isinstance(error, PlatformError):
         # Its code and parameter are static names the specification lists, never the value.
         fields = {"code": error.code, "parameter": error.details.get("parameter")}
