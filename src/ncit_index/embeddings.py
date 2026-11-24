@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from .errors import IndexCompatibilityError
 
@@ -64,7 +64,7 @@ class SentenceTransformersProvider(EmbeddingProvider):
         self.name = "sentence-transformers"
         self.model = model_name
         # Load from the path the revision is taken from, so the record names what was loaded.
-        self._model = _sentence_transformer()(resolved, local_files_only=True)
+        self._model = _sentence_transformer()(resolved.path, local_files_only=True)
         self.revision = _loaded_revision(model_name, resolved)
 
     def embed(self, texts: Iterable[str]) -> Sequence[Sequence[float]]:
@@ -89,7 +89,12 @@ def _sentence_transformer() -> Any:
     return SentenceTransformer
 
 
-def _local_model(model_name: str, local_files_only: bool) -> str:
+class _ResolvedModel(NamedTuple):
+    path: str
+    is_directory: bool  # supplied as a directory, not resolved from the Hub cache
+
+
+def _local_model(model_name: str, local_files_only: bool) -> _ResolvedModel:
     """The one place a model name becomes a path: a directory as given, else the cached snapshot.
 
     A cached snapshot wins; updating a Hub model is an explicit cache refresh. Only when online
@@ -97,25 +102,25 @@ def _local_model(model_name: str, local_files_only: bool) -> str:
     """
     path = Path(model_name)
     if path.is_dir():
-        return str(path)
+        return _ResolvedModel(str(path), True)
     if path.is_absolute():
         raise FileNotFoundError("Supply the external model directory")
     from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
 
     try:
-        return snapshot_download(model_name, local_files_only=True)
+        return _ResolvedModel(snapshot_download(model_name, local_files_only=True), False)
     except FileNotFoundError:
         if local_files_only:
             raise
     _sentence_transformer()(model_name)  # downloads into the cache; the object is discarded
-    return snapshot_download(model_name, local_files_only=True)
+    return _ResolvedModel(snapshot_download(model_name, local_files_only=True), False)
 
 
-def _loaded_revision(model_name: str, resolved: str) -> str:
+def _loaded_revision(model_name: str, resolved: _ResolvedModel) -> str:
     """Identify what was loaded: a directory by its hash, a Hub snapshot by its commit."""
-    if Path(model_name).is_dir():
-        return model_directory_revision(Path(resolved))
-    commit = Path(resolved).name
+    if resolved.is_directory:
+        return model_directory_revision(Path(resolved.path))
+    commit = Path(resolved.path).name
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise IndexCompatibilityError(
             f"The cached snapshot of model {model_name} is not a commit folder; "
