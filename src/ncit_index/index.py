@@ -436,10 +436,38 @@ class LocalIndex:
         return len(seen), dimensions
 
     def activate(self, build_id: str) -> IndexManifest:
-        """Atomically activate a completed snapshot and retain only its predecessor."""
+        """Atomically activate a completed snapshot and retain only its predecessor.
+
+        The other completed builds are hidden in the same transaction and removed after it
+        commits, so a failed removal can never undo the activation.
+        """
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            return self._activate(conn, build_id)
+            manifest = self._activate(conn, build_id)
+        self._remove_superseded()
+        return manifest
+
+    def pending_removal(self) -> list[str]:
+        """Builds hidden by an activation whose removal has not completed."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT build_id FROM manifests WHERE state = 'superseded'")
+            return sorted(row[0] for row in rows)
+
+    def _remove_superseded(self) -> None:
+        """Delete superseded builds one transaction each; stop at the first storage failure.
+
+        Runs after every activation, including one that changed nothing, so a removal that
+        was interrupted is retried by the next activation of any build.
+        """
+        pending = self.pending_removal()
+        for position, build_id in enumerate(pending):
+            try:
+                with self._connect() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    delete_build(conn, build_id)
+            except IndexStorageError:
+                self._event("index_build_removal_pending", build_ids=pending[position:])
+                return
 
     def _activate(self, conn: sqlite3.Connection, build_id: str) -> IndexManifest:
         row = conn.execute(
@@ -455,16 +483,14 @@ class LocalIndex:
         if manifest.active:
             return manifest
         previous = conn.execute("SELECT build_id FROM manifests WHERE active = 1").fetchone()
-        keep = {build_id, previous["build_id"] if previous else build_id}
+        predecessor = previous["build_id"] if previous else build_id
         conn.execute("UPDATE manifests SET active = 0 WHERE active = 1")
         conn.execute("UPDATE manifests SET active = 1 WHERE build_id = ?", (build_id,))
-        stale = [
-            row[0]
-            for row in conn.execute("SELECT build_id FROM manifests WHERE state = 'complete'")
-            if row[0] not in keep
-        ]
-        for identifier in stale:
-            delete_build(conn, identifier)
+        conn.execute(
+            "UPDATE manifests SET state = 'superseded' "
+            "WHERE state = 'complete' AND build_id NOT IN (?, ?)",
+            (build_id, predecessor),
+        )
         self._event(
             "index_activated",
             build_id=build_id,
@@ -533,10 +559,17 @@ class LocalIndex:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if _sample_base_is_active(conn, base):
-                return self._activate(conn, build_id)
-            # Committed before the error is raised: the unreferenced snapshot is not kept.
-            delete_build(conn, build_id)
-        raise IndexStateError("The active index changed during sample indexing; retry the sample")
+                manifest = self._activate(conn, build_id)
+            else:
+                # Committed before the error is raised: the unreferenced snapshot is not kept.
+                delete_build(conn, build_id)
+                manifest = None
+        if manifest is None:
+            raise IndexStateError(
+                "The active index changed during sample indexing; retry the sample"
+            )
+        self._remove_superseded()
+        return manifest
 
     @staticmethod
     def _sample_concepts(
