@@ -456,8 +456,10 @@ class StorageTest(IndexTestCase):
         with index._connect() as conn:
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
 
+        events = []
         with self.assertRaises(IndexCompatibilityError):
-            LocalIndex(self.path)
+            LocalIndex(self.path, on_event=lambda name, details: events.append(name))
+        self.assertEqual(events, [])
 
     def test_manifest_with_unknown_keys_still_loads(self):
         index = self.build()
@@ -486,20 +488,28 @@ class MigrationTest(IndexTestCase):
     def test_a_second_opener_preserves_the_migration_completed_before_it_gets_the_lock(self):
         self.legacy_database([("26.06e", RAW_CONCEPTS[0])])
         connect, directory, completed = sqlite3.connect, self.path, []
+        outer, inner = [], []
 
         class RacingConnection(sqlite3.Connection):
             def execute(self, statement, *parameters):
                 if statement == "BEGIN IMMEDIATE":
                     with patch("ncit_index.index.sqlite3.connect", connect):
-                        completed.append(LocalIndex(directory).get_active_manifest())
+                        racer = LocalIndex(directory, on_event=lambda *event: inner.append(event))
+                        completed.append(racer.get_active_manifest())
                 return super().execute(statement, *parameters)
 
         with patch(
             "ncit_index.index.sqlite3.connect",
             lambda path: connect(path, factory=RacingConnection),
         ):
-            index = LocalIndex(directory)
+            index = LocalIndex(directory, on_event=lambda name, details: outer.append(name))
 
+        # The opener that migrated says so; asserting that keeps the silent one non-vacuous.
+        self.assertEqual(
+            [(name, details["from_version"]) for name, details in inner],
+            [("index_migration_started", 0), ("index_migration_finished", 0)],
+        )
+        self.assertEqual(outer, [])
         self.assertEqual(index.get_active_manifest(), completed[0])
         self.assertEqual(index.get_concept_snapshot("C40704")[1].raw, RAW_CONCEPTS[0])
         self.assertEqual(len(index.list_builds()), 1)
@@ -885,8 +895,14 @@ class LegacyMigrationIntegrityTest(IndexTestCase):
         self.legacy_database([("26.06e", concept("C1"))])
         with closing(sqlite3.connect(self.path / "nci_si.sqlite3")) as conn, conn:
             conn.execute("UPDATE concepts SET release_version = 'orphan'")
+        events = []
         with self.assertRaisesRegex(IndexCompatibilityError, "without a manifest"):
-            LocalIndex(self.path)
+            LocalIndex(self.path, on_event=lambda name, details: events.append((name, details)))
+        # A start with no finish tells the operator the migration rolled back.
+        self.assertEqual(
+            events,
+            [("index_migration_started", {"from_version": 0, "to_version": SCHEMA_VERSION})],
+        )
         with closing(sqlite3.connect(self.path / "nci_si.sqlite3")) as conn:
             self.assertEqual(
                 conn.execute("SELECT release_version FROM concepts").fetchone()[0], "orphan"
