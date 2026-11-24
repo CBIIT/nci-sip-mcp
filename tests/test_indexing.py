@@ -15,7 +15,7 @@ from nci_sip_mcp.indexing import full_build
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.release import ReleaseContext
 from ncit_index import index as index_module
-from ncit_index.errors import IndexBuildError, IndexCompatibilityError
+from ncit_index.errors import IndexBuildError, IndexCompatibilityError, IndexStorageError
 from ncit_index.index import LocalIndex
 from test_audit import captured, records
 from test_evaluation_sets import sample_set_payload
@@ -371,28 +371,56 @@ class SupersededBuildRemovalTest(ServerFixture):
                 self.assertEqual([name for name in events if name == "index_activated"], [])
                 self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
 
-    def test_the_activation_result_needs_no_read_after_the_commit(self):
-        """The superseded builds are read once, inside the activation transaction."""
+    def listing_fault(self, *, fail_after):
+        """Make the listing of superseded builds fail once `fail_after` listings have run.
+
+        Returns the patch and the list of listings seen, so a test can prove the fault matched.
+        """
 
         connect = sqlite3.connect
-        reads = []
+        listings = []
 
-        class OneListing(sqlite3.Connection):
+        class Listing(sqlite3.Connection):
             def execute(self, statement, *parameters):
-                if "state = 'superseded'" in statement and statement.lstrip().startswith("SELECT"):
-                    reads.append(statement)
-                    if len(reads) > 1:
+                if "'superseded'" in statement and statement.lstrip().upper().startswith("SELECT"):
+                    listings.append(statement)
+                    if len(listings) > fail_after:
                         full = sqlite3.OperationalError("database or disk is full")
                         full.sqlite_errorcode = sqlite3.SQLITE_FULL
                         raise full
                 return super().execute(statement, *parameters)
 
-        with patch(
-            "ncit_index.index.sqlite3.connect",
-            lambda path, **options: connect(path, factory=OneListing, **options),
-        ):
+        return (
+            patch(
+                "ncit_index.index.sqlite3.connect",
+                lambda path, **options: connect(path, factory=Listing, **options),
+            ),
+            listings,
+        )
+
+    def test_the_superseded_listing_is_read_inside_the_activation_transaction(self):
+        """If the first listing fails the activation fails: it cannot be a read after the commit."""
+
+        events = []
+        index = LocalIndex(
+            self.local_index.data_dir, on_event=lambda name, _d, sink=events: sink.append(name)
+        )
+        fault, listings = self.listing_fault(fail_after=0)
+        with fault, self.assertRaises(IndexStorageError):
+            index.activate_and_report(self.replacement.build_id)
+
+        self.assertEqual(len(listings), 1)
+        self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
+        self.assertEqual([name for name in events if name == "index_activated"], [])
+
+    def test_the_activation_result_needs_no_read_after_the_commit(self):
+        """One listing, inside the transaction; a later listing would fail and must not be made."""
+
+        fault, listings = self.listing_fault(fail_after=1)
+        with fault:
             result = invoke(self.context, "index_activate", self.replacement.build_id)
 
+        self.assertEqual(len(listings), 1)
         self.assertEqual(result.get("buildId"), self.replacement.build_id)
         self.assertEqual(result.get("pendingRemoval"), [])
         self.assertEqual([self.rows(build_id) for build_id in self.stale], [0, 0])
