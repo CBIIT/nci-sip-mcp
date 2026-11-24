@@ -4,6 +4,8 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tomllib
 import unittest
 from pathlib import Path
@@ -37,6 +39,17 @@ try:
     runpy.run_module("zensical", run_name="__main__", alter_sys=True)
 finally:
     (configuration.parent / "site/404.html").unlink()
+"""
+
+
+# A generator stand-in that exits 0 having written no 404 page: the #433 flake itself.
+GENERATOR_FLAKE = """
+import sys
+from pathlib import Path
+
+configuration = Path(sys.argv[sys.argv.index("-f") + 1])
+(configuration.parent / "site").mkdir()
+(configuration.parent / "site/index.html").write_text("incomplete")
 """
 
 
@@ -147,6 +160,26 @@ custom_dir = "overrides"
             self.build()
         self.assertFalse(self.output.exists())
         self.assertEqual(list((self.root / "tmp").iterdir()), [])
+
+    def test_the_shim_exits_with_the_generators_status_when_the_generator_wrote_no_404(self):
+        shim = self.root / "generator-shim/zensical"
+        flake = self.root / "generator-flake/zensical"
+        for package, source in ((shim, GENERATOR_WITHOUT_404), (flake, GENERATOR_FLAKE)):
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("")
+            (package / "__main__.py").write_text(source)
+        run = self.root / "shim-run"
+        run.mkdir()
+        search_path = os.pathsep.join([str(shim.parent), str(flake.parent)])
+        result = subprocess.run(  # noqa: S603 - this interpreter, test-owned shim, no network
+            [sys.executable, "-m", "zensical", "-f", str(run / "zensical.toml")],
+            cwd=run,
+            env={**os.environ, "PYTHONPATH": search_path},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_site_ships_the_shared_stylesheet_and_links_it_before_the_overrides(self):
         self.build()
