@@ -38,7 +38,9 @@ configuration = Path(sys.argv[sys.argv.index("-f") + 1])
 try:
     runpy.run_module("zensical", run_name="__main__", alter_sys=True)
 finally:
-    (configuration.parent / "site/404.html").unlink()
+    # The generator may already have omitted the page (#433); the shim must not replace its exit
+    # status with a FileNotFoundError of its own.
+    (configuration.parent / "site/404.html").unlink(missing_ok=True)
 """
 
 
