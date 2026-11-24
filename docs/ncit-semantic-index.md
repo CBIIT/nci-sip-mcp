@@ -193,7 +193,8 @@ For an old developer sample, recreate it separately with `index-sample` instead.
 
 Legacy schema migration preserves cached lookup data, but old concatenated vectors require
 explicit rebuild before field search (`capability_unavailable`). Opening a database never
-re-embeds it. For the recorded SQLite page-layout experiment and conversion precautions, use
+re-embeds it. A migration on open logs `index_migration_started` and
+`index_migration_finished` (see [deployment](deployment.md)). For the recorded SQLite page-layout experiment and conversion precautions, use
 the [calibration reproduction notes](evaluation/ncit-v1-notes.md#reproducing-the-evidence).
 
 Recalibrate after model/release/field-policy or judgment changes; retain full per-query reports,
