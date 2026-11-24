@@ -316,9 +316,9 @@ Serving uses `Context.index: IndexPort`; CLI operators open the package directly
    verifies every release, reconciles totals and unique codes, then builds an inactive snapshot.
    Temporary spooling bounds download memory. Progress is structured JSON on stderr every
    ten pages and at completion. HTTP retries remain in the shared client.
-6. `index-activate` changes the active manifest in one transaction and marks every other
-   completed build other than it and its predecessor `superseded`, which hides it from every
-   read at once. The superseded builds
+6. `index-activate` changes the active manifest in one transaction and marks every completed
+   build except it and its predecessor `superseded`, which hides them from every read at once.
+   The superseded builds
    are deleted after the commit, one transaction each, on every activation (so an interrupted
    removal is retried by the next one). The result's `pendingRemoval` lists any not yet gone; a
    storage failure while deleting is logged as the warning `index_build_removal_pending` and

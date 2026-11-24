@@ -451,7 +451,12 @@ class LocalIndex:
         return len(seen), dimensions
 
     def activate(self, build_id: str) -> IndexManifest:
-        """Atomically activate a completed snapshot and retain only its predecessor."""
+        """Atomically activate a completed snapshot and retain only its predecessor.
+
+        No production code in this repository calls it (`index-activate` uses
+        `activate_and_report`); it is kept as the portable package's operator API, the one that
+        docs/index-migration.md names for activation and rollback.
+        """
         return self.activate_and_report(build_id)[0]
 
     def activate_and_report(self, build_id: str) -> tuple[IndexManifest, list[str]]:

@@ -112,16 +112,21 @@ class ModelDirectoryRevisionTest(unittest.TestCase):
         locked = self.model / "tokenizer"
         locked.chmod(0)
         self.addCleanup(locked.chmod, 0o700)
-        with self.assertRaisesRegex(IndexCompatibilityError, "tokenizer"):
+        with self.assertRaises(IndexCompatibilityError) as refused:
             self.revision()
+        self.assertEqual(str(refused.exception), "Model directory entry tokenizer cannot be listed")
 
     @unittest.skipIf(os.geteuid() == 0, "root can read any file")
     def test_an_unreadable_file_is_refused_naming_the_path(self):
         locked = self.model / "tokenizer" / "vocab.txt"
         locked.chmod(0)
         self.addCleanup(locked.chmod, 0o600)
-        with self.assertRaisesRegex(IndexCompatibilityError, "tokenizer/vocab.txt"):
+        with self.assertRaises(IndexCompatibilityError) as refused:
             self.revision()
+        self.assertEqual(
+            str(refused.exception),
+            "Model directory entry tokenizer/vocab.txt cannot be read: Permission denied",
+        )
 
 
 if __name__ == "__main__":
