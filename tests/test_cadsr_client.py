@@ -647,6 +647,12 @@ class StagingHintTest(unittest.TestCase):
                 self.assertEqual(error["code"], code)
                 self.assertEqual(error["details"]["attempts"], attempts)
                 self.assertNotIn("VPN", error["message"])
+                if name == "production":
+                    self.assertEqual(
+                        error["message"],
+                        "CADSR request failed for /NCILovAPI/1.0/api/getContextNames: "
+                        "transport failure. Retry later.",
+                    )
 
     def test_staging_401_is_rejected_without_the_hint(self):
         reply = Exchange(401, {}, b'{"message":"Unauthorized"}')
@@ -660,6 +666,9 @@ class StagingHintTest(unittest.TestCase):
         error, _ = self.run_call(STAGING, [dns_failure()] * 3, export=True)
         self.assertEqual(error["details"], {"surface": "cadsr", "attempts": 3})
         self.assertNotIn("VPN", error["message"])
+        self.assertEqual(
+            error["message"], "CADSR request failed for /x: transport failure. Retry later."
+        )
 
     def test_a_base_url_with_user_info_is_rejected_before_any_request(self):
         with self.assertRaises(ValueError):
