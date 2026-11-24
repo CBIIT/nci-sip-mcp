@@ -394,7 +394,7 @@ def held_process_cleanup(terminal_case, monkeypatch):
         release.set()
 
 
-def _assert_failed_terminal_resources_settled(case, expected_status):
+def _assert_failed_terminal_resources_settled(case, expected_status, outward=None):
     owner, resources, waited, closed = case
     assert len(resources) == 1
     resource = resources[0]
@@ -409,6 +409,61 @@ def _assert_failed_terminal_resources_settled(case, expected_status):
     assert owner.pending_owners == ()
     summary = json.loads((owner.run.directory / "summary.json").read_text())
     assert (summary["state"], summary["observationComplete"]) == ("failed", True)
+
+
+class PrivateWaitError(Exception):
+    """Test-only wait failure whose message must never reach a diagnostic."""
+
+
+PRIVATE_TEXT = "private-sentinel /home/private/key=hunter2"
+
+
+def test_pending_owner_failure_reports_sanitized_settlement_state(terminal_case, monkeypatch):
+    owner, resources, waited, closed = terminal_case
+    real_open, raised = anyio.open_process, []
+
+    async def open_process(*args, **kwargs):
+        process = await real_open(*args, **kwargs)
+        actual_wait = process.wait
+
+        async def wait():
+            code = await actual_wait()
+            if not raised:
+                raised.append(True)
+                raise PrivateWaitError(PRIVATE_TEXT)
+            return code
+
+        monkeypatch.setattr(process, "wait", wait)
+        return process
+
+    monkeypatch.setattr(anyio, "open_process", open_process)
+    outward = None
+    try:
+        with (
+            owner,
+            open_session(
+                [sys.executable, "-c", CHILD, "0"], {}, io.StringIO(), timeout=3, owner=owner
+            ),
+        ):
+            pass
+    except BaseException as error:  # noqa: BLE001 - assert the owner failure outside capture.
+        outward = error
+    resource = resources[0]
+    assert raised == [True] and isinstance(outward, BaseExceptionGroup)
+    assert owner.pending_owners == (resource.name,)
+    assert resource.process.returncode == 0 and set(waited) == {0}
+    assert closed == {"stdin", "stdout", "stderr"} and not resource.thread.is_alive()
+    with pytest.raises(AssertionError) as failure:
+        _assert_failed_terminal_resources_settled(terminal_case, 0, outward)
+    message = str(failure.value)
+    assert PRIVATE_TEXT not in message and "hunter2" not in message
+    assert (
+        "diagnostics: outward=BaseExceptionGroup(PrivateWaitError); errors=[PrivateWaitError]; "
+        "settled_inputs: waited=True process_closed=True streams_closed=True "
+        f"endpoints_closed=True process_present=True; fixture_waits={len(waited)}; "
+        "thread_alive=False; finish=raised:BaseExceptionGroup; "
+        f"pending=[{resource.name}]"
+    ) in message
 
 
 def test_sdk_startup_error_is_delivered_while_process_cleanup_is_held(
