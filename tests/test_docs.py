@@ -239,6 +239,54 @@ class FunctionalStatusDocumentationTest(unittest.TestCase):
         self.assertIn("(evidence/acceptance-fixture/2026-11-12.yaml)", page)
         self.assertIn("(evidence/functional-status/2026-11-12.yaml)", page)
 
+    def test_current_access_policy_is_separate_from_the_dated_checkpoint(self):
+        page = read("docs/functional-status.md")
+        paragraphs = page.split("\n\n")
+        current = next((p for p in paragraphs if p.startswith("**Current access policy")), "")
+        text = " ".join(current.split())
+        for statement in (
+            "not part of the 12 November checkpoint",
+            "No caDSR service is prohibited",
+            "larger tests are announced",
+            "request count",
+            "no Cartesian products",
+            "Acceptance(live) stays disabled",
+            "23 November",
+            "7114203427",
+            "cause not inferred",
+            "QUICKSTART.md#upstream-access-and-ssis-transition",
+        ):
+            with self.subTest(statement=statement):
+                self.assertIn(statement, text)
+        self.assertIn("grants no permission", text)
+        for stale in ("have not been issued", "traffic is prohibited"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, text)
+        self.assertIn("**Evidence checkpoint: 12 November 2026.**", page)
+        self.assertIn("The cause and issuing layer of the 403 are unknown.", page)
+
+    def test_contact_tables_say_what_the_checkpoint_evidence_records_not_what_never_happened(self):
+        services = section(
+            read("docs/functional-status.md"), "Services, environments and destinations"
+        )
+        self.assertIn("not a report on the current release", services)
+        self.assertIn("no later request recorded in this checkpoint's evidence", services)
+        self.assertNotIn("current traffic paused", services)
+
+    def test_fixture_readme_keeps_the_october_decision_and_adds_the_staging_credential_status(self):
+        text = " ".join(read("acceptance/fixtures/README.md").split())
+        self.assertIn("owner's decision, 3 October 2026", text)
+        self.assertIn("issued for staging only", text)
+        self.assertIn("last recorded as 401 on 23 November", text)
+
+    def test_cadsr_access_entry_asks_for_restored_or_verified_access(self):
+        catalogue = yaml.safe_load((ROOT / "docs/upstream/catalogue.yaml").read_text())
+        entry = next(e for e in catalogue["entries"] if e["id"] == "cadsr-access")
+        self.assertIn("issued for caDSR staging only", entry["observation"])
+        self.assertIn("23 November 2026", entry["observation"])
+        self.assertNotIn("No credentials have been issued", entry["observation"])
+        self.assertTrue(entry["expected"].startswith("Restore or verify authorized access"))
+
     def test_dated_fixture_provenance_matches_original_report_bytes_and_results(self):
         directory = ROOT / "docs/evidence/acceptance-fixture"
         record = yaml.safe_load((directory / "2026-11-12.yaml").read_text())
