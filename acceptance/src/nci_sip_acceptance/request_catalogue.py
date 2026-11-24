@@ -30,6 +30,7 @@ from nci_sip_acceptance.request_authorization import (
 from nci_sip_acceptance.request_budget import ControlledRun
 from nci_sip_mcp.errors import RequestPolicyError
 from nci_sip_mcp.request_policy import LICENSE_KEY_HEADER, using_request_policy
+from nci_sip_mcp.traffic_identity import product_user_agent
 from nci_sip_mcp.validation import RELEASE_CHANNELS, ReleaseChannel
 
 if TYPE_CHECKING:
@@ -188,7 +189,9 @@ def _record_family(
     grant = RequestGrant(
         "GET",
         origin.rstrip("/") + path,
-        headers if surface == "evs" else [("accept", "application/json")],
+        headers
+        if surface == "evs"
+        else [("accept", "application/json"), ("user-agent", product_user_agent())],
         credential_origin=origin,
     )
     return ExactRequestFamily(grant, correlation, target if pinned else None)
@@ -249,7 +252,9 @@ class CompiledPolicy:
         run.check_wait(0)
         # HttpClient captures the policy at construction, before the resolver makes any call.
         with using_request_policy(ControlledHttpPolicy(run)):
-            client = EVSClient(self._origin, license_key=self._license_key)
+            client = EVSClient(
+                self._origin, license_key=self._license_key, user_agent=product_user_agent()
+            )
             selection = resolve_evs_release(client, self._target.terminology, channel)
         run._commit_release(selection)
         return selection
@@ -296,7 +301,7 @@ def compile_policy(environment: Environment) -> CompiledPolicy:
     origin = selected["origins"]["evs"]
     if origin is None:
         raise RequestPolicyError("authorization")
-    headers = [("accept", "application/json")]
+    headers = [("accept", "application/json"), ("user-agent", product_user_agent())]
     if credential := environment.credentials.get("NCI_SIP_EVS_LICENSE_KEY"):
         headers.append((LICENSE_KEY_HEADER, credential))
     grant = RequestGrant(
