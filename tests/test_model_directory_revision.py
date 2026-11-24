@@ -115,6 +115,14 @@ class ModelDirectoryRevisionTest(unittest.TestCase):
         with self.assertRaisesRegex(IndexCompatibilityError, "tokenizer"):
             self.revision()
 
+    @unittest.skipIf(os.geteuid() == 0, "root can read any file")
+    def test_an_unreadable_file_is_refused_naming_the_path(self):
+        locked = self.model / "tokenizer" / "vocab.txt"
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o600)
+        with self.assertRaisesRegex(IndexCompatibilityError, "tokenizer/vocab.txt"):
+            self.revision()
+
 
 if __name__ == "__main__":
     unittest.main()
