@@ -1,6 +1,7 @@
 """The recorder writes the fixture set the manifest describes, or nothing when it does not hold."""
 
 import json
+from importlib.metadata import version
 from unittest import mock
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -628,3 +629,28 @@ def test_live_fetch_releases_error_response_before_return_or_failure(monkeypatch
         finally:
             for response in captured:
                 response.close()
+
+
+@pytest.mark.parametrize(
+    "given",
+    [
+        None,
+        {
+            "Accept": "application/sparql-results+json",
+            "user-agent": "nci-sip-mcp/9 (installation=x)",
+        },
+    ],
+    ids=["default-headers", "caller-user-agent"],
+)
+def test_the_live_fetch_sends_one_product_user_agent_beside_the_headers_it_is_given(
+    monkeypatch, given
+):
+    monkeypatch.setenv("NCI_SIP_INSTALLATION_ID", "a" * 32)
+    monkeypatch.setenv("NCI_SIP_ACCEPTANCE_INSTALLATION_ID", "b" * 32)
+    with WireReceiver() as receiver:
+        live_fetch({"evs": receiver.origin})("evs", "/owned", {}, headers=given)
+        ((_, _, sent, _),) = receiver.requests
+    fields = [(name.lower(), value) for name, value in sent]
+    expected = f"nci-sip-acceptance/{version('nci-sip-acceptance')} (+https://github.com/CBIIT/nci-sip-mcp)"
+    assert [value for name, value in fields if name == "user-agent"] == [expected]
+    assert ("accept", (given or {"Accept": "application/json"})["Accept"]) in fields

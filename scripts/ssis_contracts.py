@@ -165,6 +165,7 @@ def main() -> None:
         max_response_bytes=10 * 1024 * 1024,
         retry_backoff_seconds=0,
         size_bound="ssis_response_bytes",
+        user_agent=product_user_agent(),
     )
     report = [check(entry, http) for entry in register["queries"]]
     print(json.dumps(report, indent=2))
