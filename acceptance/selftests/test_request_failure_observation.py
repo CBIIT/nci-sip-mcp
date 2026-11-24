@@ -32,10 +32,18 @@ def retained(node):
     return json.loads(values[PROPERTY])
 
 
-def test_real_snapshot_retains_refusal_before_cleanup(tmp_path, request, capsys):
+def refuse_through_a_writer(run, monkeypatch):
+    # Writer-versus-writer contention is forced here: a held BEGIN IMMEDIATE refuses the next
+    # writer deterministically, whereas reader refusals (for example during last-connection
+    # recovery) cannot be provoked on demand.
+    monkeypatch.setattr(run, "snapshot", lambda: run.check_wait(0))
+
+
+def test_real_ledger_refusal_is_retained_before_cleanup(tmp_path, request, capsys, monkeypatch):
     run = ledger(tmp_path)
+    refuse_through_a_writer(run, monkeypatch)
     with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
-        blocker.execute("BEGIN EXCLUSIVE")
+        blocker.execute("BEGIN IMMEDIATE")
         with pytest.raises(RequestPolicyError) as caught:
             snapshot(run, request.node)
         assert caught.value.reason == "accounting" and caught.value.__suppress_context__
@@ -47,20 +55,48 @@ def test_real_snapshot_retains_refusal_before_cleanup(tmp_path, request, capsys)
             "ending": "end",
         }
         assert json.loads(capsys.readouterr().err) == record
-    after = run.snapshot()
+    after = ControlledRun.snapshot(run)
     assert (after.state, after.transport_entries, after.failure) == ("failed", 0, "accounting")
 
 
-def test_refusal_names_the_failing_ledger_statement_and_the_wait(tmp_path, request):
+def test_refusal_names_the_failing_ledger_statement_and_the_wait(tmp_path, request, monkeypatch):
     run = ledger(tmp_path)
+    refuse_through_a_writer(run, monkeypatch)
     with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
-        blocker.execute("BEGIN EXCLUSIVE")
+        blocker.execute("BEGIN IMMEDIATE")
         with pytest.raises(RequestPolicyError):
             snapshot(run, request.node)
     attempt = json.loads(dict(request.node.user_properties)["accounting_snapshot_attempt"])
-    assert attempt["function"] == "ControlledRun._identity"
-    assert attempt["statement"] == 'connection.execute("SELECT entry_pending FROM leases LIMIT 0")'
+    assert attempt["function"] == "ControlledRun._connection"
+    assert attempt["statement"] == 'connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")'
     assert MIN_BUSY_WAIT <= attempt["elapsed_seconds"] < MAX_BUSY_WAIT
+
+
+def test_final_failure_report_prints_the_ledger_failure_detail(pytester):
+    pytester.makepyfile(
+        test_inner="""
+import sqlite3
+from contextlib import closing
+from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
+from nci_sip_acceptance.request_supervision import SupervisedRun
+from nci_sip_mcp.http_client import RequestPolicyError
+
+def test_refused_ledger(tmp_path):
+    grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
+    owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
+    with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as holder, owner:
+        holder.execute("BEGIN IMMEDIATE")
+        try:
+            owner.run.check_wait(0)
+        except RequestPolicyError:
+            pass
+        holder.rollback()
+"""
+    )
+    result = pytester.runpytest_subprocess("-q", "-p", "no:cacheprovider", timeout=60)
+    result.assert_outcomes(failed=1)
+    detail = {"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_BUSY"}
+    assert f"ledger failure detail: {json.dumps(detail)}" in result.stdout.str()
 
 
 def test_junit_keeps_initiating_record_after_teardown_failure(pytester):
@@ -90,9 +126,9 @@ def controlled_refusal(monkeypatch):
         if not injected and current_thread() is main_thread() and ready:
             injected = True
             with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
-                blocker.execute("BEGIN EXCLUSIVE")
+                blocker.execute("BEGIN IMMEDIATE")
                 try:
-                    return original(run)
+                    return run.check_wait(0)
                 except RequestPolicyError as error:
                     assert isinstance(error.__context__, sqlite3.OperationalError)
                     error.__context__.args = (PRIVATE_CANARY,)

@@ -1044,9 +1044,11 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
     barrier = threading.Barrier(2)
     original = owner._registered
     results = []
+    arrivals = []
 
     def competing(process, participant):
         registered = original(process, participant)
+        arrivals.append(participant)
         barrier.wait(timeout=3)
         return registered
 
@@ -1058,9 +1060,11 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
         def register(participant):
             try:
                 owner.register_child(child, participant=participant, role="service")
-                results.append("accepted")
-            except RequestPolicyError:
-                results.append("rejected")
+                results.append(("accepted", participant))
+            except RequestPolicyError as error:
+                results.append(("rejected", error.reason))
+            except Exception as error:  # noqa: BLE001 - record it so the outcome check fails visibly.
+                results.append(("error", type(error).__name__))
 
         failure = None
         try:
@@ -1075,8 +1079,13 @@ def test_competing_duplicate_offers_transfer_one_child(tmp_path, monkeypatch):
                     assert not thread.is_alive()
         except (RequestPolicyError, BaseExceptionGroup) as error:
             failure = error
-        assert sorted(results) == ["accepted", "rejected"]
-        assert failure is None
+        try:
+            latched = (owner.run.snapshot().failure, owner.run.failure_detail())
+        except Exception as error:  # noqa: BLE001 - a diagnostic read must not mask the assertion.
+            latched = f"unreadable: {type(error).__name__}"
+        diagnostics = f"outcomes={results} arrivals={arrivals} latched={latched}"
+        assert sorted(kind for kind, _ in results) == ["accepted", "rejected"], diagnostics
+        assert failure is None, diagnostics
         assert child.poll() is not None and child.stdin.closed
 
 
@@ -1664,6 +1673,44 @@ def test_competing_local_failure_keeps_first_completed_latch(tmp_path, monkeypat
     assert worker_errors == ["accounting"]
     assert marker_errors == ["marker", "marker"]
     assert not owner._observer.is_alive()
+
+
+def test_competing_failure_writes_the_detail_of_the_first_latched_cause(tmp_path):
+    run = request_budget.ControlledRun.create(authorization(), tmp_path)
+    run.open()
+    arrived, release = threading.Event(), threading.Event()
+
+    def actor():
+        with pytest.raises(RequestPolicyError):
+            run.check_wait(float("nan"))
+
+    thread = threading.Thread(target=actor)
+    source, first = inspect.getsourcelines(run._mark_failed)
+    attempt = next(
+        node
+        for node in ast.parse(textwrap.dedent("".join(source))).body[0].body
+        if isinstance(node, ast.Try)
+    )
+    line = first + attempt.body[0].lineno - 1
+    with pause_handoff(run._mark_failed, "before", thread, arrived, release, line=line):
+        thread.start()
+        try:
+            assert arrived.wait(3), "The actor did not latch its first failure"
+            with (
+                closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker,
+                blocker,
+                pytest.raises(RequestPolicyError) as inner,
+            ):
+                blocker.execute("BEGIN IMMEDIATE")
+                run.check_wait(0)
+            assert inner.value.reason == "accounting"
+        finally:
+            release.set()
+            thread.join(timeout=3)
+            assert not thread.is_alive()
+    assert run.snapshot().failure == "authorization"
+    assert run.failure_detail() == {"category": "other"}
+    run.close()
 
 
 def test_marker_interruption_keeps_initiating_close_failure(tmp_path, monkeypatch):

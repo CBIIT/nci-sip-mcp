@@ -9,7 +9,7 @@ from typing import Literal, NotRequired, TypedDict
 
 import pytest
 
-from nci_sip_acceptance.request_budget import ControlledRun, LedgerSnapshot
+from nci_sip_acceptance.request_budget import SQLITE_NAMES, ControlledRun, LedgerSnapshot
 from nci_sip_mcp.http_client import RequestPolicyError
 
 PROPERTY = "accounting_snapshot_diagnostic"
@@ -17,22 +17,6 @@ ATTEMPT_PROPERTY = "accounting_snapshot_attempt"
 # Enough for the accounting refusal and a failed marker; never traverse unrelated graphs.
 MAX_CONTEXTS = 8
 MAX_SQLITE_CODE = 2147483647  # Bound SQLite integer metadata to a signed 32-bit code.
-SQLITE_NAMES = {
-    5: "SQLITE_BUSY",
-    261: "SQLITE_BUSY_RECOVERY",
-    517: "SQLITE_BUSY_SNAPSHOT",
-    773: "SQLITE_BUSY_TIMEOUT",
-    6: "SQLITE_LOCKED",
-    262: "SQLITE_LOCKED_SHAREDCACHE",
-    518: "SQLITE_LOCKED_VTAB",
-    10: "SQLITE_IOERR",
-    14: "SQLITE_CANTOPEN",
-    11: "SQLITE_CORRUPT",
-    26: "SQLITE_NOTADB",
-    8: "SQLITE_READONLY",
-    13: "SQLITE_FULL",
-    7: "SQLITE_NOMEM",
-}
 type Ending = Literal["end", "absent", "cycle", "bound", "sink"]
 type Kind = Literal["sqlite", "os", "value", "type", "overflow", "other"]
 FAMILIES: dict[type[BaseException], Kind] = {

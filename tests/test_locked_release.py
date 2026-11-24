@@ -190,12 +190,29 @@ with source:
         if match is None:
             raise SystemExit("Unrecognized bootstrap pip version evidence")
         versions.append(match.group(1))
-if len(versions) < 2:
+if not versions:
     raise SystemExit("Incomplete bootstrap pip version evidence")
 print(json.dumps(versions))
 PYTHON
 """
 GUARD_ENV = {"PDM_TOOL_HOME": "${{ runner.temp }}/pdm-tool"}
+BOOTSTRAP_RUN = """requirements="$GITHUB_ACTION_PATH/../../../container/pdm-bootstrap-requirements.txt"
+python -m venv "$PDM_HOME/venv"
+"$PDM_HOME/venv/bin/python" -m pip install --require-hashes --only-binary :all: --no-deps -r "$requirements"
+"$PDM_HOME/venv/bin/python" -m pip check
+expected="$(sed -n 's/^pdm==\\([^ ]*\\) .*/\\1/p' "$requirements")"
+test -n "$expected"
+"$PDM_HOME/venv/bin/pdm" --version | grep -Fx "PDM, version $expected"
+mkdir -p "$PDM_HOME/bin"
+ln -sf ../venv/bin/pdm "$PDM_HOME/bin/pdm"
+echo "$PDM_HOME/bin" >> "$GITHUB_PATH"
+"""  # noqa: E501
+LD_PRELOAD_RUN = 'echo "LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1" >> "$GITHUB_ENV"'
+CACHE_PATHS_RUN = """cache_dir="$(pdm config cache_dir)"
+venv_location="$(pdm config venv.location)"
+echo "cache-dir=$cache_dir" >> "$GITHUB_OUTPUT"
+echo "venv-location=$venv_location" >> "$GITHUB_OUTPUT"
+"""
 
 
 class ReleaseWorkflowTest(unittest.TestCase):
@@ -300,20 +317,25 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 "using": "composite",
                 "steps": [
                     {
-                        "uses": "pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37",
+                        "uses": "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+                        "id": "py",
+                        "with": {"python-version": "3.14"},
+                    },
+                    {
+                        "name": "Preload the compiler runtime",
+                        "if": "runner.os == 'Linux'",
+                        "shell": "bash",
+                        "run": LD_PRELOAD_RUN,
+                    },
+                    {
+                        "name": "Install PDM from hashed requirements",
                         "env": {
                             "PDM_HOME": "${{ runner.temp }}/pdm-tool",
-                            "PDM_NO_FROZEN_DEPS": "1",
-                            "PDM_DEPS": "hishel==1.2.1,unearth==0.18.2,virtualenv==21.15.2",
                             "PIP_UPLOADED_PRIOR_TO": "P5D",
                             "PIP_LOG": "${{ runner.temp }}/pdm-bootstrap-pip.log",
                         },
-                        "with": {
-                            "python-version": "3.14",
-                            "version": "2.29.2",
-                            "cache": "${{ inputs.release-only != 'true' }}",
-                            "cache-restore-exact-match": True,
-                        },
+                        "shell": "bash",
+                        "run": BOOTSTRAP_RUN,
                     },
                     {
                         "name": "Verify PDM tool environment",
@@ -329,6 +351,29 @@ class ReleaseWorkflowTest(unittest.TestCase):
                         },
                         "shell": "bash",
                         "run": PIP_REPORT_RUN,
+                    },
+                    {
+                        "name": "Locate PDM caches",
+                        "if": "inputs.release-only != 'true'",
+                        "id": "pdm-paths",
+                        "shell": "bash",
+                        "run": CACHE_PATHS_RUN,
+                    },
+                    {
+                        "if": "inputs.release-only != 'true'",
+                        "uses": "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+                        "with": {
+                            "path": (
+                                ".venv\n__pypackages__\n"
+                                "${{ steps.pdm-paths.outputs.cache-dir }}\n"
+                                "${{ steps.pdm-paths.outputs.venv-location }}"
+                            ),
+                            "key": (
+                                "pdm-bootstrap-v1-${{ runner.os }}-${{ runner.arch }}-python-"
+                                "${{ steps.py.outputs.python-version }}-"
+                                "${{ hashFiles('pdm.lock') }}"
+                            ),
+                        },
                     },
                     {
                         "if": "inputs.release-only != 'true'",

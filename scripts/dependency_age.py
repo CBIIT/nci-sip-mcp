@@ -18,6 +18,7 @@ MINIMUM_AGE = timedelta(days=5)
 PYTHON_LOCKS = (
     Path("container/requirements-amd64.txt"),
     Path("container/companion-requirements.txt"),
+    Path("container/pdm-bootstrap-requirements.txt"),
 )
 NPM_LOCK = Path("docs/site-assets/package-lock.json")
 NORMALISE_PYTHON_NAME = re.compile(r"[-_.]+")

@@ -1,0 +1,106 @@
+# Hash-pinned PDM bootstrap for CI: pdm, hishel, unearth and virtualenv and their complete closure.
+# Linux x86_64, CPython 3.14, wheel-only (install with `--only-binary :all: --require-hashes --no-deps`).
+# It is independent of pdm.lock. Edit it only by the recipe below; re-resolving on a later date
+# can yield different dependency versions, which the five-day age check (scripts/dependency_age.py) covers.
+#
+# Resolved 2026-11-23 with PDM 2.29.2 on CPython 3.14.10 (pip 26.2.2, which honours
+# PIP_UPLOADED_PRIOR_TO), `--exclude-newer 5d`. The resolver venv is seeded from the four roots under
+# the same five-day cutoff, not from this file: its hashes are Linux x86_64 wheels and do not install
+# on macOS.
+#
+# Refresh recipe, in an empty scratch directory:
+#   python3.14 -m venv tool
+#   PIP_UPLOADED_PRIOR_TO=P5D tool/bin/pip install --only-binary :all: pdm==2.29.2 hishel==1.2.1 unearth==0.18.2 virtualenv==21.15.2
+#   (write the pyproject.toml below)
+#   PDM_IGNORE_ACTIVE_VENV=1 tool/bin/pdm lock --python 3.14 --platform manylinux_2_39_x86_64 --exclude-newer 5d
+#   PDM_IGNORE_ACTIVE_VENV=1 tool/bin/pdm export -f requirements -o raw.txt --no-markers
+#   Keep each package's pin and only the sha256 of its `.whl` files listed in pdm.lock
+#   (drop the sdist hashes) and drop extras such as `[httpx]` from the names (--no-deps installs
+#   the closure as listed, and the age check reads plain `name==version`), in raw.txt's order.
+#
+# pyproject.toml of the scratch project:
+#   [project]
+#   name = "pdm-bootstrap-resolve"
+#   version = "0"
+#   requires-python = ">=3.14"
+#   dependencies = ["pdm==2.29.2", "hishel==1.2.1", "unearth==0.18.2", "virtualenv==21.15.2"]
+#
+# Keep the four roots equal to the pins in .github/actions/setup/action.yml and
+# .github/workflows/local-run.yml (tests/test_tool_bootstrap.py compares them).
+anyio==4.16.0 \
+    --hash=sha256:c66ae634e0b8228396b801741beb3294326d4b6102f7bba4041c0dfb58c29026
+anysqlite==0.0.5 \
+    --hash=sha256:cb345dc4f76f6b37f768d7a0b3e9cf5c700dfcb7a6356af8ab46a11f666edbe7
+argcomplete==3.7.2 \
+    --hash=sha256:6029205678bdd9c1c728a155f5f9ecf5812393f969eef58807641a2bc2aa5b19
+blinker==1.9.0 \
+    --hash=sha256:ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc
+certifi==2026.10.23 \
+    --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
+dep-logic==0.8.0 \
+    --hash=sha256:269715dfcc615615d038d045f5f849576febdd552028db8a7d290a928f0571d5
+distlib==0.4.4 \
+    --hash=sha256:cf09d55b1e85a89576b036aeb71550bfd68320f3f21761ca329eadadad918638
+filelock==4.2.12 \
+    --hash=sha256:21decfec02f116ed4c954433cdb31f28c3b346b784543177b6d7059da2702ee9
+findpython==0.9.0 \
+    --hash=sha256:0d58e63106cab47a48793cc7b51faba3956caa46b3b8043c92d738bfef5e2a33
+h11==0.16.0 \
+    --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+hishel==1.2.1 \
+    --hash=sha256:5e1c1e38f4c970eeef69bc8528e85fd5c02eab15a22f9845d30fc880da32b881
+httpcore==1.0.9 \
+    --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
+httpx==0.28.1 \
+    --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
+id==1.6.1 \
+    --hash=sha256:f5ec41ed2629a508f5d0988eda142e190c9c6da971100612c4de9ad9f9b237ca
+idna==3.20 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+installer==1.1.0 \
+    --hash=sha256:f55f5728ff61d3dd54dbc5a397cf3f7307cb64b180c20b72afbebf01c9e2c8a0
+markdown-it-py==4.3.0 \
+    --hash=sha256:7aa1511a46c39138de78d9eba92ce47e63124d8003fc98b3a351909e04239efa
+mdurl==0.1.2 \
+    --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
+msgpack==1.2.4 \
+    --hash=sha256:55e6106d2d085af42b2de72efeb38ed255241a24b32295ca889707c1d679c442 \
+    --hash=sha256:5d65b791ce4283e02b6267742ad540899155e1b32887b9cbdda47f38f5a076b5 \
+    --hash=sha256:cfa86432bf329d6b976f5a00ad4c9064fd51736e4967a52526750236345cc2da \
+    --hash=sha256:e7ae8cf6012372cecb43016132d1b87ccc2ebb8ae5ab5078687399e82423386a
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+pbs-installer==2026.10.25 \
+    --hash=sha256:19158e6fe4c941a230fdd017e48562ccea8a1d9320d9ffb30b38826d516b375b
+pdm==2.29.2 \
+    --hash=sha256:b17dcc9b55b94694d63afc56053afb7d580e963bb038c753df2cd18fda71182d
+platformdirs==4.14.7 \
+    --hash=sha256:391513b74707c42335fff3ea17eaac657a7ee9ffcadd809634d34ea594d0122c
+pygments==2.21.0 \
+    --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+pyproject-hooks==1.3.3 \
+    --hash=sha256:5fc53fdac9f7bd63fbcdc868fb5f90b4784d78a53a3d3388cd738b807441a20b
+python-discovery==1.9.6 \
+    --hash=sha256:93b10b90363d4151964cdeee2ec6601f3041b17fc2b253a1c3da7d6e7ddd8337
+python-dotenv==1.2.4 \
+    --hash=sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc
+resolvelib==1.2.1 \
+    --hash=sha256:fb06b66c8da04172d9e72a21d7d06186d8919e32ae5ab5cdf5b9d920be805ac2
+rich==15.0.0 \
+    --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
+shellingham==1.5.4 \
+    --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686
+socksio==1.0.0 \
+    --hash=sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3
+tomlkit==0.15.2 \
+    --hash=sha256:05562412163a3037b94497385fb7f9204c637bc605af7a48199e41cf2272f437
+truststore==0.10.5 \
+    --hash=sha256:9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c
+typing-extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+unearth==0.18.2 \
+    --hash=sha256:31fd55d67c0e46a1ebb78993a2010568e6c4231334a3207d18d5d4a549d8d692
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
+virtualenv==21.15.2 \
+    --hash=sha256:fb8c62c7c328e0238061c721068f06b7bc6bd10f7a0f5987195cef1008837ee6

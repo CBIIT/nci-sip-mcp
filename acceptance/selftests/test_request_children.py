@@ -65,10 +65,11 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
     close_failure = RequestPolicyError("accounting")
     lock = sqlite3.connect(owner.run.directory / "ledger.sqlite")
     summary = owner.run.directory / "summary.json"
-    actual_close, actual_finish, actual_snapshot = (
+    actual_close, actual_finish, actual_snapshot, actual_check_wait = (
         owner.run.close,
         resource.finish,
         owner.run.snapshot,
+        owner.run.check_wait,
     )
     facts = {}
 
@@ -77,18 +78,23 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
         raise close_failure
 
     def snapshot():
+        # The terminal read is refused by a real writer-versus-writer SQLITE_BUSY while the
+        # writer lock is held; the lock is then released and later reads recover.
         try:
-            return actual_snapshot()
+            return actual_check_wait(0)
         except RequestPolicyError as error:
             facts["storage_refusal"] = error
             lock.rollback()
+            monkeypatch.setattr(owner.run, "snapshot", actual_snapshot)
             raise
 
     def finish(deadline):
         actual_finish(deadline)
-        facts["completion"] = (resource.thread.is_alive(), resource.result.result(timeout=0))
-        lock.execute("BEGIN EXCLUSIVE")
-        facts["locked"] = lock.in_transaction
+        lock.execute("BEGIN IMMEDIATE")
+        facts.update(
+            completion=(resource.thread.is_alive(), resource.result.result(timeout=0)),
+            locked=lock.in_transaction,
+        )
         monkeypatch.setattr(owner.run, "snapshot", snapshot)
 
     monkeypatch.setattr(owner.run, "close", close)
