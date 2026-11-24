@@ -237,6 +237,16 @@ remaining work to a new milestone. Measure insertions plus deletions with
 `git diff --shortstat origin/main...milestone/<phase> -- . ':!acceptance/expected/fixture.json'`,
 adding exclusion pathspecs for generated files.
 
+**Issue clarity.** Lead with the purpose and the result the caller or maintainer needs. Use
+literal prose; add a short flow or numbered stages when order matters. Name actual dependencies
+and blockers, the work to do, and the evidence that will demonstrate completion. Define operation
+or gate codes on first use. Keep simple issues short; a long history goes in an expandable section.
+Distinguish sourced observations, inferences, proposals and approvals, and delivered evidence from
+future requirements. Historical dates are not new deadlines. When rewriting an issue, preserve its
+original record and link the exact location; retain obligations, failures, evidence links and
+custody, scope boundaries, approvals, holds and unresolved owner decisions. A presentation edit
+grants no new authority, and an implementer statement is not reviewer approval.
+
 **Each issue:**
 
 1. **Read the issue against `spec/` first.** The specification data is the source of record;
