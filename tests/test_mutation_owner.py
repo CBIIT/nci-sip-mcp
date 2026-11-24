@@ -797,7 +797,14 @@ class ProgramOwnershipTest(unittest.TestCase):
             rows = runner._group_snapshot(owner, runner.monotonic() + 5)
             self.assertEqual(len(rows), 1)
             self.assertEqual(
-                (rows[0].pid, rows[0].ppid, rows[0].pgid, rows[0].uid, rows[0].ruid, rows[0].state),
+                (
+                    rows[0].pid,
+                    rows[0].ppid,
+                    rows[0].pgid,
+                    rows[0].uid,
+                    rows[0].ruid,
+                    rows[0].state[:1],
+                ),
                 (child.pid, os.getpid(), child.pid, os.geteuid(), os.getuid(), "Z"),
             )
             if sys.platform == "darwin":
