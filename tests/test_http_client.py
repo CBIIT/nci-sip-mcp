@@ -373,6 +373,23 @@ class ClassificationTest(ServerTestCase):
                 self.assertEqual(error.details, {"surface": "evs", "attempts": 1})
                 self.assertEqual(len(server.seen), 1)
 
+    def test_an_integer_beyond_the_json_digit_limit_is_invalid_json_and_not_retried(self):
+        server = self.serve(Reply(body=b"1" * 5000))
+        client = self.client(server, max_response_bytes=10_000)
+
+        try:
+            client.get_json("/x")
+        except Exception as error:  # noqa: BLE001 - the observed outcome is the claim
+            outcome = error
+        else:
+            outcome = None
+
+        self.assertIsInstance(outcome, PlatformError)
+        self.assertEqual(outcome.code, "upstream_unavailable")
+        self.assertIn("EVS", outcome.message)
+        self.assertIn("invalid JSON", outcome.message)
+        self.assertEqual(len(server.seen), 1)
+
     def test_a_response_beyond_the_size_bound_is_not_retried(self):
         server = self.serve(Reply(body=b"x" * 2000))
 
