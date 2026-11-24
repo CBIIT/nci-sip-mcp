@@ -139,7 +139,7 @@ export NCI_SIP_EMBEDDING_MODEL=cambridgeltl/SapBERT-from-PubMedBERT-fulltext
 ```
 
 A Hub model name loads the snapshot already in the local Hugging Face cache and is downloaded only
-when the cache holds none; a refreshed cache changes the model revision, which an index built
+when the cache holds none; a refresh that brings a newer commit changes the model revision, which an index built
 before the refresh refuses (see [model revision](docs/ncit-semantic-index.md#model-rationale-and-reproducibility-limits)).
 
 ## Connect a client

@@ -27,8 +27,9 @@ start-up and a difference refuses start-up (the
 [hash definition](ncit-semantic-index.md#model-rationale-and-reproducibility-limits)).
 A Hub model name loads the snapshot found in `/model-cache` as it is; the container never
 refreshes it. The snapshot's commit must equal the revision stored in the index: a refreshed
-cache holding a newer commit is refused by `/ready` and by search, so mount the snapshot the
-index was built with. The image sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`;
+cache holding a newer commit refuses start-up, like a changed model directory (the container
+exits with `container_startup_failed` for the `index` asset), so mount the snapshot the index
+was built with. The image sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`;
 the container entry point additionally requests local files only. Missing or incompatible
 assets fail startup with one JSON diagnostic identifying the asset and error class.
 

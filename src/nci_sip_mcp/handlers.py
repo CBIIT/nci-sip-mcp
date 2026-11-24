@@ -315,8 +315,8 @@ def index_activate(context: Context, build_id: str) -> dict[str, Any]:
 
     `pendingRemoval` names builds the activation superseded but could not yet delete (a
     storage failure, logged as `index_build_removal_pending`); activating a build retries (the
-    active one included), but a build that was never evaluated is refused first, so a retry
-    names an evaluated build.
+    active one included), but a production build without a passing evaluation is refused
+    first, so a retry names an evaluated build.
     """
     index = indexing.open_index(context.settings.data_dir)
     active, pending = index.activate_and_report(build_id)
