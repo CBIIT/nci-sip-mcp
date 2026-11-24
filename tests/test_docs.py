@@ -273,17 +273,27 @@ class FunctionalStatusDocumentationTest(unittest.TestCase):
         self.assertIn("no later request recorded in this checkpoint's evidence", services)
         self.assertNotIn("current traffic paused", services)
 
-    def test_fixture_readme_keeps_the_october_decision_and_adds_the_staging_credential_status(self):
+    def test_fixture_readme_separates_the_october_history_from_the_current_credential_status(self):
         text = " ".join(read("acceptance/fixtures/README.md").split())
-        self.assertIn("owner's decision, 3 October 2026", text)
-        self.assertIn("issued for staging only", text)
-        self.assertIn("last recorded as 401 on 23 November", text)
+        self.assertIn("History: the owner's decision of 3 October 2026 established", text)
+        self.assertIn(
+            "Current status: the project now has a staging credential, but protected access "
+            "remains unverified after the 23 November 401s "
+            "([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)), "
+            "so those fixtures remain crafted pending verification.",
+            text,
+        )
+        self.assertNotIn("Until NCI issues credentials", text)
 
     def test_cadsr_access_entry_asks_for_restored_or_verified_access(self):
         catalogue = yaml.safe_load((ROOT / "docs/upstream/catalogue.yaml").read_text())
         entry = next(e for e in catalogue["entries"] if e["id"] == "cadsr-access")
         self.assertIn("issued for caDSR staging only", entry["observation"])
         self.assertIn("23 November 2026", entry["observation"])
+        self.assertIn(
+            "https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427",
+            entry["observation"],
+        )
         self.assertNotIn("No credentials have been issued", entry["observation"])
         self.assertTrue(entry["expected"].startswith("Restore or verify authorized access"))
 
