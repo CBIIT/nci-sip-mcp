@@ -12,7 +12,13 @@ from .models import IndexManifest, NcitConcept, SearchHit, Truncation
 from .validation import MAX_INDEX_SEARCH_LIMIT, validate_search
 
 # Events an operator must act on, not just read.
-_WARNING_EVENTS = frozenset({"index_build_removal_pending"})
+_WARNING_EVENTS = frozenset(
+    {
+        "index_build_removal_pending",
+        "index_model_revision_mismatch",
+        "index_model_revision_unknown",
+    }
+)
 
 
 def index_event(name: str, details: dict[str, Any]) -> None:
