@@ -65,7 +65,9 @@ caDSR's own behaviour is in the ordinary fixtures, with no scenario of its own:
 - **Failures inside HTTP 200.** An unknown data element and a refusal of the arguments come
   back as HTTP 200, with `apiResponse` saying so (X-15).
 - **Credentials.** The lists-of-values API and CDE Match refuse an anonymous caller (401,
-  recorded). Until NCI issues credentials (owner's decision, 3 October 2026),
+  recorded). Until NCI issues credentials (owner's decision, 3 October 2026; a credential has since
+  been issued for staging only, and its protected access was last recorded as 401 on 23
+  November, [#383](https://github.com/CBIIT/nci-sip-mcp/issues/383), cause not inferred),
   `cadsr/credentialed` answers for a server that holds `NCI_SIP_CADSR_CREDENTIAL` with answers
   crafted from the published contracts, recorded under `recorded/cadsr-contracts/`. The data
   elements and contexts in them are the recorded content's; what no recording can give (CDE
