@@ -193,18 +193,20 @@ into a client inside its supervised run:
 from nci_sip_acceptance.request_supervision import SupervisedRun
 from nci_sip_acceptance.request_transport import ControlledHttpPolicy
 from nci_sip_mcp.http_client import HttpClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 
 with SupervisedRun.create(authorization, owned_directory) as owner:
     client = HttpClient(
         base_url, label="diagnostic", timeout_seconds=10, max_attempts=3,
         retry_backoff_seconds=0.25, max_response_bytes=65536,
         size_bound="diagnostic_response", request_policy=ControlledHttpPolicy(owner.run),
+        user_agent=product_user_agent(),
     )
     result = client.get_json(path)
 ```
 
 Every method, absolute URL/raw query, header (including correlation) and body must match a
-grant exactly. The immutable admitted grant supplies every attempt; later Request mutation
+grant exactly; `user_agent` is required, so the grant must declare the same `user-agent` header. The immutable admitted grant supplies every attempt; later Request mutation
 cannot change sent bytes or attempt metadata. Attached callers use the same provider after
 explicit participant authorization/child registration, following the lifecycle below.
 Direct connections ignore ambient proxies, never follow redirects and verify TLS certificates
