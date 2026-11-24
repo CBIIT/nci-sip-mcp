@@ -3,6 +3,7 @@
 import hashlib
 import os
 import shutil
+import signal
 import sys
 import tempfile
 import types
@@ -106,6 +107,21 @@ class ModelDirectoryRevisionTest(unittest.TestCase):
                     self.revision()
                 path = self.model / relative
                 path.rmdir() if path.is_dir() and not path.is_symlink() else path.unlink()
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs POSIX named pipes")
+    def test_a_named_pipe_is_refused_instead_of_blocking_start_up(self):
+        os.mkfifo(self.model / "pipe")
+
+        def give_up(*_):
+            raise self.failureException("hashing blocked on a named pipe")
+
+        # Reading a pipe with no writer blocks forever; the alarm turns a regression into a failure.
+        previous = signal.signal(signal.SIGALRM, give_up)
+        self.addCleanup(signal.signal, signal.SIGALRM, previous)
+        signal.setitimer(signal.ITIMER_REAL, 5)
+        self.addCleanup(signal.setitimer, signal.ITIMER_REAL, 0)
+        with self.assertRaisesRegex(IndexCompatibilityError, "pipe is not a regular file"):
+            self.revision()
 
     @unittest.skipIf(os.geteuid() == 0, "root can list any directory")
     def test_an_unlistable_subdirectory_is_refused_naming_the_path(self):
