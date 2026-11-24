@@ -311,9 +311,18 @@ def _evaluated_build(context: Context, built: IndexManifest) -> dict[str, Any]:
 
 
 def index_activate(context: Context, build_id: str) -> dict[str, Any]:
-    """Activate a completed build; the replaced build is retained for rollback."""
-    active = indexing.open_index(context.settings.data_dir).activate(build_id)
-    return {"buildId": active.build_id, "manifest": manifest_record(active).to_result()}
+    """Activate a completed build; the replaced build is retained for rollback.
+
+    `pendingRemoval` names builds the activation superseded but could not yet delete (a
+    storage failure, logged as `index_build_removal_pending`); activating any build retries.
+    """
+    index = indexing.open_index(context.settings.data_dir)
+    active = index.activate(build_id)
+    return {
+        "buildId": active.build_id,
+        "manifest": manifest_record(active).to_result(),
+        "pendingRemoval": index.pending_removal(),
+    }
 
 
 def search(

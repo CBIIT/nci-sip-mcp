@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -12,6 +13,7 @@ from nci_sip_mcp.index_adapter import manifest_record
 from nci_sip_mcp.indexing import full_build
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.release import ReleaseContext
+from ncit_index import index as index_module
 from ncit_index.errors import IndexBuildError, IndexCompatibilityError
 from test_audit import captured, records
 from test_evaluation_sets import sample_set_payload
@@ -227,7 +229,12 @@ class IndexOperatorResultTest(ServerFixture):
         active = self.context.index.get_active_manifest()
         with correlated(result["manifest"]["provenance"]["correlationId"]):
             self.assertEqual(
-                result, {"buildId": candidate.build_id, "manifest": active.to_result()}
+                result,
+                {
+                    "buildId": candidate.build_id,
+                    "manifest": active.to_result(),
+                    "pendingRemoval": [],
+                },
             )
         self.assertEqual(active.build_id, candidate.build_id)
 
@@ -243,6 +250,101 @@ class IndexOperatorResultTest(ServerFixture):
                 {"buildId": rebuilt.build_id, "manifest": manifest_record(rebuilt).to_result()},
             )
         self.assertIsNone(rebuilt.evaluation_version)
+
+
+class SupersededBuildRemovalTest(ServerFixture):
+    """Activation commits first; the builds it superseded are removed afterwards (#552)."""
+
+    def setUp(self):
+        super().setUp()
+        self.active = self.candidate()
+        self.local_index.activate(self.active.build_id)
+        self.stale = sorted(self.candidate().build_id for _ in range(2))
+        self.replacement = self.candidate()
+
+    def candidate(self):
+        return self.local_index.build(
+            normalized([concept("C1", "One", active=True)]), None, self.context.embedding_provider
+        )
+
+    def listed(self):
+        return {item["build_id"] for item in invoke(self.context, "index_builds")["builds"]}
+
+    def rows(self, build_id):
+        with sqlite3.connect(self.local_index.db_path) as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM manifests WHERE build_id = ?", (build_id,)
+            ).fetchone()[0]
+
+    def fail_second_removal(self):
+        """The second superseded build cannot be deleted: the database is busy."""
+
+        real = index_module.delete_build
+        removed = []
+
+        def flaky(conn, build_id):
+            removed.append(build_id)
+            if len(removed) > 1:
+                busy = sqlite3.OperationalError("database is locked")
+                busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
+                raise busy
+            real(conn, build_id)
+
+        return patch.object(index_module, "delete_build", flaky)
+
+    def test_a_failed_removal_is_reported_and_leaves_the_activation_and_the_rollback_target(self):
+        with captured() as stream, self.fail_second_removal():
+            result = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        active = self.context.index.get_active_manifest()
+        with correlated(result.get("manifest", {}).get("provenance", {}).get("correlationId")):
+            self.assertEqual(
+                result,
+                {
+                    "buildId": self.replacement.build_id,
+                    "manifest": active.to_result(),
+                    "pendingRemoval": [self.stale[1]],
+                },
+            )
+        self.assertEqual(active.build_id, self.replacement.build_id)
+        self.assertEqual(self.listed(), {self.active.build_id, self.replacement.build_id})
+        self.assertEqual(self.rows(self.stale[0]), 0)
+        pending = records(stream, "index_build_removal_pending")
+        self.assertEqual(
+            [(item["level"], item["build_ids"]) for item in pending],
+            [("WARNING", [self.stale[1]])],
+        )
+
+    def test_the_next_activation_removes_what_is_left_and_the_rollback_target_survives(self):
+        with self.fail_second_removal():
+            invoke(self.context, "index_activate", self.replacement.build_id)
+
+        hidden = invoke(self.context, "index_activate", self.stale[1])
+        again = invoke(self.context, "index_activate", self.replacement.build_id)
+        rollback = invoke(self.context, "index_activate", self.active.build_id)
+        forward = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(hidden.get("error", {}).get("code"), "internal_error")
+        self.assertEqual(again.get("pendingRemoval"), [])
+        self.assertEqual(self.rows(self.stale[1]), 0)
+        self.assertEqual(rollback.get("buildId"), self.active.build_id)
+        self.assertEqual(forward.get("buildId"), self.replacement.build_id)
+        self.assertEqual(self.listed(), {self.active.build_id, self.replacement.build_id})
+
+    def test_a_removal_failure_that_is_not_a_storage_failure_propagates_after_activation(self):
+        with sqlite3.connect(self.local_index.db_path) as conn:
+            conn.execute(
+                "CREATE TRIGGER refuse_delete BEFORE DELETE ON manifests "
+                "BEGIN SELECT RAISE(ABORT, 'refused'); END"
+            )
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(
+            self.context.index.get_active_manifest().build_id, self.replacement.build_id
+        )
+        self.assertEqual(self.listed(), {self.active.build_id, self.replacement.build_id})
 
 
 class FullBuildInputValidationTest(ServerFixture):
