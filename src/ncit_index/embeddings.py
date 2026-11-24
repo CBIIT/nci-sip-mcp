@@ -22,7 +22,7 @@ from .errors import IndexCompatibilityError
 class EmbeddingProvider(ABC):
     name: str
     model: str
-    # The commit of the model files in use; None when a provider cannot tell.
+    # Commit, content hash or algorithm name of the model in use; None when unknown.
     revision: str | None = None
 
     @abstractmethod

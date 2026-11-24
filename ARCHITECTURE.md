@@ -317,17 +317,19 @@ Serving uses `Context.index: IndexPort`; CLI operators open the package directly
    Temporary spooling bounds download memory. Progress is structured JSON on stderr every
    ten pages and at completion. HTTP retries remain in the shared client.
 6. `index-activate` changes the active manifest in one transaction and marks every other
-   completed build `superseded`, which hides it from every read at once. The superseded builds
+   completed build other than it and its predecessor `superseded`, which hides it from every
+   read at once. The superseded builds
    are deleted after the commit, one transaction each, on every activation (so an interrupted
    removal is retried by the next one). The result's `pendingRemoval` lists any not yet gone; a
    storage failure while deleting is logged as the warning `index_build_removal_pending` and
-   never undoes the activation. Activating the predecessor is rollback.
+   never undoes the activation. Activating the predecessor is rollback. An older schema-6 binary
+   hides superseded rows (its reads require state `complete`) but never deletes them.
    `index-rebuild` embeds stored payloads offline into an inactive snapshot.
 
 ### Index lifecycle
 
 These are logical lifecycle stages, not extra database enum values: persisted `state` is
-`building` or `complete`; activation and evaluation evidence are separate. The diagram follows
+`building`, `complete` or `superseded`; activation and evaluation evidence are separate. The diagram follows
 a production build. Developer samples have a separate activation path without the production
 evaluation gate. Failure leaves the current active build serving.
 A failed evaluation leaves its candidate complete and inactive.
@@ -532,7 +534,7 @@ erDiagram
         text build_id PK
         text payload "JSON IndexManifest"
         integer active
-        text state "building or complete"
+        text state "building, complete or superseded"
     }
     CONCEPTS {
         text build_id PK

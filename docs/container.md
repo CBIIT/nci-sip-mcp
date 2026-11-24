@@ -22,7 +22,9 @@ Serving never builds or activates an index.
 Supply the embedding model separately in a read-only Hugging Face cache mounted at
 `/model-cache`. `NCI_SIP_EMBEDDING_MODEL` must retain the model identity in the index manifest,
 not a new path to the same weights. If the index was built using a local model path, mount
-the model at that same path. The image sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`;
+the model at that same path, with content identical to the build's: the directory is hashed at
+start-up and a difference refuses start-up (the
+[hash definition](ncit-semantic-index.md#model-rationale-and-reproducibility-limits)). The image sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`;
 the container entry point additionally requests local files only. Missing or incompatible
 assets fail startup with one JSON diagnostic identifying the asset and error class.
 

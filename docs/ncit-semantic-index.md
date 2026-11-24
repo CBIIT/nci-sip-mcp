@@ -193,7 +193,8 @@ available. Verify search/readiness with the same embedding settings
 and intended release after activating; distribute matching assets separately to any serving replica.
 
 For rollback, set `PREVIOUS_BUILD_ID` to the retained predecessor, keep its matching embedding
-settings, and explicitly activate it:
+settings and model files (the revision check applies to a rollback too), and explicitly
+activate it:
 
 ```bash
 pdm run nci-sip-mcp index-activate "$PREVIOUS_BUILD_ID"
