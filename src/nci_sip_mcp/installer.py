@@ -211,7 +211,8 @@ def executable_prerequisite(name: str, fix: str) -> Prerequisite:
 
 
 def reachability_prerequisite(name: str, url: str, fix: str) -> Prerequisite:
-    # Built here, not in `reachable`: unsafe metadata is a bug that propagates, never "unreachable".
+    # Built here, not in `reachable`: unsafe metadata stops check/run/status with exit 2 before any
+    # contact, never "unreachable".
     request = Request(url, headers={"User-Agent": product_user_agent()})  # noqa: S310 - operator-configured HTTP(S) endpoint
 
     def reachable() -> bool:
