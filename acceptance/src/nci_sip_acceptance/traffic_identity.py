@@ -1,4 +1,7 @@
-"""Generate and inspect the acceptance installation identity without sending it."""
+"""Generate and inspect the acceptance installation identity, and render the User-Agent.
+
+The commands here send nothing; `record.py` and `citations.py` send the rendered User-Agent.
+"""
 
 from __future__ import annotations
 
@@ -58,8 +61,8 @@ def installation_label(snapshot: IdentitySnapshot) -> str:
 def product_user_agent(snapshot: IdentitySnapshot) -> str:
     """The User-Agent of acceptance's direct requests: the product alone, never an installation.
 
-    The server renders the same label in `nci_sip_mcp.traffic_identity.product_user_agent`;
-    keep the two equal.
+    The server renders the same form (product, version, project URL) in
+    `nci_sip_mcp.traffic_identity.product_user_agent`; the product names differ.
     """
 
     return _label(snapshot.version, None)

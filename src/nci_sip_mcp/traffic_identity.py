@@ -53,7 +53,8 @@ def product_user_agent() -> str:
 
     For emitters that carry no installation identity; the installed version is read and
     validated here, with the refusal `user_agent` gives. The acceptance distribution renders the
-    same label in `nci_sip_acceptance.traffic_identity.product_user_agent`; keep the two equal.
+    same form (product, version, project URL) in
+    `nci_sip_acceptance.traffic_identity.product_user_agent`; the product names differ.
     """
 
     return _label(_installed_version(), None)
