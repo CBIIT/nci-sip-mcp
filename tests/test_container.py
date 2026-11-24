@@ -4,7 +4,7 @@ import logging
 import sys
 import tempfile
 import types
-from contextlib import redirect_stderr
+from contextlib import contextmanager, redirect_stderr
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -177,6 +177,24 @@ class OfflineModel:
         return [[len(text), 1] for text in texts]
 
 
+@contextmanager
+def fake_sentence_transformers(model):
+    """Replace only the sentence_transformers entry of sys.modules, restoring only that entry.
+
+    `patch.dict(sys.modules, ...)` restores the whole mapping, which evicts any module first
+    imported inside it (NumPy, imported by `embed`); a later import of NumPy then fails.
+    """
+    saved = sys.modules.get("sentence_transformers")
+    sys.modules["sentence_transformers"] = types.SimpleNamespace(SentenceTransformer=model)
+    try:
+        yield
+    finally:
+        if saved is None:
+            del sys.modules["sentence_transformers"]
+        else:
+            sys.modules["sentence_transformers"] = saved
+
+
 class ContainerOfflineTest(ServerFixture):
     def model_directory(self):
         """An external model directory of its own: the data directory holds a live database."""
@@ -221,10 +239,7 @@ class ContainerOfflineTest(ServerFixture):
         def serve(_settings, context):
             served.append([row.tolist() for row in context.embedding_provider.embed(["abc"])])
 
-        with patch.dict(
-            sys.modules,
-            {"sentence_transformers": types.SimpleNamespace(SentenceTransformer=OfflineModel)},
-        ):
+        with fake_sentence_transformers(OfflineModel):
             provider = SentenceTransformersProvider(settings.embedding_model, local_files_only=True)
             self.local_index.upsert_concepts(normalized([concept("C1")]), None, provider)
             before = self.context.index.get_active_manifest()
@@ -245,15 +260,13 @@ class ContainerOfflineTest(ServerFixture):
             embedding_provider="sentence-transformers",
             embedding_model=str(model),
         )
-        modules = {"sentence_transformers": types.SimpleNamespace(SentenceTransformer=OfflineModel)}
         logging.disable(logging.NOTSET)
-        with patch.dict(sys.modules, modules):
+        with fake_sentence_transformers(OfflineModel):
             provider = SentenceTransformersProvider(str(model), local_files_only=True)
-        # Outside the patch: embedding imports NumPy, which must stay imported afterwards.
         self.local_index.upsert_concepts(normalized([concept("C1")]), None, provider)
         served = []
         with (
-            patch.dict(sys.modules, modules),
+            fake_sentence_transformers(OfflineModel),
             patch.object(container_entry.Settings, "from_env", return_value=settings),
             patch.object(container_entry, "configure_logging"),
             patch.object(container_entry, "run_http", lambda *_: served.append("served")),
