@@ -13,3 +13,5 @@ or "No outcome moved".
 ## Review rounds
 
 For a milestone pull request: the table of each round (finding, pass, fixed or rejected).
+For a milestone pull request also: its waits by kind (active work, owner decision, external input,
+review, CI), as recorded in the issues.
