@@ -107,6 +107,14 @@ class ModelDirectoryRevisionTest(unittest.TestCase):
                 path = self.model / relative
                 path.rmdir() if path.is_dir() and not path.is_symlink() else path.unlink()
 
+    @unittest.skipIf(os.geteuid() == 0, "root can list any directory")
+    def test_an_unlistable_subdirectory_is_refused_naming_the_path(self):
+        locked = self.model / "tokenizer"
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        with self.assertRaisesRegex(IndexCompatibilityError, "tokenizer"):
+            self.revision()
+
 
 if __name__ == "__main__":
     unittest.main()
