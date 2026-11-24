@@ -20,11 +20,14 @@ from unittest.mock import patch
 
 from nci_sip_mcp import cli, container_entry, traffic_identity
 from nci_sip_mcp.audit import JsonFormatter
+from nci_sip_mcp.cadsr import CaDSRClient
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.context import Context
 from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.http_client import HttpClient
 from nci_sip_mcp.index_adapter import LocalIndexAdapter
+from nci_sip_mcp.ssis import SSISClient
 from ncit_index.index import LocalIndex
 
 INSTALLATION = "0123456789abcdef0123456789abcdef"
@@ -302,3 +305,26 @@ class ContainerEntryTest(ReceiverCase):
             ],
         )
         self.assertNotIn("secret", json.dumps(records))
+
+
+class EveryClientRequiresALabelTest(unittest.TestCase):
+    """A client built without a User-Agent is a caller bug, never urllib's default (A6.2b)."""
+
+    def test_no_platform_client_can_be_constructed_without_one(self):
+        constructors = {
+            "HttpClient": lambda: HttpClient(
+                "https://example.invalid",
+                label="EVS",
+                timeout_seconds=5,
+                max_attempts=1,
+                retry_backoff_seconds=0,
+                max_response_bytes=1000,
+                size_bound="BOUND",
+            ),
+            "EVSClient": lambda: EVSClient("https://example.invalid"),
+            "CaDSRClient": lambda: CaDSRClient(Settings()),
+            "SSISClient": lambda: SSISClient(Settings()),
+        }
+        for name, construct in constructors.items():
+            with self.subTest(name), self.assertRaisesRegex(TypeError, "user_agent"):
+                construct()
