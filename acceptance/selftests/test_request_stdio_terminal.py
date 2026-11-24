@@ -65,7 +65,7 @@ def _record_finish(resource, monkeypatch):
         try:
             result = actual_finish(deadline)
         except BaseException as error:
-            outcome[0] = f"raised:{type(error).__name__}"
+            outcome[0] = f"raised:{_type_label(error)}"
             raise
         outcome[0] = "returned"
         return result
@@ -414,21 +414,46 @@ def held_process_cleanup(terminal_case, monkeypatch):
         release.set()
 
 
+class PrivateWaitError(Exception):
+    """Test-only wait failure whose message must never reach a diagnostic."""
+
+
+PRIVATE_TEXT = "private-sentinel /home/private/key=hunter2"
+
+
+# Closed set of exception classes a diagnostic may name; anything else is "unknown", so a
+# dynamically named class cannot carry private text into an assertion message.
+DIAGNOSTIC_TYPES = {
+    cls: cls.__name__
+    for cls in (
+        ExceptionGroup,
+        BaseExceptionGroup,
+        RequestPolicyError,
+        PrivateWaitError,
+        LookupError,
+    )
+}
+
+
+def _type_label(error):
+    return DIAGNOSTIC_TYPES.get(type(error), "unknown")
+
+
 def _label(error):
     if not isinstance(error, RequestPolicyError):
-        return type(error).__name__
+        return _type_label(error)
     reason = error.reason if error.reason in get_args(PolicyReason.__value__) else "unknown"
-    return f"{type(error).__name__}:{reason}"
+    return f"{_type_label(error)}:{reason}"
 
 
-def _labels(error):
-    return ",".join(_label(leaf) for leaf in failure_leaves(error))
+def _labels(errors):
+    return ",".join(_label(leaf) for error in errors for leaf in failure_leaves(error))
 
 
 def _outward_label(outward):
     if not isinstance(outward, BaseExceptionGroup):
         return "None" if outward is None else _label(outward)
-    return f"{type(outward).__name__}({_labels(outward)})"
+    return f"{_type_label(outward)}({_labels([outward])})"
 
 
 def _terminal_diagnostics(case, outward):
@@ -442,7 +467,7 @@ def _terminal_diagnostics(case, outward):
             f"endpoints_closed={resource.endpoints_closed} "
             f"process_present={resource.process is not None}"
         )
-        errors = ",".join(_label(error) for error in resource.errors)
+        errors = _labels(resource.errors)
         return (
             f"diagnostics: outward={_outward_label(outward)}; errors=[{errors}]; "
             f"settled_inputs: {settled}; fixture_waits={len(waited)}; "
@@ -470,14 +495,7 @@ def _assert_failed_terminal_resources_settled(case, expected_status, outward=Non
     assert (summary["state"], summary["observationComplete"]) == ("failed", True)
 
 
-class PrivateWaitError(Exception):
-    """Test-only wait failure whose message must never reach a diagnostic."""
-
-
-PRIVATE_TEXT = "private-sentinel /home/private/key=hunter2"
-
-
-def test_pending_owner_failure_reports_sanitized_settlement_state(terminal_case, monkeypatch):
+def _pending_owner_failure(terminal_case, monkeypatch, fault):
     owner, resources, waited, closed = terminal_case
     real_open, raised = anyio.open_process, []
 
@@ -489,7 +507,7 @@ def test_pending_owner_failure_reports_sanitized_settlement_state(terminal_case,
             code = await actual_wait()
             if not raised:
                 raised.append(True)
-                raise PrivateWaitError(PRIVATE_TEXT)
+                raise fault
             return code
 
         monkeypatch.setattr(process, "wait", wait)
@@ -515,6 +533,13 @@ def test_pending_owner_failure_reports_sanitized_settlement_state(terminal_case,
     with pytest.raises(AssertionError) as failure:
         _assert_failed_terminal_resources_settled(terminal_case, 0, outward)
     message = str(failure.value)
+    return message, resource, waited
+
+
+def test_pending_owner_failure_reports_sanitized_settlement_state(terminal_case, monkeypatch):
+    message, resource, waited = _pending_owner_failure(
+        terminal_case, monkeypatch, PrivateWaitError(PRIVATE_TEXT)
+    )
     assert PRIVATE_TEXT not in message and "hunter2" not in message
     assert (
         "diagnostics: outward=ExceptionGroup(PrivateWaitError); errors=[PrivateWaitError]; "
@@ -523,6 +548,44 @@ def test_pending_owner_failure_reports_sanitized_settlement_state(terminal_case,
         "thread_alive=False; finish=raised:ExceptionGroup; "
         f"pending=[{resource.name}]"
     ) in message
+
+
+def test_pending_owner_failure_never_names_an_unknown_exception_class(terminal_case, monkeypatch):
+    private_class = type("PrivateClassName_hunter2", (Exception,), {})
+    message, resource, waited = _pending_owner_failure(
+        terminal_case, monkeypatch, private_class(PRIVATE_TEXT)
+    )
+    assert "PrivateClassName" not in message and "hunter2" not in message
+    assert (
+        "diagnostics: outward=ExceptionGroup(unknown); errors=[unknown]; "
+        "settled_inputs: waited=True process_closed=True streams_closed=True "
+        f"endpoints_closed=True process_present=True; fixture_waits={len(waited)}; "
+        "thread_alive=False; finish=raised:ExceptionGroup; "
+        f"pending=[{resource.name}]"
+    ) in message
+
+
+def test_grouped_resource_errors_report_their_leaf_reasons():
+    grouped = ExceptionGroup(
+        "private group message", [RequestPolicyError("accounting"), LookupError(PRIVATE_TEXT)]
+    )
+    resource = SimpleNamespace(
+        waited=False,
+        process_closed=False,
+        closed=set(),
+        endpoints_closed=False,
+        process=None,
+        errors=[grouped],
+        thread=SimpleNamespace(is_alive=lambda: False),
+        finish_outcome=["not-called"],
+    )
+    owner = SimpleNamespace(pending_owners=())
+    assert _terminal_diagnostics((owner, [resource], [], set()), None) == (
+        "diagnostics: outward=None; errors=[RequestPolicyError:accounting,LookupError]; "
+        "settled_inputs: waited=False process_closed=False streams_closed=False "
+        "endpoints_closed=False process_present=False; fixture_waits=0; "
+        "thread_alive=False; finish=not-called; pending=[]"
+    )
 
 
 def test_finish_recording_keeps_result_and_exception_through_other_wrappers(monkeypatch):
