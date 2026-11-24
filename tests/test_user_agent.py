@@ -18,7 +18,7 @@ from importlib.metadata import version
 from pathlib import Path
 from unittest.mock import patch
 
-from nci_sip_mcp import cli, container_entry, installer, traffic_identity
+from nci_sip_mcp import cli, container_entry, installer, installer_state, traffic_identity
 from nci_sip_mcp.audit import JsonFormatter
 from nci_sip_mcp.cadsr import CaDSRClient
 from nci_sip_mcp.config import Settings
@@ -207,6 +207,48 @@ class InstallerProbeTest(ReceiverCase):
 
         self.assertTrue(reachable)
         self.assertEqual(self.user_agents(server), [user_agent()])
+
+    def test_unsafe_installed_metadata_stops_every_prerequisite_command_without_contact(self):
+        message = (
+            "The installed nci-sip-mcp version cannot form a safe label. "
+            "Reinstall the package with valid metadata and retry.\n"
+        )
+        for command in ("check", "run", "status"):
+            with self.subTest(command=command):
+                server = self.serve()
+                data_dir = self.path / command
+                data_dir.mkdir()
+                arguments = [command, "--target", "local"]
+                if command != "check":
+                    arguments += ["--data-dir", str(data_dir), "--non-interactive"]
+                if command == "status":
+                    installer_state.write_state(
+                        data_dir,
+                        installer_state.InstallationState(
+                            2,
+                            "local",
+                            ("server",),
+                            (installer_state.StepOutcome("check_prerequisites", "completed"),),
+                        ),
+                    )
+                environment = {
+                    "NCI_SIP_EVS_BASE_URL": server.url,
+                    "NCI_SIP_CADSR_BASE_URL": server.url,
+                }
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    patch.dict(os.environ, environment),
+                    patch.object(traffic_identity, "version", return_value="not a version"),
+                    redirect_stdout(stdout),
+                    redirect_stderr(stderr),
+                ):
+                    try:
+                        outcome = installer.main(arguments)
+                    except Exception as error:  # noqa: BLE001 - the observed outcome is the claim
+                        outcome = type(error).__name__
+
+                self.assertEqual((outcome, stdout.getvalue(), stderr.getvalue()), (2, "", message))
+                self.assertEqual(server.seen, [])
 
 
 def run_main(*argv, **environment):
