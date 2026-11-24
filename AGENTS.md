@@ -12,8 +12,9 @@ production standards and likely to become the production codebase: never as a pr
 as in production, and never by contract terms or documents outside the repository. It is a lean
 wrapper over EVS and caDSR (plus the NCIt index), never a shadow of them; a functional gap in
 an upstream system is reported to its team and stays visible here (see the first standard
-below). Until NCI issues caDSR credentials, CDE Match and the lists-of-values API are tested
-against fixtures crafted from the published contracts; the data element API, vmMatch and
+below). The caDSR credential is issued for staging only and its protected access is unverified
+(last recorded 401, #383), so CDE Match and the lists-of-values API are tested against
+fixtures crafted from the published contracts; the data element API, vmMatch and
 Form API 2.0 are anonymous and may be tested live.
 The milestones and issues on GitHub (Phases 0 to 7 delivered; later phases open) are the plan.
 `docs/functional-status.md` gives dated functional status and evidence, linked from README.md;
