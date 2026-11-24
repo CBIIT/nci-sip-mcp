@@ -1,11 +1,14 @@
+import io
 import json
 import sqlite3
+import sys
 import unittest
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from fakes import captured, concept, records, release, terminology_row
+from nci_sip_mcp.cli import main
 from nci_sip_mcp.errors import correlated
 from nci_sip_mcp.evaluation import evaluate_build
 from nci_sip_mcp.evaluation_sets import parse_set
@@ -292,6 +295,40 @@ class SupersededBuildRemovalTest(ServerFixture):
             real(conn, build_id)
 
         return patch.object(index_module, "delete_build", flaky)
+
+    def test_a_superseded_build_is_unknown_to_rebuild_and_evaluate(self):
+        # No build can be removed, so the two builds the activation superseded stay in the file.
+        with captured(), self.fail_removals_after(0):
+            invoke(self.context, "index_activate", self.replacement.build_id)
+        unknown = "Inspect `index-builds` and "
+        for argv, message in (
+            (
+                ["index-rebuild", self.stale[0]],
+                "Unknown build; list available builds with index-builds. "
+                + unknown
+                + "retry against an available completed build.",
+            ),
+            (
+                ["evaluate", "--build-id", self.stale[0]],
+                "Evaluation build is unavailable; list completed builds. "
+                + unknown
+                + "resolve the reported evaluation problem before retrying.",
+            ),
+        ):
+            with self.subTest(argv[0]):
+                stdout = io.StringIO()
+                with (
+                    patch("nci_sip_mcp.cli.configure_logging"),
+                    patch("nci_sip_mcp.cli.Context", return_value=self.context),
+                    patch.object(sys, "argv", ["nci-sip-mcp", *argv]),
+                    redirect_stdout(stdout),
+                ):
+                    code = main()
+                error = json.loads(stdout.getvalue()).get("error", {})
+                self.assertEqual(
+                    (code, error.get("code"), error.get("message")), (1, "internal_error", message)
+                )
+                self.assertEqual(self.rows(self.stale[0]), 1)  # present, but not offered
 
     def test_a_failed_removal_is_reported_and_leaves_the_activation_and_the_rollback_target(self):
         with captured() as stream, self.fail_removals_after(1):
