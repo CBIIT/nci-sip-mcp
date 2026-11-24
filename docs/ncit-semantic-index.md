@@ -81,17 +81,25 @@ call is added for it). The cases:
   `IndexModelRevisionError` naming both, and one `index_model_revision_mismatch` record per build
   and process is logged. Serve the model files the build was embedded with, or run `index-rebuild`
   with the serving model and activate its evaluated build.
-- Stored known, runtime unknown (for example a model supplied as a directory): refused the same
-  way, because the two cannot be compared.
-- Stored unknown (a build made before this check, or from a model directory): served after the
+- Stored known, runtime unknown (a custom provider that cannot tell): refused the same way,
+  because the two cannot be compared.
+- Stored unknown (a build made before this check): served after the
   checks above, and one `index_model_revision_unknown` record per build and process is logged. A
   stored build is never backfilled; rebuild to record a revision. `index-builds` shows
   `embedding_revision` (`null` when unknown). The hashing provider's revision names its algorithm.
 
-A model supplied as a directory has no revision until its files are identified separately, so
-such a deployment is still unprotected against a changed same-named model. Preserve the actual
-frozen model assets, software versions and evaluation data externally when reproducing a run;
-the commands below alone do not provide a byte-reproducible model pin.
+A model supplied as a directory is identified by its content: the revision is `sha256:` followed
+by the SHA-256 of the lines `<relative path>\0<file SHA-256 hex>\n` for every file, sorted by
+relative path. A file link counts as the content of its target under the link's own path (a Hub
+snapshot folder of links into `blobs/` hashes like a copy); location and modification time do not
+count, a changed byte, a rename or an added file does. A directory link, a broken link, a special
+file or an empty directory is refused, naming the path. Copy a model directory unchanged: the
+path comparison is exact, including case. The hash is computed once when the provider is created,
+at build and at start-up, so the container serving `/model` refuses to start when the directory
+differs from the one the index was embedded with. A build made before this check stores no
+revision and stays in the "stored unknown" case until it is rebuilt. Preserve the actual
+software versions and evaluation data externally when reproducing a run; the commands below
+alone do not provide a byte-reproducible model pin.
 
 ## How retrieval uses the fields
 

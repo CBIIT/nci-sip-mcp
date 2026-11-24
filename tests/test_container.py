@@ -109,6 +109,7 @@ class ContainerTest(ServerFixture):
         # A Hub cache folder is a commit snapshot; the revision is read from its name.
         cached = str(self.settings.data_dir / "snapshots" / ("a" * 40))
         Path(cached).mkdir(parents=True)
+        (Path(cached) / "config.json").write_text("{}")  # a directory model is hashed, not empty
 
         class LocalModel:
             def __init__(self, name, *, local_files_only=False):
@@ -248,17 +249,19 @@ class ContainerOfflineTest(ServerFixture):
         logging.disable(logging.NOTSET)
         with patch.dict(sys.modules, modules):
             provider = SentenceTransformersProvider(str(model), local_files_only=True)
-            self.local_index.upsert_concepts(normalized([concept("C1")]), None, provider)
-            served = []
-            with (
-                patch.object(container_entry.Settings, "from_env", return_value=settings),
-                patch.object(container_entry, "configure_logging"),
-                patch.object(container_entry, "run_http", lambda *_: served.append("served")),
-            ):
-                self.assertEqual((container_entry.main(), served), (0, ["served"]))
-                (model / "weights.bin").write_bytes(b"w2")
-                with self.assertLogs("nci_sip_mcp.index", level="INFO") as logs:
-                    code = container_entry.main()
+        # Outside the patch: embedding imports NumPy, which must stay imported afterwards.
+        self.local_index.upsert_concepts(normalized([concept("C1")]), None, provider)
+        served = []
+        with (
+            patch.dict(sys.modules, modules),
+            patch.object(container_entry.Settings, "from_env", return_value=settings),
+            patch.object(container_entry, "configure_logging"),
+            patch.object(container_entry, "run_http", lambda *_: served.append("served")),
+        ):
+            self.assertEqual((container_entry.main(), served), (0, ["served"]))
+            (model / "weights.bin").write_bytes(b"w2")
+            with self.assertLogs("nci_sip_mcp.index", level="INFO") as logs:
+                code = container_entry.main()
         mismatch = [
             r.structured for r in logs.records if r.structured["event"].endswith("_mismatch")
         ]

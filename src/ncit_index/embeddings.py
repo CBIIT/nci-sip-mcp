@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
@@ -101,10 +102,10 @@ def _local_model(model_name: str) -> str:
 def _cache_revision(model_name: str) -> str | None:
     """The commit of a Hub model's cached snapshot, read from the local cache without traffic.
 
-    A model supplied as a directory is not identified by its path, so it has no revision.
+    A model supplied as a directory is identified by a hash of its files instead.
     """
     if Path(model_name).is_dir():
-        return None
+        return model_directory_revision(Path(model_name))
     from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
 
     commit = Path(snapshot_download(model_name, local_files_only=True)).name
@@ -114,6 +115,56 @@ def _cache_revision(model_name: str) -> str | None:
             "refresh the model cache from the Hub."
         )
     return commit
+
+
+def model_directory_revision(path: Path) -> str:
+    """Identify a model directory by its content: `sha256:` plus a hash of sorted file lines.
+
+    Each line is `<relative POSIX path>\\0<file SHA-256 hex>\\n`. A file link counts as its
+    target's content under the link's own path, because Hub snapshot folders hold links into
+    `blobs/`. Location, modification time and ordering on disk do not count; a changed byte, a
+    rename or an added file does. Anything that cannot be hashed as a file is refused by path.
+    """
+    lines = sorted(f"{relative}\0{_file_hash(file)}\n" for relative, file in _model_files(path))
+    return "sha256:" + hashlib.sha256("".join(lines).encode()).hexdigest()
+
+
+def _model_files(root: Path) -> Iterable[tuple[str, Path]]:
+    for current, directories, names in os.walk(root):
+        here = Path(current)
+        if not directories and not names:
+            raise IndexCompatibilityError(f"Model directory {_relative(here, root)} is empty")
+        for name in directories:
+            _require_real_directory(here / name, root)
+        for name in names:
+            yield _relative(here / name, root), _require_file(here / name, root)
+
+
+def _require_real_directory(path: Path, root: Path) -> None:
+    if path.is_symlink():
+        raise IndexCompatibilityError(
+            f"Model directory entry {_relative(path, root)} is a directory link"
+        )
+
+
+def _require_file(path: Path, root: Path) -> Path:
+    if not path.is_file():
+        raise IndexCompatibilityError(
+            f"Model directory entry {_relative(path, root)} is not a readable file"
+        )
+    return path
+
+
+def _relative(path: Path, root: Path) -> str:
+    return "." if path == root else path.relative_to(root).as_posix()
+
+
+def _file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def normalize_embedding_settings(provider: str, model: str) -> tuple[str, str]:
