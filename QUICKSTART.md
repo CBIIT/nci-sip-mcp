@@ -18,22 +18,31 @@ the utilities do not label requests yet.
 
 ## Upstream access and SSIS transition
 
-**Operational status: 2026-11-05.** The [current access decision](https://github.com/CBIIT/nci-sip-mcp/issues/421#issuecomment-6671335647)
-and [stage investigation](https://github.com/CBIIT/nci-sip-mcp/issues/383) distinguish three things:
+**Operational status: 2026-11-23.** The access policy of the project owner
+([#381](https://github.com/CBIIT/nci-sip-mcp/issues/381#issuecomment-7090335026), superseding
+the earlier [access decision](https://github.com/CBIIT/nci-sip-mcp/issues/421#issuecomment-6671335647))
+and the [stage investigation](https://github.com/CBIIT/nci-sip-mcp/issues/383) distinguish
+three things:
 
-- **Technical access:** data-element, vmMatch and Form API operations can be anonymous;
-  protected CDE Match and lists-of-values APIs need credentials that NCI has not issued.
-  Their contract-crafted fixtures establish caller behavior, not live acceptance or access.
-- **Operational authorization:** production caDSR requests are prohibited even anonymously.
-  Shared SI/SSIS traffic is paused; no new stage or AI requests are authorized here, and
-  Acceptance(live) remains disabled. A stage hostname and earlier exploratory contact are
-  recorded, but present access and stage registry identity are unverified. A production export
-  date cannot supply that identity. Existing automatic hosted setup checks retain their
-  [bounded EVS traffic](https://github.com/CBIIT/nci-sip-mcp/issues/421#issuecomment-6671269749);
-  that is separate from offline fixture verification.
-- **Capability:** a pause or missing credential does not prove an API lacks a capability.
-  The [upstream requirements catalogue](docs/upstream/README.md) records the actual contract gaps
-  and needed evidence. Green fixtures are not permission to contact production.
+- **Operational permission:** No caDSR service is prohibited: the production REST API, the
+  export folder and the staging host may be used. Small spot tests are permitted, and larger
+  tests are announced to the team first, so that the upstream teams can watch them. A larger
+  automated run states its request count before any larger automated run starts (a reviewed
+  plan, then the announcement). EVS production is permitted on the same terms. SSIS queries stay
+  bounded, with no Cartesian products and no unbounded joins. This is not unrestricted
+  permission for every service, model, workload or tool: each request stays identifiable by its
+  `X-Correlation-ID`. Staging needs the NIH VPN.
+- **The harness is stricter than that permission.** The acceptance harness's run policy still
+  blocks live caDSR and SSIS traffic, and Acceptance(live) stays disabled until a reviewed run
+  plan exists. Offline fixtures establish caller behavior, not live acceptance or access, and
+  they are the default for automated runs.
+- **Technical access:** data-element, vmMatch and Form API operations can be anonymous. The
+  protected CDE Match and lists-of-values APIs need a credential; the credential issued to this
+  project is for staging only. A stage hostname and earlier exploratory contact are recorded,
+  but stage registry identity is unverified, and a production export date cannot supply it.
+- **Capability:** a missing credential or a hold does not prove an API lacks a capability. The
+  [upstream requirements catalogue](docs/upstream/README.md) records the actual contract gaps
+  and needed evidence.
 
 **Protected caDSR operations (access, not capability).** `match_data_elements`,
 `harmonize_data_dictionary` (its CDE matching calls) and `list_contexts` use the CDE Match and
@@ -42,14 +51,15 @@ issued to this project is for caDSR staging: pair it only with
 `NCI_SIP_CADSR_BASE_URL=https://cadsrapi-stage.cancer.gov/rad`, the NIH VPN and
 `NCI_SIP_CADSR_CREDENTIAL`, never with production. A production request without a production
 credential is refused with 401, which says nothing about whether the feature exists there. The
-tools stay listed, and the server never falls back from staging to production. **Last recorded
-protected staging attempts returned 401 ([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383));
+tools stay listed, and the server never falls back from staging to production. **Protected
+access with the staging credential: last recorded 401 on 2026-11-23
+([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383)); the cause is not inferred, and
 restored access is not yet verified.** This status changes only from verification results.
 
-While holds remain, use [offline fixture validation](CONTRIBUTING.md#complete-fixture-ratchet).
-Do not run live installer connectivity checks against their default production caDSR target.
-The [local guide](docs/local-guide.md#server) describes the lifecycle, not authorization to
-make those requests.
+Use [offline fixture validation](CONTRIBUTING.md#complete-fixture-ratchet) for automated runs.
+The [local guide](docs/local-guide.md#server) describes the installer lifecycle; its default
+connectivity checks are small requests to the production caDSR target and need no announcement
+at that size.
 
 ### External configuration and its limits
 
@@ -60,13 +70,13 @@ existing interfaces support them; never commit secrets. The [Settings table](#se
 It also owns `NCI_SIP_CADSR_CREDENTIAL` and `NCI_SIP_EVS_LICENSE_KEY`; service credentials are
 origin-bound, not caller authorization. Live mode fills unset endpoints with production defaults.
 Fixture mode requires all five explicit endpoints, preventing silent fallback; it does not
-reject an explicitly supplied prohibited origin.
+reject an explicitly supplied origin.
 
 `NCI_SIP_PROFILE` limits the served surface. An opt-in `authority_resolver` supplies
 [caller permissions](docs/caller-permissions.md); governed HTTP uses `NCI_SIP_HTTP_AUTH_MODE`
 and `NCI_SIP_HTTP_AUTH_FACTORY` for an approved [authentication/policy integration](docs/governed-http.md).
 These inbound/tool controls are not a universal outbound-environment policy. Current settings
-and credentials neither enforce nor lift the operational holds. Named environment isolation
+and credentials neither enforce nor lift the access policy. Named environment isolation
 and pre-send request safeguards are scheduled in [#447](https://github.com/CBIIT/nci-sip-mcp/issues/447)
 and [#448](https://github.com/CBIIT/nci-sip-mcp/issues/448); they are not implemented here.
 [Deployment egress controls](docs/container.md#gateway-controls-and-outbound-access) remain
@@ -268,7 +278,7 @@ release does not inherit that export date.
 The five base URLs are one set. In `live` mode a base URL that is not given takes its production
 default, and one that is given replaces that default. In `fixture` mode every one of the five must be given;
 a missing one stops startup, naming it, rather than silently falling back to production. Explicit
-origins are not checked against the [operational holds](#upstream-access-and-ssis-transition). The
+origins are not checked against the [access policy](#upstream-access-and-ssis-transition). The
 server adds the platform's own paths to each base URL. A setting set to an empty value is
 rejected: unset it instead.
 
