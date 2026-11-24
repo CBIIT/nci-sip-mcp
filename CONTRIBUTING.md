@@ -493,6 +493,8 @@ scheduler directory; missing or incomplete raw evidence for a nonempty shard blo
 clearance, regardless of the workflow's displayed status. An empty pre-PR sample does not excuse a
 later `NO_TESTS` outcome for a reachable candidate. The raw results do not contain every runner
 phase.
+The producer-evidence exception for a complete, independently verified empty catalogue is stated
+in AGENTS.md; nothing here relaxes a nonempty campaign.
 
 ## Coverage badges
 
@@ -698,6 +700,9 @@ Merge clearance is a reviewer PR comment naming the head commit; a subsequent pu
 clearance, after all triggered workflows pass. See [AGENTS.md](AGENTS.md#how-work-is-done-issues-into-a-milestone-branch-one-reviewed-milestone-into-main)
 for the milestone process and [operations](docs/operations.md) for available signals, ATO
 evidence inputs and open hosting responsibilities.
+
+Issue sizing, milestone bounds, issue clarity and the wait summary are set in
+[AGENTS.md](AGENTS.md#how-work-is-done-issues-into-a-milestone-branch-one-reviewed-milestone-into-main).
 
 Every change reaches `main` through a pull request. Milestone landings use merge commits;
 squash remains an allowed alternative. Use the pull request title as the landing commit

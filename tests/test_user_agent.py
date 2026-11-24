@@ -18,7 +18,7 @@ from importlib.metadata import version
 from pathlib import Path
 from unittest.mock import patch
 
-from nci_sip_mcp import cli, container_entry, installer, traffic_identity
+from nci_sip_mcp import cli, container_entry, installer, installer_state, traffic_identity
 from nci_sip_mcp.audit import JsonFormatter
 from nci_sip_mcp.cadsr import CaDSRClient
 from nci_sip_mcp.config import Settings
@@ -208,6 +208,50 @@ class InstallerProbeTest(ReceiverCase):
         self.assertTrue(reachable)
         self.assertEqual(self.user_agents(server), [user_agent()])
 
+    def test_unsafe_installed_metadata_stops_every_prerequisite_command_without_contact(self):
+        message = (
+            "The installed nci-sip-mcp version cannot form a safe label. "
+            "Reinstall the package with valid metadata and retry.\n"
+        )
+        for command in ("check", "run", "status"):
+            with self.subTest(command=command):
+                server = self.serve()
+                data_dir = self.path / command
+                data_dir.mkdir()
+                arguments = [command, "--target", "local"]
+                if command != "check":
+                    arguments += ["--data-dir", str(data_dir)]
+                if command == "run":
+                    arguments.append("--non-interactive")
+                if command == "status":
+                    installer_state.write_state(
+                        data_dir,
+                        installer_state.InstallationState(
+                            2,
+                            "local",
+                            ("server",),
+                            (installer_state.StepOutcome("check_prerequisites", "completed"),),
+                        ),
+                    )
+                environment = {
+                    "NCI_SIP_EVS_BASE_URL": server.url,
+                    "NCI_SIP_CADSR_BASE_URL": server.url,
+                }
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    patch.dict(os.environ, environment),
+                    patch.object(traffic_identity, "version", return_value="not a version"),
+                    redirect_stdout(stdout),
+                    redirect_stderr(stderr),
+                ):
+                    try:
+                        outcome = installer.main(arguments)
+                    except Exception as error:  # noqa: BLE001 - the observed outcome is the claim
+                        outcome = type(error).__name__
+
+                self.assertEqual((outcome, stdout.getvalue(), stderr.getvalue()), (2, "", message))
+                self.assertEqual(server.seen, [])
+
 
 def run_main(*argv, **environment):
     """Run the CLI with exactly `environment`; return (exit code, parsed stdout, stderr text)."""
@@ -313,57 +357,40 @@ class ContainerEntryTest(ReceiverCase):
         self.assertEqual(code, 1)
         serve.assert_not_called()
         self.assertEqual(
-            [(r["event"], r["asset"], r["errorType"], r["parameter"]) for r in records],
+            [(r["event"], r["asset"], r["errorType"], r["code"], r["parameter"]) for r in records],
             [
                 (
                     "container_startup_failed",
                     "identity",
                     "PlatformError",
+                    "invalid_request",
                     "NCI_SIP_INSTALLATION_ID",
                 )
             ],
         )
         self.assertNotIn("secret", json.dumps(records))
 
-    def test_a_refused_identity_is_logged_with_its_code_and_parameter(self):
+    def test_an_unsafe_installed_version_stops_startup_naming_the_version(self):
         logging.disable(logging.NOTSET)
         settings = Settings(data_dir=self.path, transport="streamable-http")
         index = LocalIndexAdapter(LocalIndex(self.path))
-        cases = (
-            (
-                "malformed id",
-                {"NCI_SIP_INSTALLATION_ID": "not-an-id"},
-                None,
-                "NCI_SIP_INSTALLATION_ID",
-            ),
-            ("unsafe version", {}, "not a version", "nci-sip-mcp installed version"),
-        )
-        for name, environment, unsafe_version, parameter in cases:
-            with ExitStack() as stack, self.subTest(name):
-                stack.enter_context(patch.dict(os.environ, environment))
-                stack.enter_context(
-                    patch.object(container_entry.Settings, "from_env", return_value=settings)
-                )
-                stack.enter_context(patch.object(container_entry, "configure_logging"))
-                stack.enter_context(
-                    patch.object(container_entry, "prepared_index", return_value=index)
-                )
-                stack.enter_context(patch.object(container_entry, "run_http"))
-                if unsafe_version:
-                    stack.enter_context(
-                        patch.object(traffic_identity, "version", return_value=unsafe_version)
-                    )
-                logs = stack.enter_context(
-                    self.assertLogs("nci_sip_mcp.container_entry", level="ERROR")
-                )
-                code = container_entry.main()
+        with (
+            patch.object(container_entry.Settings, "from_env", return_value=settings),
+            patch.object(container_entry, "configure_logging"),
+            patch.object(container_entry, "prepared_index", return_value=index),
+            patch.object(container_entry, "run_http") as serve,
+            patch.object(traffic_identity, "version", return_value="not a version"),
+            self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as logs,
+        ):
+            code = container_entry.main()
 
-                records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
-                self.assertEqual(code, 1)
-                self.assertEqual(
-                    [(r["asset"], r.get("code"), r["parameter"]) for r in records],
-                    [("identity", "invalid_request", parameter)],
-                )
+        records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
+        self.assertEqual(code, 1)
+        serve.assert_not_called()
+        self.assertEqual(
+            [(r["asset"], r["code"], r["parameter"]) for r in records],
+            [("identity", "invalid_request", "nci-sip-mcp installed version")],
+        )
 
 
 class EveryClientRequiresALabelTest(unittest.TestCase):

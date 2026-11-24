@@ -61,7 +61,7 @@ correlation id, use the section above.
 ## Start-up checks and troubleshooting
 
 The server reads `NCI_SIP_INSTALLATION_ID` and the installed version once, at start-up, and refuses
-to start before contacting any upstream when either is unusable. A malformed id gives an error
+to start before contacting any upstream when either is unusable. Both stop with an `invalid_request` error. A malformed id gives an error
 that names `NCI_SIP_INSTALLATION_ID` and never repeats the rejected value. An unsafe installed
 version gives an error that names the package metadata and asks you to reinstall the package.
 Every CLI command, including local-only ones such as `search`, starts

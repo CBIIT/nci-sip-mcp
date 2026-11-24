@@ -27,7 +27,8 @@ class Context:
         embedding_provider: EmbeddingProvider | None = None,
     ) -> None:
         self.settings = settings
-        # Captured once, here: the configuration read at start-up decides every request (A6.2b).
+        # Renders the label for the clients built below (A6.2b). On the container path the label
+        # was already checked at start-up, from the same environment and metadata in one process.
         agent = user_agent(capture_identity())
         self.cadsr = cadsr or CaDSRClient(settings, user_agent=agent)
         self.ssis = ssis or SSISClient(settings, user_agent=agent)
