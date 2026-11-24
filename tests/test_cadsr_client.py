@@ -598,6 +598,11 @@ class StagingHintTest(unittest.TestCase):
     def test_the_hint_names_a_check_and_never_a_cause(self):
         error, _ = self.run_call(STAGING, [dns_failure()] * 3)
         self.assertIn("did not resolve; " + HINT, error["message"])
+        self.assertEqual(
+            error["message"],
+            "CADSR request failed for /NCILovAPI/1.0/api/getContextNames: transport failure. "
+            "The host name did not resolve; " + HINT + ". Retry later.",
+        )
 
     def test_no_other_target_or_failure_gets_the_hint(self):
         reset = ConnectionResetError("reset")
