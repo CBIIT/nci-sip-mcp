@@ -45,7 +45,7 @@ def metadata_request(owner, origin, path, params, headers, body, user_agent=PROD
             size_bound="owned",
             credentials=headers,
             request_policy=ControlledHttpPolicy(owner.run),
-            user_agent=PRODUCT_USER_AGENT,
+            user_agent=user_agent,
         )
         return client.get_json(path, params) if body is None else client.post_json(path, body)
 
