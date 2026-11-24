@@ -12,6 +12,7 @@ from contextlib import closing, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from fakes import captured
 from nci_sip_mcp.cli import main
 from nci_sip_mcp.index_adapter import LocalIndexAdapter, index_event
 from nci_sip_mcp.registry import invoke
@@ -22,7 +23,6 @@ from ncit_index.embeddings import (
 )
 from ncit_index.errors import IndexCompatibilityError
 from ncit_index.index import LocalIndex
-from test_audit import captured
 from test_server import ServerFixture
 
 COMMIT = "a" * 40

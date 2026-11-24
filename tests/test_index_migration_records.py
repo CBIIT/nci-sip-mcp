@@ -10,12 +10,12 @@ from contextlib import closing, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from fakes import schema_five
 from nci_sip_mcp import container_entry
 from nci_sip_mcp.cli import main
 from nci_sip_mcp.config import Settings
 from ncit_index.index import LocalIndex
 from ncit_index.storage import SCHEMA_VERSION
-from test_index_float32 import schema_five
 
 
 class MigrationRecordsTest(unittest.TestCase):

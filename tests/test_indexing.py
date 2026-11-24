@@ -5,7 +5,7 @@ from contextlib import closing
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-from fakes import concept, release, terminology_row
+from fakes import captured, concept, records, release, terminology_row
 from nci_sip_mcp.errors import correlated
 from nci_sip_mcp.evaluation import evaluate_build
 from nci_sip_mcp.evaluation_sets import parse_set
@@ -17,7 +17,6 @@ from nci_sip_mcp.release import ReleaseContext
 from ncit_index import index as index_module
 from ncit_index.errors import IndexBuildError, IndexCompatibilityError, IndexStorageError
 from ncit_index.index import LocalIndex
-from test_audit import captured, records
 from test_evaluation_sets import sample_set_payload
 from test_evs_client import FakeResponse
 from test_index import normalized

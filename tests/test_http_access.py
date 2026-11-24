@@ -13,12 +13,12 @@ from starlette.applications import Starlette
 from starlette.responses import Response
 from starlette.routing import Route
 
+from fakes import captured, records
 from nci_sip_mcp.audit import compact, hashed
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.http_auth import HTTPAuthIntegration, configured_auth
 from nci_sip_mcp.permissions import Authority, Principal
 from nci_sip_mcp.transport import create_http_app
-from test_audit import captured, records
 from test_release_selection import initialize_http
 from test_server import ServerFixture
 from test_transport import concept_response, http_app, result

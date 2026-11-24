@@ -1,8 +1,13 @@
 """Shared test doubles. Nothing here touches the network."""
 
+import io
+import json
+import logging
+from contextlib import contextmanager
 from copy import deepcopy
 from urllib.parse import urlencode
 
+from nci_sip_mcp.audit import JsonFormatter
 from nci_sip_mcp.config import DEFAULT_EXCLUSION_ROLE_CODES
 from nci_sip_mcp.evs import INDEX_INCLUDE, LOOKUP_INCLUDE, EVSNotFoundError, verify_content
 from nci_sip_mcp.release import ReleaseContext
@@ -362,3 +367,46 @@ def selected_environment():
         },
         "policy_sha256": "a" * 64,
     }
+
+
+@contextmanager
+def captured():
+    """Capture actual JSON records through the production formatter."""
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JsonFormatter())
+    logger = logging.getLogger("nci_sip_mcp")
+    level, disabled = logger.level, logging.root.manager.disable
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    logging.disable(logging.NOTSET)
+    try:
+        yield stream
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+        logging.disable(disabled)
+
+
+def records(stream, event="call_completed"):
+    found = [json.loads(line) for line in stream.getvalue().splitlines()]
+    return [record for record in found if record["event"] == event]
+
+
+def schema_five(conn):
+    statements = (
+        "CREATE TABLE manifests (build_id TEXT PRIMARY KEY, payload TEXT NOT NULL, "
+        "active INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'complete')",
+        "CREATE UNIQUE INDEX manifests_single_active ON manifests(active) WHERE active = 1",
+        "CREATE TABLE concepts (build_id TEXT, code TEXT, payload TEXT, name_key TEXT, "
+        "PRIMARY KEY (build_id, code))",
+        "CREATE INDEX concepts_name ON concepts(build_id, name_key)",
+        "CREATE TABLE fields (id INTEGER PRIMARY KEY, build_id TEXT, code TEXT, "
+        "kind TEXT, text TEXT, vector TEXT)",
+        "CREATE INDEX fields_concept ON fields(build_id, code)",
+        "CREATE TABLE vector_lsh (field_id INTEGER, table_id INTEGER, bucket INTEGER)",
+        "PRAGMA user_version = 5",
+    )
+    for statement in statements:
+        conn.execute(statement)
