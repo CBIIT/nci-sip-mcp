@@ -64,8 +64,9 @@ bakeoff. They establish neither superiority over alternatives nor clinical or sp
 Definitions provide additional indexed fields, but the model card's entity-name task does not
 by itself establish quality for arbitrary long definitions or downstream workflows.
 
-The actual [provider](../src/ncit_index/embeddings.py) constructs
-`SentenceTransformer(model_name)` and calls `encode` with `normalize_embeddings=True` and
+The actual [provider](../src/ncit_index/embeddings.py) loads a
+`SentenceTransformer` from the model directory or the cached Hub snapshot (a cached snapshot is
+used as it is; refresh the cache to update the model, since only an empty cache downloads) and calls `encode` with `normalize_embeddings=True` and
 `show_progress_bar=False`, then converts the result to float32. Pooling, tokenization, truncation
 and inference batching are delegated to the loaded model/library; this wrapper specifies no
 CLS pooling or model-card example length. Do not copy those example settings into a description

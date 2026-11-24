@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from importlib import import_module
 from pathlib import Path
+from typing import Any
 
 from .errors import IndexCompatibilityError
 
@@ -59,25 +60,12 @@ class HashingEmbeddingProvider(EmbeddingProvider):
 
 class SentenceTransformersProvider(EmbeddingProvider):
     def __init__(self, model_name: str, *, local_files_only: bool = False) -> None:
-        resolved_name = _local_model(model_name) if local_files_only else model_name
-        # An optional extra with heavy dependencies, imported only when configured.
-        try:
-            from sentence_transformers import (  # pyright: ignore[reportMissingImports]
-                SentenceTransformer,
-            )
-        except ImportError as exc:
-            raise RuntimeError(
-                "The sentence-transformers provider needs the 'embeddings' extra "
-                f"(pdm install -G embeddings). Import failed: {exc}"
-            ) from exc
+        resolved = _local_model(model_name, local_files_only)
         self.name = "sentence-transformers"
         self.model = model_name
-        self._model = (
-            SentenceTransformer(resolved_name, local_files_only=True)
-            if local_files_only
-            else SentenceTransformer(model_name)
-        )
-        self.revision = _cache_revision(model_name)
+        # Load from the path the revision is taken from, so the record names what was loaded.
+        self._model = _sentence_transformer()(resolved, local_files_only=True)
+        self.revision = _loaded_revision(model_name, resolved)
 
     def embed(self, texts: Iterable[str]) -> Sequence[Sequence[float]]:
         vectors = self._model.encode(
@@ -87,8 +75,26 @@ class SentenceTransformersProvider(EmbeddingProvider):
         return list(import_module("numpy").asarray(vectors, dtype="<f4"))
 
 
-def _local_model(model_name: str) -> str:
-    """Check supplied assets before the embedding library emits startup diagnostics."""
+def _sentence_transformer() -> Any:
+    # An optional extra with heavy dependencies, imported only when configured.
+    try:
+        from sentence_transformers import (  # pyright: ignore[reportMissingImports]
+            SentenceTransformer,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "The sentence-transformers provider needs the 'embeddings' extra "
+            f"(pdm install -G embeddings). Import failed: {exc}"
+        ) from exc
+    return SentenceTransformer
+
+
+def _local_model(model_name: str, local_files_only: bool) -> str:
+    """The one place a model name becomes a path: a directory as given, else the cached snapshot.
+
+    A cached snapshot wins; updating a Hub model is an explicit cache refresh. Only when online
+    and nothing is cached does the library's own load by name download it, once.
+    """
     path = Path(model_name)
     if path.is_dir():
         return str(path)
@@ -96,19 +102,20 @@ def _local_model(model_name: str) -> str:
         raise FileNotFoundError("Supply the external model directory")
     from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
 
+    try:
+        return snapshot_download(model_name, local_files_only=True)
+    except FileNotFoundError:
+        if local_files_only:
+            raise
+    _sentence_transformer()(model_name)  # downloads into the cache; the object is discarded
     return snapshot_download(model_name, local_files_only=True)
 
 
-def _cache_revision(model_name: str) -> str | None:
-    """The commit of a Hub model's cached snapshot, read from the local cache without traffic.
-
-    A model supplied as a directory is identified by a hash of its files instead.
-    """
+def _loaded_revision(model_name: str, resolved: str) -> str:
+    """Identify what was loaded: a directory by its hash, a Hub snapshot by its commit."""
     if Path(model_name).is_dir():
-        return model_directory_revision(Path(model_name))
-    from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
-
-    commit = Path(snapshot_download(model_name, local_files_only=True)).name
+        return model_directory_revision(Path(resolved))
+    commit = Path(resolved).name
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise IndexCompatibilityError(
             f"The cached snapshot of model {model_name} is not a commit folder; "
