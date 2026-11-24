@@ -25,6 +25,7 @@ import yaml
 from jsonschema import Draft202012Validator
 from mcp.client import Client
 
+from nci_sip_acceptance import traffic_identity as acceptance_identity
 from nci_sip_mcp.audit import Audit
 from nci_sip_mcp.cli import build_parser
 from nci_sip_mcp.config import DEFAULT_CALL_DEADLINE_SECONDS, DEFAULT_EXCLUSION_ROLE_CODES, Settings
@@ -1002,9 +1003,12 @@ class DocumentationTest(unittest.TestCase):
         # The guide's server examples are the labels the code renders, with placeholders.
         configured = IdentitySnapshot("0" * 32, "1.2.3")
         unconfigured = IdentitySnapshot(None, "1.2.3")
-        for label in (installation_label(configured), user_agent(unconfigured)):
+        acceptance = acceptance_identity.product_user_agent(
+            acceptance_identity.IdentitySnapshot(None, "1.2.3")
+        )
+        for label in (installation_label(configured), user_agent(unconfigured), acceptance):
             with self.subTest(label=label):
-                example = label.replace("1.2.3", "<version>").replace("0" * 32, "<id>")
+                example = label.replace("1.2.3", "<v>").replace("0" * 32, "<32 lowercase hex>")
                 self.assertIn(f"`{example}`", guide_text)
         self.assertNotIn("pdm run --working-dir acceptance", guide_text)
         self.assertIn(
