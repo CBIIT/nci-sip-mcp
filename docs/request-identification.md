@@ -98,8 +98,11 @@ request it makes (convention A6.2b): `nci-sip-mcp/<version> (installation=<id>; 
 With no `NCI_SIP_INSTALLATION_ID` configured it sends the product label alone,
 `nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`; a configured value that is not 32 lowercase hexadecimal characters stops
 start-up with an error naming the variable, before any upstream is contacted. The `generate`
-and `show` commands remain local and send nothing. Acceptance, recorder, installer and CI
-requests do not yet send this label; that is separate work, so do not rely on traces of those
-requests carrying it. The identity does not replace the per-call correlation ID or change its
-behavior. The CI guidance above describes the configuration lifecycle for an emitting job; it
+and `show` commands remain local and send nothing. Governed acceptance requests (the exact-request
+grants of a controlled run, and the release preflight) send the product label alone,
+`nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`, whatever `NCI_SIP_INSTALLATION_ID` holds, and each grant
+declares that exact `user-agent`: a request with another value, or none, is refused before contact. The
+recorder, citation reads, installer probe and Shared SI script do not yet send a label; that is
+separate work, so do not rely on traces of those requests carrying it. The identity does not
+replace the per-call correlation ID or change its behavior. The CI guidance above describes the configuration lifecycle for an emitting job; it
 applies to the server now and to the acceptance package once that work is released.

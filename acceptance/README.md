@@ -30,7 +30,8 @@ pdm run spec-render                                  # regenerate docs/specifica
 ```
 
 The [request identification guide](../docs/request-identification.md) describes the acceptance
-distribution's separate local identity utility. It does not label acceptance requests yet.
+distribution's separate local identity utility. Governed requests send the product User-Agent without an installation id; the recorder,
+citation reads, installer probe and Shared SI script do not label their requests yet.
 
 ## Managed live environments
 
