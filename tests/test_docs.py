@@ -251,8 +251,8 @@ class FunctionalStatusDocumentationTest(unittest.TestCase):
             "request count",
             "no Cartesian products",
             "Acceptance(live) stays disabled",
-            "23 November",
-            "7114203427",
+            "24 November",
+            "7139797516",
             "cause not inferred",
             "QUICKSTART.md#upstream-access-and-ssis-transition",
         ):
@@ -278,8 +278,10 @@ class FunctionalStatusDocumentationTest(unittest.TestCase):
         self.assertIn("History: the owner's decision of 3 October 2026 established", text)
         self.assertIn(
             "Current status: the project now has a staging credential, but protected access "
-            "remains unverified after the 23 November 401s "
-            "([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)), "
+            "remains unverified after the 24 November 401s "
+            "([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516); "
+            "direct HTTP, not an MCP acceptance run; earlier 23 November 401s: "
+            "[#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)), "
             "so those fixtures remain crafted pending verification.",
             text,
         )
@@ -289,9 +291,9 @@ class FunctionalStatusDocumentationTest(unittest.TestCase):
         catalogue = yaml.safe_load((ROOT / "docs/upstream/catalogue.yaml").read_text())
         entry = next(e for e in catalogue["entries"] if e["id"] == "cadsr-access")
         self.assertIn("issued for caDSR staging only", entry["observation"])
-        self.assertIn("23 November 2026", entry["observation"])
+        self.assertIn("24 November 2026", entry["observation"])
         self.assertIn(
-            "https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427",
+            "https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516",
             entry["observation"],
         )
         self.assertNotIn("No credentials have been issued", entry["observation"])
@@ -874,7 +876,7 @@ class DocumentationTest(unittest.TestCase):
     def test_quickstart_access_section_states_the_current_policy(self):
         text = " ".join(section(QUICKSTART, "Upstream access and SSIS transition").split())
         for statement in (
-            "**Operational status: 2026-11-23.**",
+            "**Operational status: 2026-11-24.**",
             "No caDSR service is prohibited",
             "not unrestricted permission",
             "Small spot tests are permitted",
@@ -884,7 +886,7 @@ class DocumentationTest(unittest.TestCase):
             "NIH VPN",
             "run policy",
             "Acceptance(live) stays disabled",
-            "last recorded 401 on 2026-11-23",
+            "last recorded 401 on 2026-11-24",
             "cause is not inferred",
         ):
             with self.subTest(statement=statement):

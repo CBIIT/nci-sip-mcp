@@ -18,7 +18,7 @@ the utilities do not label requests yet.
 
 ## Upstream access and SSIS transition
 
-**Operational status: 2026-11-23.** The access policy of the project owner
+**Operational status: 2026-11-24.** The access policy of the project owner
 ([#381](https://github.com/CBIIT/nci-sip-mcp/issues/381#issuecomment-7090335026), superseding
 the earlier [access decision](https://github.com/CBIIT/nci-sip-mcp/issues/421#issuecomment-6671335647))
 and the [stage investigation](https://github.com/CBIIT/nci-sip-mcp/issues/383) distinguish
@@ -52,8 +52,8 @@ issued to this project is for caDSR staging: pair it only with
 `NCI_SIP_CADSR_CREDENTIAL`, never with production. A production request without a production
 credential is refused with 401, which says nothing about whether the feature exists there. The
 tools stay listed, and the server never falls back from staging to production. **Protected
-access with the staging credential: last recorded 401 on 2026-11-23
-([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383)); the cause is not inferred, and
+access with the staging credential: last recorded 401 on 2026-11-24
+([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516), direct HTTP, not an MCP acceptance run); the cause is not inferred, and
 restored access is not yet verified.** This status changes only from verification results.
 
 Use [offline fixture validation](CONTRIBUTING.md#complete-fixture-ratchet) for automated runs.

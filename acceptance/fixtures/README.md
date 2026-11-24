@@ -68,8 +68,8 @@ caDSR's own behaviour is in the ordinary fixtures, with no scenario of its own:
   recorded). History: the owner's decision of 3 October 2026 established that
   `cadsr/credentialed` answers for a server that holds `NCI_SIP_CADSR_CREDENTIAL` with answers
   crafted from the published contracts, recorded under `recorded/cadsr-contracts/`. Current status: the project now has a staging
-  credential, but protected access remains unverified after the 23 November 401s
-  ([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)), so those
+  credential, but protected access remains unverified after the 24 November 401s
+  ([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516); direct HTTP, not an MCP acceptance run; earlier 23 November 401s: [#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)), so those
   fixtures remain crafted pending verification. The data
   elements and contexts in them are the recorded content's; what no recording can give (CDE
   Match's scores, its rule, marked "Crafted") is invented. A self-test holds each answer to its

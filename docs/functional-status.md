@@ -15,9 +15,10 @@ new native live-suite run or UAT. The cause and issuing layer of the 403 are unk
 prohibited; small spot tests are permitted and larger tests are announced to the upstream teams
 first, with a request count before any larger automated run. SSIS queries stay bounded, with no
 Cartesian products. Acceptance(live) stays disabled until a reviewed run plan exists. The
-**23 November recheck** ([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427))
-again recorded 401 for protected staging attempts (cause not inferred); access is
-unverified. This page records evidence and grants no permission; the policy is owned by the
+**24 November recheck** ([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516))
+again recorded 401 for protected staging attempts (cause not inferred); it used direct HTTP,
+not an MCP acceptance run, and access is unverified. The earlier 23 November recheck
+([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)) recorded the same. This page records evidence and grants no permission; the policy is owned by the
 [access guidance](../QUICKSTART.md#upstream-access-and-ssis-transition).
 
 ## What the evidence covers
