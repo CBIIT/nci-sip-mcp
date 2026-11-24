@@ -23,6 +23,7 @@ from nci_sip_mcp.audit import JsonFormatter
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.context import Context
 from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.http_client import HttpClient
 from nci_sip_mcp.index_adapter import LocalIndexAdapter
 from ncit_index.index import LocalIndex
 
@@ -169,6 +170,25 @@ class ContextTest(ReceiverCase):
             ),
             (user_agent(), LICENCE_KEY, "call-17"),
         )
+
+
+class HttpClientTest(ReceiverCase):
+    def test_a_given_user_agent_is_sent_as_given_even_when_empty(self):
+        server = self.serve()
+        client = HttpClient(
+            server.url,
+            label="EVS",
+            timeout_seconds=5,
+            max_attempts=1,
+            retry_backoff_seconds=0,
+            max_response_bytes=1000,
+            size_bound="BOUND",
+            user_agent="",
+        )
+
+        client.get_json("/x")
+
+        self.assertEqual(self.user_agents(server), [""])
 
 
 def run_main(*argv, **environment):
