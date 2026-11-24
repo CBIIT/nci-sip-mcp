@@ -56,7 +56,11 @@ def installation_label(snapshot: IdentitySnapshot) -> str:
 
 
 def product_user_agent(snapshot: IdentitySnapshot) -> str:
-    """The User-Agent of acceptance's direct requests: the product alone, never an installation."""
+    """The User-Agent of acceptance's direct requests: the product alone, never an installation.
+
+    The server renders the same label in `nci_sip_mcp.traffic_identity.product_user_agent`;
+    keep the two equal.
+    """
 
     return _label(snapshot.version, None)
 
@@ -67,7 +71,7 @@ def _label(installed_version: str | None, installation_id: InstallationId | None
         or _VERSION_TOKEN.fullmatch(installed_version) is None
     ):
         raise ValueError(VERSION_ERROR)
-    installation = f"installation={installation_id}; " if installation_id else ""
+    installation = f"installation={installation_id}; " if installation_id is not None else ""
     label = f"{PRODUCT}/{installed_version} ({installation}+{PROJECT_URL})"
     if len(label.encode("ascii")) > MAX_LABEL_BYTES:
         raise ValueError(VERSION_ERROR)

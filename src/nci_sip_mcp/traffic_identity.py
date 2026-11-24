@@ -52,7 +52,8 @@ def product_user_agent() -> str:
     """The product-only User-Agent, whatever installation is configured (A6.2b).
 
     For emitters that carry no installation identity; the installed version is read and
-    validated here, with the refusal `user_agent` gives.
+    validated here, with the refusal `user_agent` gives. The acceptance distribution renders the
+    same label in `nci_sip_acceptance.traffic_identity.product_user_agent`; keep the two equal.
     """
 
     return _label(_installed_version(), None)
@@ -91,7 +92,7 @@ def _label(installed_version: str | None, installation_id: InstallationId | None
         or _VERSION_TOKEN.fullmatch(installed_version) is None
     ):
         raise _invalid_version()
-    installation = f"installation={installation_id}; " if installation_id else ""
+    installation = f"installation={installation_id}; " if installation_id is not None else ""
     label = f"{PRODUCT}/{installed_version} ({installation}+{PROJECT_URL})"
     if len(label.encode("ascii")) > MAX_LABEL_BYTES:
         raise _invalid_version()
