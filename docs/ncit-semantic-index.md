@@ -94,9 +94,13 @@ relative path. A file link counts as the content of its target under the link's 
 snapshot folder of links into `blobs/` hashes like a copy); location and modification time do not
 count, a changed byte, a rename or an added file does. A directory link, a broken link, a special
 file or an empty directory is refused, naming the path. Copy a model directory unchanged: the
-path comparison is exact, including case. The hash is computed once when the provider is created,
-at build and at start-up, so the container serving `/model` refuses to start when the directory
-differs from the one the index was embedded with. A build made before this check stores no
+path comparison is exact, including case. The hash covers the files as read once, when the
+provider is created (at build and at start-up), so the container serving `/model` refuses to start
+when the directory it finds then differs from the one the index was embedded with. The directory,
+including the targets of its links, must stay unchanged while a process runs: a later or
+concurrent change is not detected. On one proxy sample (the cached `all-mpnet-base-v2` snapshot,
+438.7 MB in 11 files, warm file cache, one machine; not the SapBERT model) hashing took about
+0.17 s; this is not an upper bound, since a cold cache or network storage can be slower. A build made before this check stores no
 revision and stays in the "stored unknown" case until it is rebuilt. Preserve the actual
 software versions and evaluation data externally when reproducing a run; the commands below
 alone do not provide a byte-reproducible model pin.

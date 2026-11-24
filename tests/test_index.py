@@ -899,7 +899,7 @@ class LegacyMigrationIntegrityTest(IndexTestCase):
         events = []
         with self.assertRaisesRegex(IndexCompatibilityError, "without a manifest"):
             LocalIndex(self.path, on_event=lambda name, details: events.append((name, details)))
-        # A start with no finish tells the operator the migration rolled back.
+        # A start with no finish leaves the outcome unknown; here the migration did fail.
         self.assertEqual(
             events,
             [("index_migration_started", {"from_version": 0, "to_version": SCHEMA_VERSION})],

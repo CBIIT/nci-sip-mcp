@@ -251,7 +251,7 @@ class LocalIndex:
                 migration = self._announce_migration(conn, version)
                 migrate(conn)
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        # Past the commit: a start record without this one means the migration rolled back.
+        # Past the commit: a start record without this one leaves the outcome unknown.
         if migration is not None:
             self._event(
                 "index_migration_finished",
