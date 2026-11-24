@@ -45,7 +45,7 @@ class Capture:
 
 
 def request(entry: dict[str, Any]) -> CapturedRequestError:
-    client: Any = SSISClient(Settings())
+    client: Any = SSISClient(Settings(), user_agent=product_user_agent())
     client.sparql_http = Capture()
     try:
         getattr(client, entry["operation"])(*entry["args"], **entry["kwargs"])

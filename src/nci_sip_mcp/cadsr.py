@@ -204,7 +204,7 @@ def search_request(query: str, size: int, pin: str | None) -> tuple[str, dict[st
 
 
 class CaDSRClient:
-    def __init__(self, settings: Settings, *, user_agent: str | None = None) -> None:
+    def __init__(self, settings: Settings, *, user_agent: str) -> None:
         credential = settings.cadsr_credential
         headers = (
             {"Authorization": "Basic " + base64.b64encode(credential.encode()).decode()}

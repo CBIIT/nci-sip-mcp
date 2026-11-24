@@ -331,9 +331,9 @@ class HttpClient:
     redirect to another origin is refused. `on_request`, `sleep` and `jitter` are public so
     that the caller can set the request-log hook and a test can replace the clock and the
     random source. A hook that raises is logged by its exception type and otherwise ignored:
-    it never changes the result of a call, nor the error of a failing one. `user_agent`, when
-    given, is sent on every request of this client (A6.2b); a caller that leaves it out sends
-    urllib's own, a transitional default.
+    it never changes the result of a call, nor the error of a failing one.
+    `user_agent` is required and is sent on every request of this client (A6.2b): no request
+    goes out under urllib's own.
     """
 
     def __init__(
@@ -341,6 +341,7 @@ class HttpClient:
         base_url: str,
         *,
         label: str,
+        user_agent: str,
         timeout_seconds: float,
         max_attempts: int,
         retry_backoff_seconds: float,
@@ -349,7 +350,6 @@ class HttpClient:
         credentials: Mapping[str, str] | None = None,
         redact_values: tuple[str, ...] = (),
         request_policy: RequestPolicy | None = None,
-        user_agent: str | None = None,
     ) -> None:
         self.request_policy = (
             request_policy if request_policy is not None else current_request_policy()
@@ -397,8 +397,7 @@ class HttpClient:
         data: bytes | None = None,
     ) -> Request:
         headers = {"Accept": "application/json", **(headers or {}), **self.credentials}
-        if self.user_agent is not None:
-            headers["User-Agent"] = self.user_agent
+        headers["User-Agent"] = self.user_agent
         if correlation_id := current_correlation_id():
             headers[CORRELATION_HEADER] = correlation_id
         # The base URL comes from Settings, which accepts only http and https.

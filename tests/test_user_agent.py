@@ -20,11 +20,14 @@ from unittest.mock import patch
 
 from nci_sip_mcp import cli, container_entry, installer, traffic_identity
 from nci_sip_mcp.audit import JsonFormatter
+from nci_sip_mcp.cadsr import CaDSRClient
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.context import Context
 from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.http_client import HttpClient
 from nci_sip_mcp.index_adapter import LocalIndexAdapter
+from nci_sip_mcp.ssis import SSISClient
 from ncit_index.index import LocalIndex
 
 INSTALLATION = "0123456789abcdef0123456789abcdef"
@@ -278,11 +281,15 @@ class CliTest(ReceiverCase):
         server = self.serve()
 
         with patch.object(cli, "create_mcp") as create:
-            code, result, _ = run_main(
+            code, _, stderr = run_main(
                 "serve", **self.environment(server, NCI_SIP_INSTALLATION_ID="not-an-id")
             )
 
-        self.assertEqual((code, result.get("error", {}).get("code")), (1, "invalid_request"))
+        error = json.loads(stderr)["error"]
+        self.assertEqual(
+            (code, error["code"], error["details"]["parameter"]),
+            (1, "invalid_request", "NCI_SIP_INSTALLATION_ID"),
+        )
         create.assert_not_called()
         self.assertEqual(server.seen, [])
 
@@ -317,3 +324,66 @@ class ContainerEntryTest(ReceiverCase):
             ],
         )
         self.assertNotIn("secret", json.dumps(records))
+
+    def test_a_refused_identity_is_logged_with_its_code_and_parameter(self):
+        logging.disable(logging.NOTSET)
+        settings = Settings(data_dir=self.path, transport="streamable-http")
+        index = LocalIndexAdapter(LocalIndex(self.path))
+        cases = (
+            (
+                "malformed id",
+                {"NCI_SIP_INSTALLATION_ID": "not-an-id"},
+                None,
+                "NCI_SIP_INSTALLATION_ID",
+            ),
+            ("unsafe version", {}, "not a version", "nci-sip-mcp installed version"),
+        )
+        for name, environment, unsafe_version, parameter in cases:
+            with ExitStack() as stack, self.subTest(name):
+                stack.enter_context(patch.dict(os.environ, environment))
+                stack.enter_context(
+                    patch.object(container_entry.Settings, "from_env", return_value=settings)
+                )
+                stack.enter_context(patch.object(container_entry, "configure_logging"))
+                stack.enter_context(
+                    patch.object(container_entry, "prepared_index", return_value=index)
+                )
+                stack.enter_context(patch.object(container_entry, "run_http"))
+                if unsafe_version:
+                    stack.enter_context(
+                        patch.object(traffic_identity, "version", return_value=unsafe_version)
+                    )
+                logs = stack.enter_context(
+                    self.assertLogs("nci_sip_mcp.container_entry", level="ERROR")
+                )
+                code = container_entry.main()
+
+                records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
+                self.assertEqual(code, 1)
+                self.assertEqual(
+                    [(r["asset"], r.get("code"), r["parameter"]) for r in records],
+                    [("identity", "invalid_request", parameter)],
+                )
+
+
+class EveryClientRequiresALabelTest(unittest.TestCase):
+    """A client built without a User-Agent is a caller bug, never urllib's default (A6.2b)."""
+
+    def test_no_platform_client_can_be_constructed_without_one(self):
+        constructors = {
+            "HttpClient": lambda: HttpClient(
+                "https://example.invalid",
+                label="EVS",
+                timeout_seconds=5,
+                max_attempts=1,
+                retry_backoff_seconds=0,
+                max_response_bytes=1000,
+                size_bound="BOUND",
+            ),
+            "EVSClient": lambda: EVSClient("https://example.invalid"),
+            "CaDSRClient": lambda: CaDSRClient(Settings()),
+            "SSISClient": lambda: SSISClient(Settings()),
+        }
+        for name, construct in constructors.items():
+            with self.subTest(name), self.assertRaisesRegex(TypeError, "user_agent"):
+                construct()
