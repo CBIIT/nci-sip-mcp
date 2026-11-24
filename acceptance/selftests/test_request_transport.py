@@ -12,6 +12,7 @@ from threading import Event, Thread
 from urllib.parse import urlsplit
 
 import pytest
+from http_receiver import PRODUCT_USER_AGENT
 
 from nci_sip_acceptance.fixture_server import (
     Fixture,
@@ -48,6 +49,7 @@ def entry_client(base, consumer):
         max_response_bytes=32,
         size_bound="entry-test",
         request_policy=consumer,
+        user_agent=PRODUCT_USER_AGENT,
     )
 
 
