@@ -82,11 +82,15 @@ def _sentence_transformer() -> Any:
             SentenceTransformer,
         )
     except ImportError as exc:
-        raise RuntimeError(
-            "The sentence-transformers provider needs the 'embeddings' extra "
-            f"(pdm install -G embeddings). Import failed: {exc}"
-        ) from exc
+        raise _missing_extra(exc) from exc
     return SentenceTransformer
+
+
+def _missing_extra(exc: ImportError) -> RuntimeError:
+    return RuntimeError(
+        "The sentence-transformers provider needs the 'embeddings' extra "
+        f"(pdm install -G embeddings). Import failed: {exc}"
+    )
 
 
 class _ResolvedModel(NamedTuple):
@@ -105,8 +109,10 @@ def _local_model(model_name: str, local_files_only: bool) -> _ResolvedModel:
         return _ResolvedModel(str(path), True)
     if path.is_absolute():
         raise FileNotFoundError("Supply the external model directory")
-    from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
-
+    try:
+        from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
+    except ImportError as exc:
+        raise _missing_extra(exc) from exc
     try:
         return _ResolvedModel(snapshot_download(model_name, local_files_only=True), False)
     except FileNotFoundError:

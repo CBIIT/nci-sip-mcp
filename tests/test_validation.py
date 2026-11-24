@@ -178,8 +178,13 @@ class EmbeddingConfigurationTest(unittest.TestCase):
         self.assertEqual(HashingEmbeddingProvider(4).embed(["  ", ""]), [[0.0] * 4] * 2)
 
     def test_sentence_transformers_provider_wraps_the_named_model(self):
+        snapshot = "/cache/models--a-model/snapshots/" + "a" * 40
+
         class FakeModel:
-            def __init__(self, name):
+            def __init__(self, name, *, local_files_only=False):
+                # The model is loaded from its cached snapshot, never by name.
+                if (name, local_files_only) != (snapshot, True):
+                    raise OSError("Only the cached snapshot may be loaded")
                 self.name = name
 
             def encode(self, texts, normalize_embeddings, show_progress_bar=True):
@@ -191,13 +196,17 @@ class EmbeddingConfigurationTest(unittest.TestCase):
                 return [(len(text), int(normalize_embeddings), len(self.name)) for text in texts]
 
         library = types.SimpleNamespace(SentenceTransformer=FakeModel)
-        with patch.dict(sys.modules, {"sentence_transformers": library}):
+        hub = types.SimpleNamespace(snapshot_download=lambda name, *, local_files_only: snapshot)
+        with patch.dict(sys.modules, {"sentence_transformers": library, "huggingface_hub": hub}):
             provider = create_embedding_provider("Sentence-Transformers", "a-model")
 
         self.assertEqual((provider.name, provider.model), ("sentence-transformers", "a-model"))
         # The named model is loaded and asked for unit vectors.
         vectors = provider.embed(iter(["ab", "c"]))
-        self.assertEqual([row.tolist() for row in vectors], [[2.0, 1.0, 7.0], [1.0, 1.0, 7.0]])
+        self.assertEqual(
+            [row.tolist() for row in vectors],
+            [[2.0, 1.0, float(len(snapshot))], [1.0, 1.0, float(len(snapshot))]],
+        )
         self.assertEqual({row.dtype.str for row in vectors}, {"<f4"})
 
     def test_missing_embeddings_extra_is_explained(self):
