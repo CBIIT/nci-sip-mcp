@@ -43,7 +43,7 @@ from .bounds import (
     current_budget,
     current_deadline,
 )
-from .errors import PlatformError, current_correlation_id
+from .errors import PlatformError, current_correlation_id, with_next_step
 from .errors import RequestPolicyError as RequestPolicyError  # noqa: PLC0414 - public export.
 from .errors import UpstreamError as UpstreamError  # noqa: PLC0414 - public export.
 from .request_policy import (
@@ -723,7 +723,9 @@ class HttpClient:
             )
         message = failure.message
         if failure.unresolved and self.unresolved_hint:
-            message += f" The host name did not resolve; {self.unresolved_hint}."
+            message = with_next_step(
+                message, f"The host name did not resolve; {self.unresolved_hint}."
+            )
         return UpstreamUnavailableError(
             message, surface=self.surface, attempts=attempts, **last_http
         )

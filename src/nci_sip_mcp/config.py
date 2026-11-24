@@ -62,7 +62,7 @@ def _require_between(name: str, value: float, low: int, high: int) -> None:
 
 
 DEFAULT_EVS_BASE_URL = "https://api-evsrest.nci.nih.gov"
-CADSR_STAGING_ORIGIN: Final = "https://cadsrapi-stage.cancer.gov"
+CADSR_STAGING_ORIGIN: Final[str] = "https://cadsrapi-stage.cancer.gov"
 DEFAULT_EMBEDDING_MODEL = "hashing"
 # The production base URL of each surface, as acceptance/fixtures/manifest.yaml records them. The
 # server adds the platform's own paths: /api/v1/... to EVS, FHIR operations to the FHIR base,

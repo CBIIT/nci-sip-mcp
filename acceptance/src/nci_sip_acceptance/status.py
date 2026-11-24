@@ -21,7 +21,7 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -197,7 +197,7 @@ def _entry_tools(entry: dict[str, Any], requirements: dict[str, Any]) -> tuple[s
     return owners, basis & TOOLS.keys()
 
 
-STAGING_CREDENTIAL_CONTEXT = (
+STAGING_CREDENTIAL_CONTEXT: Final[str] = (
     "credential issued for staging; protected access unverified "
     "([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383))"
 )
