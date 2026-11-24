@@ -31,14 +31,27 @@ class IdentitySnapshot:
     version: str | None = field(repr=False)
 
 
+def _installed_version() -> str | None:
+    try:
+        return version(PRODUCT)
+    except UnicodeDecodeError:
+        return None
+
+
 def capture_identity() -> IdentitySnapshot:
     """Capture the configured value and installed package version once."""
 
-    try:
-        installed_version = version(PRODUCT)
-    except UnicodeDecodeError:
-        installed_version = None
-    return IdentitySnapshot(os.environ.get(INSTALLATION_ID_ENV), installed_version)
+    return IdentitySnapshot(os.environ.get(INSTALLATION_ID_ENV), _installed_version())
+
+
+def product_user_agent() -> str:
+    """The product-only User-Agent, whatever installation is configured (A6.2b).
+
+    For emitters that carry no installation identity; the installed version is read and
+    validated here, with the refusal `user_agent` gives.
+    """
+
+    return _label(_installed_version(), None)
 
 
 def installation_label(snapshot: IdentitySnapshot) -> str:
