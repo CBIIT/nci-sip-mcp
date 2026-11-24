@@ -1,6 +1,6 @@
 # Stable installation identity
 
-The local identity utilities give an installation a stable, opaque label for future request
+The local identity utilities give an installation a stable, opaque label for request
 traceability. They do not identify a person or a call, grant authority, or act as credentials.
 This value is separate from the per-call correlation ID.
 

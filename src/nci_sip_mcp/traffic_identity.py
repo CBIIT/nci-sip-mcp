@@ -1,4 +1,8 @@
-"""Generate and inspect the local installation identity without sending it."""
+"""Generate and inspect the installation identity, and render the User-Agent the server sends.
+
+`user_agent` and `product_user_agent` render the label (A6.2b) that `Context` hands to every
+platform client; `generate` and `show` only create and display the identity and send nothing.
+"""
 
 from __future__ import annotations
 
