@@ -24,7 +24,11 @@ Supply the embedding model separately in a read-only Hugging Face cache mounted 
 not a new path to the same weights. If the index was built using a local model path, mount
 the model at that same path, with content identical to the build's: the directory is hashed at
 start-up and a difference refuses start-up (the
-[hash definition](ncit-semantic-index.md#model-rationale-and-reproducibility-limits)). The image sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`;
+[hash definition](ncit-semantic-index.md#model-rationale-and-reproducibility-limits)).
+A Hub model name loads the snapshot found in `/model-cache` as it is; the container never
+refreshes it. The snapshot's commit must equal the revision stored in the index: a refreshed
+cache holding a newer commit is refused by `/ready` and by search, so mount the snapshot the
+index was built with. The image sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`;
 the container entry point additionally requests local files only. Missing or incompatible
 assets fail startup with one JSON diagnostic identifying the asset and error class.
 

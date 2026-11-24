@@ -138,6 +138,10 @@ export NCI_SIP_EMBEDDING_PROVIDER=sentence-transformers
 export NCI_SIP_EMBEDDING_MODEL=cambridgeltl/SapBERT-from-PubMedBERT-fulltext
 ```
 
+A Hub model name loads the snapshot already in the local Hugging Face cache and is downloaded only
+when the cache holds none; a refreshed cache changes the model revision, which an index built
+before the refresh refuses (see [model revision](docs/ncit-semantic-index.md#model-rationale-and-reproducibility-limits)).
+
 ## Connect a client
 
 ### Treat returned content as untrusted data
@@ -312,8 +316,9 @@ the old release (named in the `provenance.release` of each hit), and `lookup` fa
 MCP `search_concepts` in semantic/hybrid mode requires the caller's release to match the index; `get_concept`
 reads the caller's pinned release directly from EVS.
 
-Embedding provider/model/dimensions must match the index, and so must the model revision when
-both are known (see [model revision](docs/ncit-semantic-index.md#model-rationale-and-reproducibility-limits)). The guide covers
+Embedding provider/model/dimensions must match the index, and so must the model revision: a build that stores one is refused when the serving
+revision differs or cannot be determined, and a build that stores none is served with a warning
+record (see [model revision](docs/ncit-semantic-index.md#model-rationale-and-reproducibility-limits)). The guide covers
 [offline rebuild and legacy migration](docs/ncit-semantic-index.md#rebuilds-and-future-handover),
 including evaluation and preserved rollback data. Opening the index never re-embeds it.
 

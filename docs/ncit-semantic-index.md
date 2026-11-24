@@ -73,7 +73,7 @@ CLS pooling or model-card example length. Do not copy those example settings int
 of the historical calibration without evidence that they were used.
 
 Runtime compatibility checks **provider, model name and dimensions**, and the model **revision**
-when both sides know it. A build records the commit of the model files that embedded it, read
+of every build that stores one: it is refused unless the serving revision is known and equal. A build records the commit of the model files that embedded it, read
 from the local Hugging Face cache (a Hub model's `snapshots/<commit>` folder; no download or Hub
 call is added for it). The cases:
 
@@ -90,8 +90,10 @@ call is added for it). The cases:
   `embedding_revision` (`null` when unknown). The hashing provider's revision names its algorithm.
 
 A model supplied as a directory is identified by its content: the revision is `sha256:` followed
-by the SHA-256 of the lines `<relative path>\0<file SHA-256 hex>\n` for every file, sorted by
-relative path. A file link counts as the content of its target under the link's own path (a Hub
+by the SHA-256 of the lines `<relative path>\0<file SHA-256 hex>\n` for every file. The path
+is relative to the directory (which may itself be a link), uses `/` as separator on every
+platform and has no leading `./`; the hex is lowercase; the lines are sorted as strings by code
+point, joined without separator and encoded as UTF-8 before hashing. A file link counts as the content of its target under the link's own path (a Hub
 snapshot folder of links into `blobs/` hashes like a copy); location and modification time do not
 count, a changed byte, a rename or an added file does. A directory link, a broken link, a special
 file or an empty directory is refused, naming the path. Copy a model directory unchanged: the
@@ -192,7 +194,8 @@ completed snapshots are hidden at once (they no longer appear in `index-builds` 
 activated) and deleted after the activation commits. A failed deletion never undoes the
 activation: the result lists the builds still awaiting removal in `pendingRemoval`, the log
 carries a warning `index_build_removal_pending`, and their disk space stays in use until a later
-activation, for example `index-activate` of the already active build, removes them. Preserve
+activation, for example `index-activate` of the already active build, removes them. A removal
+frees pages inside the SQLite file for reuse; the file itself does not shrink. Preserve
 needed evidence/backups before activation; do not assume every listed candidate will remain
 available. Verify search/readiness with the same embedding settings
 and intended release after activating; distribute matching assets separately to any serving replica.

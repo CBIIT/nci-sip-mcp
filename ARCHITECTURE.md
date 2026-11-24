@@ -196,7 +196,7 @@ The top-level `ncit_index` package ships in the same distribution but imports ne
 | `index.py` | `LocalIndex`: snapshot reads and the public build, upsert, rebuild, activation, build-listing and evaluation operator API. |
 | `storage.py` | Schema 6, migrations, float32 vector storage and per-build FTS tables. |
 | `scoring.py` | Exact field scoring, concept reduction and deterministic page selection. |
-| `embeddings.py` | Provider abstraction, hashing and optional sentence-transformers providers, configuration checks. |
+| `embeddings.py` | Provider abstraction, hashing and optional sentence-transformers providers, configuration checks. The sentence-transformers provider loads a model directory or the cached Hub snapshot and records its revision (a directory's content hash, or the snapshot's commit); `LocalIndex` refuses a build whose stored revision differs. |
 | `records.py` | Package-owned stored concepts, manifests and search hits, without MCP provenance serialization. |
 | `errors.py` | Package exceptions, without protocol error codes or MCP imports. |
 
