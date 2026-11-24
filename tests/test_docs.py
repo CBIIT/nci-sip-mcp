@@ -813,6 +813,33 @@ class DocumentationTest(unittest.TestCase):
                 block = document[position:].split("\n\n", 1)[0]
                 self.assertIn(f"]({target}#upstream-access-and-ssis-transition)", block)
 
+    def test_quickstart_access_section_states_the_current_policy(self):
+        text = " ".join(section(QUICKSTART, "Upstream access and SSIS transition").split())
+        for statement in (
+            "**Operational status: 2026-11-23.**",
+            "No caDSR service is prohibited",
+            "not unrestricted permission",
+            "Small spot tests are permitted",
+            "larger tests are announced to the team first",
+            "request count before any larger automated run",
+            "SSIS queries stay bounded, with no Cartesian products",
+            "NIH VPN",
+            "run policy",
+            "Acceptance(live) stays disabled",
+            "last recorded 401 on 2026-11-23",
+            "cause is not inferred",
+        ):
+            with self.subTest(statement=statement):
+                self.assertIn(statement, text)
+        for stale in (
+            "requests are prohibited",
+            "traffic is paused",
+            "has not issued",
+            "no new stage or AI requests are authorized",
+        ):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, text)
+
     def test_quickstart_provenance_table_names_the_fields_of_the_specification(self):
         text = section(QUICKSTART, "Provenance and truncation")
 
