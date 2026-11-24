@@ -1,15 +1,17 @@
 """An index records the model revision it was embedded with and refuses a different one."""
 
+import io
 import json
 import sqlite3
 import sys
 import tempfile
 import types
 import unittest
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from nci_sip_mcp.cli import main
 from nci_sip_mcp.index_adapter import LocalIndexAdapter, index_event
 from nci_sip_mcp.registry import invoke
 from ncit_index.embeddings import (
@@ -108,6 +110,28 @@ class ModelRevisionTest(ServerFixture):
         with self.assertRaises(IndexCompatibilityError) as refused:
             self.local_index.search_build(build.build_id, "Neoplasm", provider("r2"))
         self.assertEqual(type(refused.exception).__name__, "IndexModelRevisionError")
+
+    def test_the_evaluate_command_refuses_a_build_under_another_model_revision(self):
+        build = self.index_with("r1")
+        self.context.embedding_provider = provider("r2")
+        stdout = io.StringIO()
+        with (
+            patch("nci_sip_mcp.cli.configure_logging"),
+            patch("nci_sip_mcp.cli.Context", return_value=self.context),
+            patch.object(sys, "argv", ["nci-sip-mcp", "evaluate", "--build-id", build.build_id]),
+            redirect_stdout(stdout),
+        ):
+            code = main()
+        answer = json.loads(stdout.getvalue())
+        self.assertEqual(
+            (code, answer["error"]["code"], answer["error"]["message"]),
+            (
+                1,
+                "internal_error",
+                "Index model revision r1 does not match the serving model revision r2. "
+                + NEXT_STEP,
+            ),
+        )
 
     def test_a_legacy_build_without_a_revision_is_served_and_noted_once_never_backfilled(self):
         build = self.index_with("r1")
