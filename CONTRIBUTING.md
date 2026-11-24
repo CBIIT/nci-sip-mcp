@@ -125,16 +125,21 @@ that list empty. Do not use the unselected local command to launch a second full
 
 **Allowlist preflight.** `pdm run mutation-gate --base <B> --head <B>` (the same commit twice)
 validates `scripts/validation/mutation-allowlist.yaml` against the working tree with the gate's own
-validator and stops there: the selection is empty, so it runs no baseline and no mutant (about 14 s
-measured once at `bbbd1ae`). Exit 0 with `{"outcome": "EMPTY", ...}` means every entry still matches
-exactly one current candidate; exit 2 with an `INFRA` record names the first stale, duplicate or
-ambiguous entry. Run it before the pre-PR sample and other heavy gates whenever the diff touches a
-file named in the allowlist, and before pushing a review-round fix to an open milestone PR. Its
-`EMPTY` line is not a source-bound selection or a sample record. It checks that the allowlist and the
-source agree, not that any mutant is equivalent. For a failing entry: re-key it only when the same
-intended mutation is still equivalent after the source change; remove it, with review, when the site is
-gone or the exemption is obsolete; when behaviour changed, the old reason cannot move to a new key
-and needs a fresh equivalence review.
+validator and stops there: the diff is empty, so it runs no baseline and no mutant (once measured at
+about 14 s on one machine, not a promised cost). Exit 0 with `{"outcome": "EMPTY", ...}` means every
+entry still matches exactly one current candidate; exit 2 with an `INFRA` record names the first
+stale, duplicate or ambiguous entry. It is a recommended early diagnostic, for example before the
+pre-PR sample or when a change touches an allowlisted function, the allowlist itself, or the gate's
+candidate generation; it is not a required gate. Two different EMPTY results exist and are recorded
+separately. This preflight's EMPTY comes from an artificial empty diff and only says the allowlist
+and the source agree; it is never the source-bound selection of a candidate. The selection record
+for the pre-PR review comes from the real base and head of that candidate (for a milestone, against
+`main`), with those SHAs frozen. An issue compared against its milestone branch does not replace it.
+The preflight does not show that any mutant is equivalent. For a failing entry: re-key it only when
+the same intended mutation is still equivalent after the source change; remove it, with review, when
+the site is gone or the exemption is obsolete; when behaviour changed, the old reason cannot move to a
+new key and needs a fresh equivalence review. A test that drove the real working-tree allowlist could
+also catch this, but the preflight reuses the existing command and needs no new code.
 
 Ordinary `pdm run test` stores combined coverage in `tmp/coverage/unit/.coverage`;
 `pdm run acceptance-selftest` uses `tmp/coverage/harness/.coverage`. PDM supplies the required
