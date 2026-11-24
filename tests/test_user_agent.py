@@ -281,11 +281,15 @@ class CliTest(ReceiverCase):
         server = self.serve()
 
         with patch.object(cli, "create_mcp") as create:
-            code, result, _ = run_main(
+            code, _, stderr = run_main(
                 "serve", **self.environment(server, NCI_SIP_INSTALLATION_ID="not-an-id")
             )
 
-        self.assertEqual((code, result.get("error", {}).get("code")), (1, "invalid_request"))
+        error = json.loads(stderr)["error"]
+        self.assertEqual(
+            (code, error["code"], error["details"]["parameter"]),
+            (1, "invalid_request", "NCI_SIP_INSTALLATION_ID"),
+        )
         create.assert_not_called()
         self.assertEqual(server.seen, [])
 
