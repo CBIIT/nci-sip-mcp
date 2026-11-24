@@ -28,7 +28,9 @@ def startup_failure(asset: str, error: Exception) -> None:
     # Library exceptions can contain paths, URLs or secrets; retain only a setting's name.
     configure_logging("ERROR")
     logger.setLevel(logging.ERROR)  # A fatal startup diagnostic survives CRITICAL verbosity.
-    parameter = re.search(r"NCI_SIP_[A-Z_]+", str(error)) if asset == "settings" else None
+    parameter = (
+        re.search(r"NCI_SIP_[A-Z_]+", str(error)) if asset in ("settings", "identity") else None
+    )
     emit(
         logger,
         logging.ERROR,
@@ -80,10 +82,11 @@ def main() -> int:
         asset = "index"
         if settings.http_require_index or index.get_active_manifest() is not None:
             index.verify_active(provider)
+        asset = "identity"
+        context = Context(settings, index=index, embedding_provider=provider)
     except (RuntimeError, ValueError, OSError, PlatformError) as exc:
         startup_failure(asset, exc)
         return 1
-    context = Context(settings, index=index, embedding_provider=provider)
     if settings.transport == "streamable-http":
         run_http(settings, context)
     else:

@@ -91,9 +91,13 @@ value is not a credential.
 
 ## Current scope
 
-These commands only generate and inspect local configuration. The server does not yet read this
-identity or include it in HTTP requests. Server and acceptance request emission are separate work; do not
-rely on platform request traces carrying this label until that work is released. The identity
-does not replace the per-call correlation ID or change its behavior. The CI guidance above
-describes the configuration lifecycle for an emitting job; it does not mean emission is available
-in this release.
+The server reads this identity once at start-up and sends it in the `User-Agent` of every platform
+request it makes (convention A6.2b): `nci-sip-mcp/<version> (installation=<id>; +https://github.com/CBIIT/nci-sip-mcp)`.
+With no `NCI_SIP_INSTALLATION_ID` configured it sends the product label alone,
+`nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`; a configured value that is not 32 lowercase hexadecimal characters stops
+start-up with an error naming the variable, before any upstream is contacted. The `generate`
+and `show` commands remain local and send nothing. Acceptance, recorder, installer and CI
+requests do not yet send this label; that is separate work, so do not rely on traces of those
+requests carrying it. The identity does not replace the per-call correlation ID or change its
+behavior. The CI guidance above describes the configuration lifecycle for an emitting job; it
+applies to the server now and to the acceptance package once that work is released.

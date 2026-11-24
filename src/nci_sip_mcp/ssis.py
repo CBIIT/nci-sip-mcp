@@ -233,7 +233,7 @@ class SSISClient:
     client neither compares it with EVS nor fabricates a registry release from a date.
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, user_agent: str | None = None) -> None:
         transport = partial(
             HttpClient,
             timeout_seconds=settings.timeout_seconds,
@@ -241,6 +241,7 @@ class SSISClient:
             retry_backoff_seconds=0.25,
             max_response_bytes=10 * 1024 * 1024,
             size_bound="ssis_response_bytes",
+            user_agent=user_agent,
         )
         self.sparql_http = transport(settings.ssis_sparql_url, label="SSIS_SPARQL")
 
