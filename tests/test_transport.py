@@ -297,6 +297,40 @@ class HTTPTest(ServerFixture):
         self.assertEqual((ready.status_code, wrong.status_code), (200, 503))
         self.assertEqual(self.evs.calls, [])
 
+    def test_readiness_follows_the_model_revision_the_index_was_embedded_with(self):
+        settings = replace(self.settings, http_require_index=True)
+        self.context.settings = settings
+        indexed, other = HashingEmbeddingProvider(), HashingEmbeddingProvider()
+        indexed.revision, other.revision = "r1", "r2"
+        self.context.embedding_provider = indexed
+        invoke(self.context, "index_codes", ["C3262"])
+
+        async def scenario():
+            async with http_app(settings, self.context) as client:
+                answers = [await client.get("/ready")]
+                self.context.embedding_provider = other
+                answers += [await client.get("/ready"), await client.get("/ready")]
+                self.context.embedding_provider = indexed
+                answers.append(await client.get("/ready"))
+                return answers
+
+        logging.disable(logging.NOTSET)
+        with self.assertLogs("nci_sip_mcp.index", level="INFO") as logs:
+            answers = asyncio.run(scenario())
+        self.assertEqual([a.status_code for a in answers], [200, 503, 503, 200])
+        self.assertEqual(
+            [
+                (
+                    r.structured["event"],
+                    r.structured["stored_revision"],
+                    r.structured["runtime_revision"],
+                )
+                for r in logs.records
+                if r.structured["event"] == "index_model_revision_mismatch"
+            ],
+            [("index_model_revision_mismatch", "r1", "r2")],
+        )
+
     def test_optional_index_allows_live_tools_but_a_corrupt_database_is_not_ready(self):
         async def scenario():
             async with http_app(self.settings, self.context) as client:
