@@ -12,7 +12,7 @@ import math
 import os
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from importlib import import_module
 from pathlib import Path
 
@@ -130,7 +130,7 @@ def model_directory_revision(path: Path) -> str:
 
 
 def _model_files(root: Path) -> Iterable[tuple[str, Path]]:
-    for current, directories, names in os.walk(root):
+    for current, directories, names in os.walk(root, onerror=_unlistable(root)):
         here = Path(current)
         if not directories and not names:
             raise IndexCompatibilityError(f"Model directory {_relative(here, root)} is empty")
@@ -138,6 +138,17 @@ def _model_files(root: Path) -> Iterable[tuple[str, Path]]:
             _require_real_directory(here / name, root)
         for name in names:
             yield _relative(here / name, root), _require_file(here / name, root)
+
+
+def _unlistable(root: Path) -> Callable[[OSError], None]:
+    """os.walk skips a directory it cannot list unless told otherwise; hashing must not."""
+
+    def refuse(error: OSError) -> None:
+        raise IndexCompatibilityError(
+            f"Model directory entry {_relative(Path(str(error.filename)), root)} cannot be listed"
+        ) from error
+
+    return refuse
 
 
 def _require_real_directory(path: Path, root: Path) -> None:
@@ -150,7 +161,7 @@ def _require_real_directory(path: Path, root: Path) -> None:
 def _require_file(path: Path, root: Path) -> Path:
     if not path.is_file():
         raise IndexCompatibilityError(
-            f"Model directory entry {_relative(path, root)} is not a readable file"
+            f"Model directory entry {_relative(path, root)} is not a regular file"
         )
     return path
 
