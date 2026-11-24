@@ -210,14 +210,25 @@ class EmbeddingConfigurationTest(unittest.TestCase):
         self.assertEqual({row.dtype.str for row in vectors}, {"<f4"})
 
     def test_missing_embeddings_extra_is_explained(self):
-        with (
-            patch.dict(sys.modules, {"sentence_transformers": None}),
-            self.assertRaises(RuntimeError) as raised,
+        # Each import is forced to fail with the other present: no dependence on the environment.
+        present = types.SimpleNamespace(
+            SentenceTransformer=lambda *args, **kwargs: None,
+            snapshot_download=lambda name, *, local_files_only: "snapshot",
+        )
+        for missing, other in (
+            ("sentence_transformers", "huggingface_hub"),
+            ("huggingface_hub", "sentence_transformers"),
         ):
-            create_embedding_provider("sentence-transformers", "all-MiniLM-L6-v2")
+            with self.subTest(missing=missing):
+                with (
+                    patch.dict(sys.modules, {missing: None, other: present}),
+                    self.assertRaises(RuntimeError) as raised,
+                ):
+                    create_embedding_provider("sentence-transformers", "all-MiniLM-L6-v2")
 
-        self.assertIn("'embeddings' extra", str(raised.exception))
-        self.assertIn(f"Import failed: {raised.exception.__cause__}", str(raised.exception))
+                self.assertIn("'embeddings' extra", str(raised.exception))
+                self.assertIn(f"Import failed: {raised.exception.__cause__}", str(raised.exception))
+                self.assertIn(missing, str(raised.exception))
 
 
 if __name__ == "__main__":
