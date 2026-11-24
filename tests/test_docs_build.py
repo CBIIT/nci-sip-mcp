@@ -157,9 +157,11 @@ custom_dir = "overrides"
         (shim / "__main__.py").write_text(GENERATOR_WITHOUT_404)
         with (
             patch.dict(os.environ, {"PYTHONPATH": str(shim.parent)}),
-            self.assertRaises(FileNotFoundError),
+            self.assertRaises(FileNotFoundError) as raised,
         ):
             self.build()
+        # Other FileNotFoundError raisers precede the generator; only this path proves the guard.
+        self.assertTrue(Path(raised.exception.filename).match("*/site/404.html"))
         self.assertFalse(self.output.exists())
         self.assertEqual(list((self.root / "tmp").iterdir()), [])
 
