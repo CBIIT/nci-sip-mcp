@@ -254,9 +254,14 @@ custom_dir = "overrides"
         self.assertEqual((staged / guide).read_bytes(), (self.root / guide).read_bytes())
 
         (self.root / "README.md").write_text("# Public overview\n")
+        # The guide links to these two pages; a strict build needs them, as the real navigation has.
+        (self.root / "QUICKSTART.md").write_text("# Quickstart\n\n## Audit records\n\nStub.\n")
+        (self.root / "docs/specification.md").write_text("# Specification\n")
         config = self.config().replace(
             'nav = [{ Overview = "README.md" }, { Story = "docs/story.md" }]',
             'nav = [{ Overview = "README.md" }, '
+            '{ Quickstart = "QUICKSTART.md" }, '
+            '{ Specification = "docs/specification.md" }, '
             '{ "Run locally" = "docs/local-guide.md" }, '
             '{ "Request identification" = "docs/request-identification.md" }]',
         )
@@ -267,4 +272,5 @@ custom_dir = "overrides"
         self.assertIn(
             'href="./docs/request-identification.html"', (self.output / "index.html").read_text()
         )
-        self.assertIn("Stable installation identity", published_page.read_text())
+        # Text from the guide itself: the navigation label alone would also contain its title.
+        self.assertIn("Which deployment of which product?", published_page.read_text())

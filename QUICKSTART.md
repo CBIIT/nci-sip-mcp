@@ -14,7 +14,8 @@ configuration proposals, including startup-settings snapshots
 (`nci-sip-mcp serve --configuration-snapshot PATH`,
 [configuration evidence](docs/local-validation.md#configuration-evidence-and-proposals)). The
 [request identification guide](docs/request-identification.md) covers local identity provisioning;
-the server labels its platform requests with it; acceptance traffic does not yet.
+the server labels its platform requests with it; acceptance traffic sends the product label
+without an installation identity.
 
 ## Upstream access and SSIS transition
 
@@ -231,8 +232,9 @@ A leading `~` is expanded, and an empty value is rejected. The other settings:
 once at start-up and sends it in the `User-Agent` of every platform request
 (`nci-sip-mcp/<version> (installation=<id>; +https://github.com/CBIIT/nci-sip-mcp)`). Unset, the
 server sends the product label without `installation=`; a value that is not exactly 32
-lowercase hexadecimal characters stops start-up with an `invalid_request` error naming the
-variable, before any upstream is contacted. For a persistent installation, generate one value,
+lowercase hexadecimal characters, or installed metadata that cannot form a safe label, stops
+start-up with an `invalid_request` error naming the variable or the installed version, before
+any upstream is contacted. For a persistent installation, generate one value,
 replace the placeholder below with that saved value, and retain it in durable deployment
 configuration across restarts and upgrades. This `export` lasts only in the current shell; do not generate a fresh value on every
 startup. The [request identification guide](docs/request-identification.md) covers artifact and

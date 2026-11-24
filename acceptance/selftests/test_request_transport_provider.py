@@ -9,7 +9,7 @@ from urllib.error import URLError
 from urllib.request import Request
 
 import pytest
-from http_receiver import WireReceiver, tls_certificate
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver, tls_certificate
 
 from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_sip_acceptance.request_supervision import SupervisedRun
@@ -123,7 +123,7 @@ def test_exact_authorized_request_reaches_owned_receiver(
             monkeypatch.setenv(name, proxy.origin)
         for name in ("no_proxy", "NO_PROXY"):
             monkeypatch.setenv(name, "")
-        headers = (("accept", "application/json"),)
+        headers = (("accept", "application/json"), ("user-agent", PRODUCT_USER_AGENT))
         body = None
         if method == "POST":
             headers += (("content-type", "application/json"),)
@@ -142,6 +142,7 @@ def test_exact_authorized_request_reaches_owned_receiver(
                 max_response_bytes=64,
                 size_bound="owned",
                 request_policy=provider(owner.run),
+                user_agent=PRODUCT_USER_AGENT,
             )
             result = (
                 client.get_json(authorized_target)
@@ -193,7 +194,11 @@ class MutatingPolicy:
 
 def test_admitted_snapshot_keeps_wire_and_audit_truthful(tmp_path):
     with WireReceiver() as receiver, WireReceiver() as other:
-        grant = RequestGrant("GET", receiver.origin + "/owned", (("accept", "application/json"),))
+        grant = RequestGrant(
+            "GET",
+            receiver.origin + "/owned",
+            (("accept", "application/json"), ("user-agent", PRODUCT_USER_AGENT)),
+        )
         owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
         records = []
         with owner:
@@ -206,6 +211,7 @@ def test_admitted_snapshot_keeps_wire_and_audit_truthful(tmp_path):
                 max_response_bytes=64,
                 size_bound="owned",
                 request_policy=MutatingPolicy(provider(owner.run), other.origin),
+                user_agent=PRODUCT_USER_AGENT,
             )
             client.on_request = records.append
             assert client.get_json("/owned") == {"ok": True}
@@ -297,6 +303,7 @@ def test_redirect_never_moves_credentials_or_exposes_private_fields(tmp_path, st
             (
                 ("accept", "application/json"),
                 ("authorization", secret),
+                ("user-agent", PRODUCT_USER_AGENT),
                 ("x-correlation-id", "policy-test"),
             ),
             credential_origin=receiver.origin + "/allowed",
@@ -313,6 +320,7 @@ def test_redirect_never_moves_credentials_or_exposes_private_fields(tmp_path, st
                 size_bound="owned",
                 credentials={"Authorization": secret},
                 request_policy=provider(owner.run),
+                user_agent=PRODUCT_USER_AGENT,
             )
             result = call("controlled-http", lambda: client.get_json("/allowed"))
         assert result == {
@@ -355,6 +363,7 @@ def test_tls_verification_precedes_credential_http(
             (
                 ("accept", "application/json"),
                 ("authorization", credential),
+                ("user-agent", PRODUCT_USER_AGENT),
             ),
             credential_origin=receiver.origin,
         )
@@ -371,6 +380,7 @@ def test_tls_verification_precedes_credential_http(
                 size_bound="owned",
                 credentials={"Authorization": credential},
                 request_policy=provider(owner.run),
+                user_agent=PRODUCT_USER_AGENT,
             )
             records = []
             client.on_request = records.append

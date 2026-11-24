@@ -8,6 +8,7 @@ from fakes import concept
 from nci_sip_mcp.bounds import HARD_MAX_BATCH_CODES, MAX_BATCH_TARGET_BYTES
 from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
 
@@ -120,7 +121,11 @@ class BatchContentTest(ServerFixture):
 class BatchBoundaryTest(ServerFixture):
     def setUp(self):
         super().setUp()
-        self.client = EVSClient("https://example.invalid/proxy", max_response_bytes=10000)
+        self.client = EVSClient(
+            "https://example.invalid/proxy",
+            max_response_bytes=10000,
+            user_agent=product_user_agent(),
+        )
         self.context.evs = self.client
 
     def batch(self, codes, **arguments):

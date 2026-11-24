@@ -18,13 +18,16 @@ from importlib.metadata import version
 from pathlib import Path
 from unittest.mock import patch
 
-from nci_sip_mcp import cli, container_entry, installer, traffic_identity
+from nci_sip_mcp import cli, container_entry, installer, installer_state, traffic_identity
 from nci_sip_mcp.audit import JsonFormatter
+from nci_sip_mcp.cadsr import CaDSRClient
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.context import Context
 from nci_sip_mcp.errors import correlated
+from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.http_client import HttpClient
 from nci_sip_mcp.index_adapter import LocalIndexAdapter
+from nci_sip_mcp.ssis import SSISClient
 from ncit_index.index import LocalIndex
 
 INSTALLATION = "0123456789abcdef0123456789abcdef"
@@ -205,6 +208,50 @@ class InstallerProbeTest(ReceiverCase):
         self.assertTrue(reachable)
         self.assertEqual(self.user_agents(server), [user_agent()])
 
+    def test_unsafe_installed_metadata_stops_every_prerequisite_command_without_contact(self):
+        message = (
+            "The installed nci-sip-mcp version cannot form a safe label. "
+            "Reinstall the package with valid metadata and retry.\n"
+        )
+        for command in ("check", "run", "status"):
+            with self.subTest(command=command):
+                server = self.serve()
+                data_dir = self.path / command
+                data_dir.mkdir()
+                arguments = [command, "--target", "local"]
+                if command != "check":
+                    arguments += ["--data-dir", str(data_dir)]
+                if command == "run":
+                    arguments.append("--non-interactive")
+                if command == "status":
+                    installer_state.write_state(
+                        data_dir,
+                        installer_state.InstallationState(
+                            2,
+                            "local",
+                            ("server",),
+                            (installer_state.StepOutcome("check_prerequisites", "completed"),),
+                        ),
+                    )
+                environment = {
+                    "NCI_SIP_EVS_BASE_URL": server.url,
+                    "NCI_SIP_CADSR_BASE_URL": server.url,
+                }
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    patch.dict(os.environ, environment),
+                    patch.object(traffic_identity, "version", return_value="not a version"),
+                    redirect_stdout(stdout),
+                    redirect_stderr(stderr),
+                ):
+                    try:
+                        outcome = installer.main(arguments)
+                    except Exception as error:  # noqa: BLE001 - the observed outcome is the claim
+                        outcome = type(error).__name__
+
+                self.assertEqual((outcome, stdout.getvalue(), stderr.getvalue()), (2, "", message))
+                self.assertEqual(server.seen, [])
+
 
 def run_main(*argv, **environment):
     """Run the CLI with exactly `environment`; return (exit code, parsed stdout, stderr text)."""
@@ -278,11 +325,15 @@ class CliTest(ReceiverCase):
         server = self.serve()
 
         with patch.object(cli, "create_mcp") as create:
-            code, result, _ = run_main(
+            code, _, stderr = run_main(
                 "serve", **self.environment(server, NCI_SIP_INSTALLATION_ID="not-an-id")
             )
 
-        self.assertEqual((code, result.get("error", {}).get("code")), (1, "invalid_request"))
+        error = json.loads(stderr)["error"]
+        self.assertEqual(
+            (code, error["code"], error["details"]["parameter"]),
+            (1, "invalid_request", "NCI_SIP_INSTALLATION_ID"),
+        )
         create.assert_not_called()
         self.assertEqual(server.seen, [])
 
@@ -306,14 +357,60 @@ class ContainerEntryTest(ReceiverCase):
         self.assertEqual(code, 1)
         serve.assert_not_called()
         self.assertEqual(
-            [(r["event"], r["asset"], r["errorType"], r["parameter"]) for r in records],
+            [(r["event"], r["asset"], r["errorType"], r["code"], r["parameter"]) for r in records],
             [
                 (
                     "container_startup_failed",
                     "identity",
                     "PlatformError",
+                    "invalid_request",
                     "NCI_SIP_INSTALLATION_ID",
                 )
             ],
         )
         self.assertNotIn("secret", json.dumps(records))
+
+    def test_an_unsafe_installed_version_stops_startup_naming_the_version(self):
+        logging.disable(logging.NOTSET)
+        settings = Settings(data_dir=self.path, transport="streamable-http")
+        index = LocalIndexAdapter(LocalIndex(self.path))
+        with (
+            patch.object(container_entry.Settings, "from_env", return_value=settings),
+            patch.object(container_entry, "configure_logging"),
+            patch.object(container_entry, "prepared_index", return_value=index),
+            patch.object(container_entry, "run_http") as serve,
+            patch.object(traffic_identity, "version", return_value="not a version"),
+            self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as logs,
+        ):
+            code = container_entry.main()
+
+        records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
+        self.assertEqual(code, 1)
+        serve.assert_not_called()
+        self.assertEqual(
+            [(r["asset"], r["code"], r["parameter"]) for r in records],
+            [("identity", "invalid_request", "nci-sip-mcp installed version")],
+        )
+
+
+class EveryClientRequiresALabelTest(unittest.TestCase):
+    """A client built without a User-Agent is a caller bug, never urllib's default (A6.2b)."""
+
+    def test_no_platform_client_can_be_constructed_without_one(self):
+        constructors = {
+            "HttpClient": lambda: HttpClient(
+                "https://example.invalid",
+                label="EVS",
+                timeout_seconds=5,
+                max_attempts=1,
+                retry_backoff_seconds=0,
+                max_response_bytes=1000,
+                size_bound="BOUND",
+            ),
+            "EVSClient": lambda: EVSClient("https://example.invalid"),
+            "CaDSRClient": lambda: CaDSRClient(Settings()),
+            "SSISClient": lambda: SSISClient(Settings()),
+        }
+        for name, construct in constructors.items():
+            with self.subTest(name), self.assertRaisesRegex(TypeError, "user_agent"):
+                construct()

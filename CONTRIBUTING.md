@@ -193,18 +193,20 @@ into a client inside its supervised run:
 from nci_sip_acceptance.request_supervision import SupervisedRun
 from nci_sip_acceptance.request_transport import ControlledHttpPolicy
 from nci_sip_mcp.http_client import HttpClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 
 with SupervisedRun.create(authorization, owned_directory) as owner:
     client = HttpClient(
         base_url, label="diagnostic", timeout_seconds=10, max_attempts=3,
         retry_backoff_seconds=0.25, max_response_bytes=65536,
         size_bound="diagnostic_response", request_policy=ControlledHttpPolicy(owner.run),
+        user_agent=product_user_agent(),
     )
     result = client.get_json(path)
 ```
 
 Every method, absolute URL/raw query, header (including correlation) and body must match a
-grant exactly. The immutable admitted grant supplies every attempt; later Request mutation
+grant exactly; `user_agent` is required, so the grant must declare the same `user-agent` header. The immutable admitted grant supplies every attempt; later Request mutation
 cannot change sent bytes or attempt metadata. Attached callers use the same provider after
 explicit participant authorization/child registration, following the lifecycle below.
 Direct connections ignore ambient proxies, never follow redirects and verify TLS certificates
@@ -491,6 +493,8 @@ scheduler directory; missing or incomplete raw evidence for a nonempty shard blo
 clearance, regardless of the workflow's displayed status. An empty pre-PR sample does not excuse a
 later `NO_TESTS` outcome for a reachable candidate. The raw results do not contain every runner
 phase.
+The producer-evidence exception for a complete, independently verified empty catalogue is stated
+in AGENTS.md; nothing here relaxes a nonempty campaign.
 
 ## Coverage badges
 
@@ -696,6 +700,9 @@ Merge clearance is a reviewer PR comment naming the head commit; a subsequent pu
 clearance, after all triggered workflows pass. See [AGENTS.md](AGENTS.md#how-work-is-done-issues-into-a-milestone-branch-one-reviewed-milestone-into-main)
 for the milestone process and [operations](docs/operations.md) for available signals, ATO
 evidence inputs and open hosting responsibilities.
+
+Issue sizing, milestone bounds, issue clarity and the wait summary are set in
+[AGENTS.md](AGENTS.md#how-work-is-done-issues-into-a-milestone-branch-one-reviewed-milestone-into-main).
 
 Every change reaches `main` through a pull request. Milestone landings use merge commits;
 squash remains an allowed alternative. Use the pull request title as the landing commit

@@ -12,6 +12,7 @@ from nci_sip_mcp.config import Settings
 from nci_sip_mcp.errors import correlated
 from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.invocation import call
+from nci_sip_mcp.traffic_identity import product_user_agent
 from ncit_index.embeddings import EmbeddingProvider
 from test_http_client import BufferedPolicy, Reply, ServerTestCase
 from test_index import IndexTestCase
@@ -29,7 +30,7 @@ class ResponseParsingTest(ServerTestCase):
     def test_deep_form_json_reaches_common_unavailable_error_classification(self):
         body = b"[" * 2000 + b"0" + b"]" * 2000
         server = self.serve(Reply(200, body))
-        client = CaDSRClient(Settings(cadsr_base_url=server.url))
+        client = CaDSRClient(Settings(cadsr_base_url=server.url), user_agent=product_user_agent())
         with correlated("deep-form"):
             error = call("get_form", lambda: client.get_form("123"))["error"]
         self.assertEqual(error["code"], "upstream_unavailable")
@@ -40,7 +41,7 @@ class ResponseParsingTest(ServerTestCase):
     def test_deep_404_concept_error_body_is_unavailable_not_concept_absence(self):
         body = b"[" * 2000 + b"0" + b"]" * 2000
         server = self.serve(Reply(404, body))
-        client = EVSClient(server.url, max_attempts=1)
+        client = EVSClient(server.url, max_attempts=1, user_agent=product_user_agent())
         with correlated("deep-concept-404"):
             result = call(
                 "get_concept",
@@ -117,7 +118,7 @@ class ResponseParsingTest(ServerTestCase):
             with self.subTest(token=token, suffix=suffix):
                 body = json.dumps({"message": f"Error: Terminology not found = {token}{suffix}"})
                 server = self.serve(Reply(404, body.encode()))
-                client = EVSClient(server.url, max_attempts=1)
+                client = EVSClient(server.url, max_attempts=1, user_agent=product_user_agent())
                 with correlated("unknown-terminology"):
                     error = call("version", client.get_api_version)["error"]
                 accepted = token in (valid, "ncit_x")

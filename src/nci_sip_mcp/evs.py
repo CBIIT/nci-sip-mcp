@@ -218,11 +218,11 @@ class EVSClient:
         base_url: str,
         timeout_seconds: float = 30.0,
         *,
+        user_agent: str,
         max_attempts: int = 3,
         retry_backoff_seconds: float = 0.25,
         max_response_bytes: int = 10 * 1024 * 1024,
         license_key: str | None = None,
-        user_agent: str | None = None,
     ) -> None:
         self.http = HttpClient(
             base_url,
