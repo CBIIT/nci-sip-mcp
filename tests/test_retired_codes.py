@@ -7,6 +7,7 @@ from jsonschema import Draft202012Validator
 from fakes import concept
 from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
 
@@ -81,7 +82,9 @@ class RetiredCodeTest(ServerFixture):
         self.history = [
             {"code": "C1", "action": "retire", "replacementCode": "C2", "replacementName": "Second"}
         ]
-        self.context.evs = EVSClient("https://example.invalid", max_attempts=1)
+        self.context.evs = EVSClient(
+            "https://example.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
 
     def resolve(self, **arguments):
         return invoke(

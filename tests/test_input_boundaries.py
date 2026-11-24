@@ -17,6 +17,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from fakes import cde_response, data_element
 from nci_sip_mcp.cadsr import CaDSRClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_cadsr_client import reply
 from test_http_client import ServerTestCase
 from test_release_selection import initialize_http
@@ -95,7 +96,7 @@ class InputBoundaryTest(ServerFixture, ServerTestCase):
         server = self.serve(*responses)
         self.settings = replace(self.settings, cadsr_base_url=server.url, cadsr_ftp_url=server.url)
         self.context.settings = self.settings
-        self.context.cadsr = CaDSRClient(self.settings)
+        self.context.cadsr = CaDSRClient(self.settings, user_agent=product_user_agent())
         return server
 
     def exchange(self, transport, calls):

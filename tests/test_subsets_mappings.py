@@ -6,6 +6,7 @@ from jsonschema import Draft202012Validator
 from fakes import concept
 from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_audit import captured, records
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
@@ -22,7 +23,9 @@ class SubsetsMappingsTest(ServerFixture):
         }
         self.subset = {"type": "Concept_In_Subset", "relatedCode": "C2", "relatedName": "Second"}
         self.raw = concept("C1", active=True, associations=[self.subset], maps=[self.mapping])
-        self.context.evs = EVSClient("https://example.invalid", max_attempts=1)
+        self.context.evs = EVSClient(
+            "https://example.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
 
     def invoke_tool(self, kind, **arguments):
         return invoke(
@@ -167,7 +170,10 @@ class SubsetsMappingsTest(ServerFixture):
 
     def test_attribution_comes_only_from_upstream_and_credentials_use_existing_client(self):
         self.context.evs = EVSClient(
-            "https://example.invalid", license_key="test-only", max_attempts=1
+            "https://example.invalid",
+            license_key="test-only",
+            max_attempts=1,
+            user_agent=product_user_agent(),
         )
         self.raw["licenseText"] = "Source licence"
         self.raw["maps"][0]["licenseText"] = "Map licence"
