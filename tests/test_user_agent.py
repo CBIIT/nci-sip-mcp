@@ -321,6 +321,46 @@ class ContainerEntryTest(ReceiverCase):
         )
         self.assertNotIn("secret", json.dumps(records))
 
+    def test_a_refused_identity_is_logged_with_its_code_and_parameter(self):
+        logging.disable(logging.NOTSET)
+        settings = Settings(data_dir=self.path, transport="streamable-http")
+        index = LocalIndexAdapter(LocalIndex(self.path))
+        cases = (
+            (
+                "malformed id",
+                {"NCI_SIP_INSTALLATION_ID": "not-an-id"},
+                None,
+                "NCI_SIP_INSTALLATION_ID",
+            ),
+            ("unsafe version", {}, "not a version", "nci-sip-mcp installed version"),
+        )
+        for name, environment, unsafe_version, parameter in cases:
+            with ExitStack() as stack, self.subTest(name):
+                stack.enter_context(patch.dict(os.environ, environment))
+                stack.enter_context(
+                    patch.object(container_entry.Settings, "from_env", return_value=settings)
+                )
+                stack.enter_context(patch.object(container_entry, "configure_logging"))
+                stack.enter_context(
+                    patch.object(container_entry, "prepared_index", return_value=index)
+                )
+                stack.enter_context(patch.object(container_entry, "run_http"))
+                if unsafe_version:
+                    stack.enter_context(
+                        patch.object(traffic_identity, "version", return_value=unsafe_version)
+                    )
+                logs = stack.enter_context(
+                    self.assertLogs("nci_sip_mcp.container_entry", level="ERROR")
+                )
+                code = container_entry.main()
+
+                records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
+                self.assertEqual(code, 1)
+                self.assertEqual(
+                    [(r["asset"], r.get("code"), r["parameter"]) for r in records],
+                    [("identity", "invalid_request", parameter)],
+                )
+
 
 class EveryClientRequiresALabelTest(unittest.TestCase):
     """A client built without a User-Agent is a caller bug, never urllib's default (A6.2b)."""
