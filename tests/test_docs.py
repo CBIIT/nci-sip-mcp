@@ -1000,7 +1000,7 @@ class DocumentationTest(unittest.TestCase):
             '"$ACCEPTANCE_VENV/bin/python" -m nci_sip_acceptance.traffic_identity show',
             guide_text,
         )
-        # The guide's server examples are the labels the code renders, with placeholders.
+        # The guide's three label examples are the labels the code renders, with placeholders.
         configured = IdentitySnapshot("0" * 32, "1.2.3")
         unconfigured = IdentitySnapshot(None, "1.2.3")
         acceptance = acceptance_identity.product_user_agent(

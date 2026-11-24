@@ -23,16 +23,16 @@ Three forms exist. `<v>` is the installed package version.
 | Acceptance recorder and citation reads | `nci-sip-acceptance/<v> (+https://github.com/CBIIT/nci-sip-mcp)` |
 
 - **Governed acceptance runs and the release preflight** send the second form: product only, never
-  an installation id. A server launched by the acceptance suite receives none, because the suite
-  removes every `NCI_SIP_*` variable from its environment.
+  an installation id. A server launched by the acceptance suite receives none: the suite strips
+  every inherited `NCI_SIP_*` variable from its environment and sets only its own run settings.
 - **The installer's reachability probe and the Shared SI contract script** send the second form,
   never an installation id.
 - **Only the server and core can send `installation=`.** There is no separate installation header,
-  and the acceptance harness gives the server it launches no identity (it removes every
-  `NCI_SIP_*` variable from that server's environment).
-- **Localhost-only callers send no label.** The dependency-age script identifies itself to the
-  public package registries as `nci-sip-mcp-dependency-age`; that is not a platform service and
-  carries no installation.
+  and the acceptance harness gives the server it launches no identity (it strips every inherited
+  `NCI_SIP_*` variable from that server's environment, then sets only its own run settings).
+- **Localhost-only callers send no label.**
+- **The dependency-age script** calls the public package registries, not a platform service. It
+  identifies itself as `nci-sip-mcp-dependency-age` and carries no installation.
 
 ## When to configure an installation id
 
@@ -63,8 +63,8 @@ The server reads `NCI_SIP_INSTALLATION_ID` and the installed version once, at st
 to start before contacting any upstream when either is unusable. A malformed id gives an error
 that names `NCI_SIP_INSTALLATION_ID` and never repeats the rejected value. An unsafe installed
 version gives an error that names the package metadata and asks you to reinstall the package.
-Local-only CLI commands (`search`, `lookup`, and the others) start
-the same context and stop too.
+Every CLI command, including local-only ones such as `search`, starts
+the same context and stops too.
 
 | Situation | Result |
 |---|---|
@@ -159,7 +159,7 @@ installation's durable one, and it is not a credential.
 
 ## For platform teams
 
-What you will see from us on every platform request:
+What you will see from us on a platform request the server makes during a tool call or CLI command:
 
 ```text
 User-Agent: nci-sip-mcp/<v> (installation=<32 hex>; +https://github.com/CBIIT/nci-sip-mcp)
@@ -177,7 +177,9 @@ retention):
   credential. Requests without it come from a deployment that has none configured, from acceptance
   or CI traffic, or from the recorder (a different product token).
 - `X-Correlation-ID` joins one request to the audit record of the call that made it. Send us the
-  value and the time and we find the call from our stderr records.
+  value and the time and we find the call from our stderr records. Requests made outside a call
+  carry `User-Agent` only and no correlation id: the installer's reachability probe, the Shared SI
+  contract script, and the recorder and citation reads.
 - Both fields are self-reported. They are meant for monitoring and assistance, not authentication
   or access control.
 
