@@ -268,7 +268,7 @@ class SupersededBuildRemovalTest(ServerFixture):
         )
 
     def listed(self):
-        return {item["buildId"] for item in invoke(self.context, "index_builds")["builds"]}
+        return {item["build_id"] for item in invoke(self.context, "index_builds")["builds"]}
 
     def rows(self, build_id):
         with sqlite3.connect(self.local_index.db_path) as conn:
