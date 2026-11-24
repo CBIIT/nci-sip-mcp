@@ -30,7 +30,9 @@ pdm run spec-render                                  # regenerate docs/specifica
 ```
 
 The [request identification guide](../docs/request-identification.md) describes the acceptance
-distribution's separate local identity utility. It does not label acceptance requests yet.
+distribution's separate local identity utility. The recorder and the citation reads send the
+product `User-Agent` `nci-sip-acceptance/<version> (+https://github.com/CBIIT/nci-sip-mcp)`,
+never an installation identity; governed live requests do not label themselves yet.
 
 ## Managed live environments
 
