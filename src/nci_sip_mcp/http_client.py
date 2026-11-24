@@ -397,7 +397,7 @@ class HttpClient:
         data: bytes | None = None,
     ) -> Request:
         headers = {"Accept": "application/json", **(headers or {}), **self.credentials}
-        if self.user_agent:
+        if self.user_agent is not None:
             headers["User-Agent"] = self.user_agent
         if correlation_id := current_correlation_id():
             headers[CORRELATION_HEADER] = correlation_id
