@@ -16,6 +16,7 @@ from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.release import ReleaseContext
 from ncit_index import index as index_module
 from ncit_index.errors import IndexBuildError, IndexCompatibilityError
+from ncit_index.index import LocalIndex
 from test_audit import captured, records
 from test_evaluation_sets import sample_set_payload
 from test_evs_client import FakeResponse
@@ -326,6 +327,49 @@ class SupersededBuildRemovalTest(ServerFixture):
             [item["build_ids"] for item in records(stream, "index_build_removal_pending")],
             [self.stale],
         )
+
+    def failing_activation_commit(self):
+        """Make the commit of an activation fail: a deferred constraint broken by the switch."""
+
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn, conn:
+            conn.executescript(
+                "CREATE TABLE IF NOT EXISTS parent (id INTEGER PRIMARY KEY);"
+                "CREATE TABLE IF NOT EXISTS child (parent_id INTEGER REFERENCES parent(id) "
+                "DEFERRABLE INITIALLY DEFERRED);"
+                "CREATE TRIGGER IF NOT EXISTS break_on_switch AFTER UPDATE OF active ON manifests "
+                "WHEN NEW.active = 1 BEGIN INSERT INTO child VALUES (999); END;"
+            )
+        connect = sqlite3.connect
+
+        class Enforcing(sqlite3.Connection):
+            def __init__(self, *arguments, **options):
+                super().__init__(*arguments, **options)
+                self.execute("PRAGMA foreign_keys = ON")
+
+        return patch(
+            "ncit_index.index.sqlite3.connect",
+            lambda path, **options: connect(path, factory=Enforcing, **options),
+        )
+
+    def test_a_failed_activation_commit_announces_nothing_and_keeps_the_old_build(self):
+        provider = self.context.embedding_provider
+        operations = {
+            "index-activate": lambda index: index.activate(self.replacement.build_id),
+            "sample": lambda index: index.upsert_concepts(
+                normalized([concept("C2", "Two")]), None, provider
+            ),
+        }
+        for label, operation in operations.items():
+            with self.subTest(label):
+                events = []
+                index = LocalIndex(
+                    self.local_index.data_dir,
+                    on_event=lambda name, _d, sink=events: sink.append(name),
+                )
+                with self.failing_activation_commit(), self.assertRaises(sqlite3.IntegrityError):
+                    operation(index)
+                self.assertEqual([name for name in events if name == "index_activated"], [])
+                self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
 
     def test_the_next_activation_removes_what_is_left_and_the_rollback_target_survives(self):
         with self.fail_removals_after(1):
