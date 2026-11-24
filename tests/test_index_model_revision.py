@@ -2,6 +2,7 @@
 
 import io
 import json
+import logging
 import sqlite3
 import sys
 import tempfile
@@ -82,6 +83,33 @@ class ModelRevisionTest(ServerFixture):
                         "runtime_revision": "r2",
                     },
                 )
+            ],
+        )
+
+    def test_both_revision_records_are_warnings(self):
+        self.index_with("r1")
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn, conn:
+            payload = json.loads(conn.execute("SELECT payload FROM manifests").fetchone()[0])
+            payload.pop("embedding_revision", None)
+            conn.execute("UPDATE manifests SET payload = ?", (json.dumps(payload),))
+        self.context.index = LocalIndexAdapter(
+            LocalIndex(self.settings.data_dir, on_event=index_event)
+        )
+        with captured(), self.assertLogs("nci_sip_mcp.index", level="INFO") as unknown:
+            self.search()
+        self.index_with("r1")  # a build that stores a revision
+        self.context.embedding_provider = provider("r2")
+        self.context.index = LocalIndexAdapter(
+            LocalIndex(self.settings.data_dir, on_event=index_event)
+        )
+        with captured(), self.assertLogs("nci_sip_mcp.index", level="INFO") as mismatch:
+            self.search()
+        levels = [(r.structured["event"], r.levelno) for r in unknown.records + mismatch.records]
+        self.assertEqual(
+            [pair for pair in levels if pair[0].startswith("index_model_revision_")],
+            [
+                ("index_model_revision_unknown", logging.WARNING),
+                ("index_model_revision_mismatch", logging.WARNING),
             ],
         )
 
