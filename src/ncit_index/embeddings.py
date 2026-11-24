@@ -132,7 +132,9 @@ def model_directory_revision(path: Path) -> str:
     `blobs/`. Location, modification time and ordering on disk do not count; a changed byte, a
     rename or an added file does. Anything that cannot be hashed as a file is refused by path.
     """
-    lines = sorted(f"{relative}\0{_file_hash(file)}\n" for relative, file in _model_files(path))
+    lines = sorted(
+        f"{relative}\0{_file_hash(file, relative)}\n" for relative, file in _model_files(path)
+    )
     return "sha256:" + hashlib.sha256("".join(lines).encode()).hexdigest()
 
 
@@ -177,11 +179,16 @@ def _relative(path: Path, root: Path) -> str:
     return "." if path == root else path.relative_to(root).as_posix()
 
 
-def _file_hash(path: Path) -> str:
+def _file_hash(path: Path, relative: str) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(1 << 20):
-            digest.update(chunk)
+    try:
+        with path.open("rb") as stream:
+            while chunk := stream.read(1 << 20):
+                digest.update(chunk)
+    except OSError as error:
+        raise IndexCompatibilityError(
+            f"Model directory entry {relative} cannot be read: {error.strerror}"
+        ) from error
     return digest.hexdigest()
 
 
