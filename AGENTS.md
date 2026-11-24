@@ -230,12 +230,35 @@ Post plans, review rounds and reviewer questions as GitHub comments; the reviewe
 Ask the owner directly only for owner decisions: scope, specification conventions, repository
 settings and rulesets.
 
-A milestone fits one pull request reviewable in one sitting: about four issues, 1,500 changed
-lines (excluding generated files and `acceptance/expected/fixture.json`), and two days of work
-at most. If it outgrows those bounds, split it before opening the pull request and move the
-remaining work to a new milestone. Measure insertions plus deletions with
+An executable issue is one independently reviewable outcome that fits one focused work session
+(hours). Its estimate counts implementation, tests, documentation, review corrections and every
+gate. Work without a defensible estimate is not ready to start; oversized work is split into
+independently reviewable slices before entry. A broad investigation is a tracking umbrella whose
+finite batches are the executable issues. A stalled external dependency is BLOCKED, with an owner.
+
+A milestone fits one pull request reviewable in one sitting: about four issues and 1,500 changed
+lines (excluding generated files and `acceptance/expected/fixture.json`), and at most seven
+planned working days, including integration, review and gate reserve. More than seven needs the
+owner's recorded approval, and ten is the limit; neither is a target, and more time never permits
+an oversized pull request. Calendar forecasts and external waits are kept apart from planned
+active work. If a milestone outgrows these bounds, split it before opening the pull request and
+move the remaining work to a new milestone. Measure insertions plus deletions with
 `git diff --shortstat origin/main...milestone/<phase> -- . ':!acceptance/expected/fixture.json'`,
 adding exclusion pathspecs for generated files.
+
+**Issue clarity.** Lead with the purpose and the result the caller or maintainer needs. Use
+literal prose; add a short flow or numbered stages when order matters. Name actual dependencies
+and blockers, the work to do, and the evidence that will demonstrate completion. Define operation
+or gate codes on first use. Keep simple issues short; a long history goes in an expandable section.
+Distinguish sourced observations, inferences, proposals and approvals, and delivered evidence from
+future requirements. Historical dates are not new deadlines. When rewriting an issue, preserve its
+original record and link the exact location; retain obligations, failures, evidence links and
+custody, scope boundaries, approvals, holds and unresolved owner decisions. A presentation edit
+grants no new authority, and an implementer statement is not reviewer approval.
+
+An issue records its state, owner and next checkpoint at each meaningful transition (active work,
+owner decision, external input, review, CI). A milestone pull request summarizes its waits by
+those kinds, without overlapping intervals or retrospective precision.
 
 **Each issue:**
 
@@ -308,8 +331,14 @@ adding exclusion pathspecs for generated files.
       evidence must belong to one workflow attempt. An unrelated rerun that did not execute the
       mutation consumer does not by itself invalidate a completed campaign when H/B/T and inputs
       are unchanged and raw results are independently reviewed; an aggregate summary alone is
-      insufficient. This does not reduce ordinary test, self-test, fixture or hook gates.
-     Use focused follow-up tests/mutations for a concrete claim or finding.
+      insufficient. The one exception is a complete, independently verified empty changed-site
+      catalogue, where no mutant was selected, routed or judged: B/H/T, the selection command, the
+      source and tool identity, the raw `EMPTY` record and the tested-source custody are the
+      evidence, and no same-attempt producer coverage is required. Nonempty campaigns are
+      unchanged. This does not reduce ordinary test, self-test, fixture or hook gates.
+     Use focused follow-up tests/mutations for a concrete claim or finding. Evidence a review
+     requires names the claim it proves; a new universal condition needs the owner's agreement,
+     recorded in this file, and is never added inside a review round.
      Fix every survivor or allowlist only reviewed equivalent `SURVIVED` results in
      `scripts/validation/mutation-allowlist.yaml` with their reasons. `NO_TESTS` is never
      allowlisted: close reachable gaps at their owning boundary and remove verified dead code.
@@ -399,8 +428,13 @@ Rules learned the hard way:
   type. Break down the available timing evidence and explain every outlier; do not invent a
   projection when no sample can be run. State the projection in the issue before launching the full
   campaign; do not substitute a separate full local campaign.
+- Before delegating a mutation run, state its exact command, source/base/head, selection scope and
+  count, workers, execution cap, owner and stop rule. Ordinary gates cite their existing measured
+  command instead.
 - When a run falls more than 25% behind its projection, find the cause before waiting longer;
-  a new estimate is not a cause.
+  a new estimate is not a cause. Stop the run cooperatively where the cause or the cost requires it,
+  never by killing blindly.
+- Run one heavy local execution (full test suite, self-tests, mutation sample) at a time.
 - Name roles, never people, in code, issues and pull requests.
 - Licence and attribution text is passed through from what the upstream API returns; the server
   keeps no licence data of its own. A licence key or credential is never logged or committed.
