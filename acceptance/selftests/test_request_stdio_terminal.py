@@ -57,10 +57,6 @@ sys.exit(7)
 """
 
 
-def _kind(error):
-    return "BaseExceptionGroup" if isinstance(error, BaseExceptionGroup) else type(error).__name__
-
-
 def _record_finish(resource, monkeypatch):
     outcome = ["not-called"]
     actual_finish = resource.finish
@@ -69,7 +65,7 @@ def _record_finish(resource, monkeypatch):
         try:
             result = actual_finish(deadline)
         except BaseException as error:
-            outcome[0] = f"raised:{_kind(error)}"
+            outcome[0] = f"raised:{type(error).__name__}"
             raise
         outcome[0] = "returned"
         return result
@@ -432,7 +428,7 @@ def _labels(error):
 def _outward_label(outward):
     if not isinstance(outward, BaseExceptionGroup):
         return "None" if outward is None else _label(outward)
-    return f"{_kind(outward)}({_labels(outward)})"
+    return f"{type(outward).__name__}({_labels(outward)})"
 
 
 def _terminal_diagnostics(case, outward):
@@ -521,10 +517,10 @@ def test_pending_owner_failure_reports_sanitized_settlement_state(terminal_case,
     message = str(failure.value)
     assert PRIVATE_TEXT not in message and "hunter2" not in message
     assert (
-        "diagnostics: outward=BaseExceptionGroup(PrivateWaitError); errors=[PrivateWaitError]; "
+        "diagnostics: outward=ExceptionGroup(PrivateWaitError); errors=[PrivateWaitError]; "
         "settled_inputs: waited=True process_closed=True streams_closed=True "
         f"endpoints_closed=True process_present=True; fixture_waits={len(waited)}; "
-        "thread_alive=False; finish=raised:BaseExceptionGroup; "
+        "thread_alive=False; finish=raised:ExceptionGroup; "
         f"pending=[{resource.name}]"
     ) in message
 
