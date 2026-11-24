@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from fakes import cde_response, cde_row, data_element, form, vm_response, vm_row
 from nci_sip_mcp.cadsr import CDE_MATCH, CaDSRClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
 
@@ -30,7 +31,8 @@ class MetadataFixture(ServerFixture):
     def setUp(self):
         super().setUp()
         self.context.cadsr = CaDSRClient(
-            replace(self.settings, cadsr_base_url="https://cadsr.test")
+            replace(self.settings, cadsr_base_url="https://cadsr.test"),
+            user_agent=product_user_agent(),
         )
 
     def answer(self, body, tool="get_data_element", **arguments):

@@ -16,6 +16,7 @@ from nci_sip_mcp.errors import InputValidationError, PlatformError
 from nci_sip_mcp.http_client import UpstreamTimeoutError, UpstreamTooLargeError
 from nci_sip_mcp.invocation import call
 from nci_sip_mcp.ssis import CADSR_GRAPH, NCIT_GRAPH, SSISClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse
 from test_http_client import Reply, ServerTestCase
 
@@ -85,7 +86,7 @@ VALUES ?role { cadsr:main_concept cadsr:minor_concept }
                     self.assertEqual(query.split(), expected.split())
 
     def ssis(self, server):
-        client = SSISClient(Settings(ssis_sparql_url=server.url))
+        client = SSISClient(Settings(ssis_sparql_url=server.url), user_agent=product_user_agent())
         client.sparql_http.sleep = lambda _: None
         return client
 
@@ -265,7 +266,8 @@ VALUES ?role { cadsr:main_concept cadsr:minor_concept }
             Settings(
                 ssis_sparql_url=server.url,
                 cadsr_credential="fixture-only:secret-value",
-            )
+            ),
+            user_agent=product_user_agent(),
         )
         self.assertEqual(
             {row["graph"] for row in client.get_graph_identities()}, {NCIT_GRAPH, CADSR_GRAPH}
@@ -275,7 +277,7 @@ VALUES ?role { cadsr:main_concept cadsr:minor_concept }
 
 class SSISValidationTest(unittest.TestCase):
     def test_identifiers_rejected_before_any_transport(self):
-        client = SSISClient(Settings())
+        client = SSISClient(Settings(), user_agent=product_user_agent())
         with patch("nci_sip_mcp.http_client._open", side_effect=AssertionError("Unexpected HTTP")):
             for method in (
                 client.find_data_elements,
@@ -356,7 +358,7 @@ class SSISContractsTest(ServerTestCase):
                 self.assertEqual(result[0]["roles"], f"{object_class} {value_meaning}")
 
     def ssis(self, server):
-        return SSISClient(Settings(ssis_sparql_url=server.url))
+        return SSISClient(Settings(ssis_sparql_url=server.url), user_agent=product_user_agent())
 
     def test_identity_requires_each_graph_and_date_field(self):
         original = recording("ssis-sparql/graph-identities.json")["response"]["body"]["results"][
@@ -439,7 +441,7 @@ class SSISContractsTest(ServerTestCase):
 
 class SSISValidationContractsTest(unittest.TestCase):
     def test_identifiers_and_expansion_name_the_bad_parameter_before_http(self):
-        client = SSISClient(Settings())
+        client = SSISClient(Settings(), user_agent=product_user_agent())
         cases = [
             (client.find_data_elements, "C", {}, "conceptCode"),
             (client.find_data_elements, "C0", {}, "conceptCode"),
@@ -457,7 +459,7 @@ class SSISValidationContractsTest(unittest.TestCase):
                     self.assertEqual(raised.exception.details["parameter"], parameter)
 
     def test_every_value_operation_validates_maximum(self):
-        client = SSISClient(Settings())
+        client = SSISClient(Settings(), user_agent=product_user_agent())
         for operation, argument in (
             (client.find_data_elements, "C1"),
             (client.find_permissible_values, "C1"),
@@ -476,7 +478,8 @@ class SSISValidationContractsTest(unittest.TestCase):
             Settings(
                 ssis_sparql_url="https://sparql.example",
                 timeout_seconds=17,
-            )
+            ),
+            user_agent=product_user_agent(),
         )
         with patch("nci_sip_mcp.http_client._open") as transport:
             transport.return_value = FakeResponse(b'{"results":{"bindings":[]}}')
@@ -487,7 +490,7 @@ class SSISValidationContractsTest(unittest.TestCase):
         )
 
     def test_timeout_and_ten_megabyte_bound_apply_to_the_sparql_surface(self):
-        client = SSISClient(Settings(timeout_seconds=17))
+        client = SSISClient(Settings(timeout_seconds=17), user_agent=product_user_agent())
         client.sparql_http.sleep = lambda _: None
         with (
             patch("nci_sip_mcp.http_client._open", side_effect=TimeoutError),
@@ -511,7 +514,7 @@ class SSISValidationContractsTest(unittest.TestCase):
 class SSISRetryContractsTest(ServerTestCase):
     def test_the_surface_retries_503_until_the_third_response(self):
         sparql = self.serve(Reply(503), Reply(503), sparql_reply([]))
-        client = SSISClient(Settings(ssis_sparql_url=sparql.url))
+        client = SSISClient(Settings(ssis_sparql_url=sparql.url), user_agent=product_user_agent())
         client.sparql_http.sleep = lambda _: None
         self.assertEqual(client.find_data_elements("C1"), [])
         self.assertEqual([path for path, _ in sparql.seen], ["/sparql"] * 3)

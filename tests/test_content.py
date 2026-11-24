@@ -8,6 +8,7 @@ from nci_sip_mcp.bounds import Budget, current_budget
 from nci_sip_mcp.errors import correlated
 from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traffic_identity import product_user_agent
 from nci_sip_mcp.traversal import traverse_ncit
 from test_bounds import BudgetHub
 from test_index import normalized
@@ -356,7 +357,7 @@ class ContentTest(ServerFixture):
 
     def test_status_fetch_after_an_edge_stop_rejects_missing_or_wrong_release_nodes(self):
         root = dict(self.evs.concepts["C1"], children=[{"code": "C2"}, {"code": "C3"}])
-        client = EVSClient("https://example.invalid")
+        client = EVSClient("https://example.invalid", user_agent=product_user_agent())
         for answer, expected in (
             ([], "upstream_unavailable"),
             ([concept("C9")], "upstream_unavailable"),
