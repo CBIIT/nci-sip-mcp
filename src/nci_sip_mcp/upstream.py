@@ -66,7 +66,7 @@ def parse_upstream_json(payload: bytes, source: str) -> Any:
 
     try:
         data = json.loads(payload)
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+    except (ValueError, RecursionError) as exc:  # ValueError: bad JSON, bad UTF-8, > 4,300 digits
         what = "an HTML page" if payload.lstrip().startswith(b"<") else "invalid JSON"
         raise PlatformError(
             "upstream_unavailable",
