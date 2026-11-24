@@ -222,6 +222,7 @@ class EVSClient:
         retry_backoff_seconds: float = 0.25,
         max_response_bytes: int = 10 * 1024 * 1024,
         license_key: str | None = None,
+        user_agent: str | None = None,
     ) -> None:
         self.http = HttpClient(
             base_url,
@@ -232,6 +233,7 @@ class EVSClient:
             max_response_bytes=max_response_bytes,
             size_bound="NCI_SIP_EVS_MAX_RESPONSE_BYTES",
             credentials={LICENSE_KEY_HEADER: license_key} if license_key else None,
+            user_agent=user_agent,
         )
 
     @property

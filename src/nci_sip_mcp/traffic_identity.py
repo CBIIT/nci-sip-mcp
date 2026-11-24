@@ -31,14 +31,27 @@ class IdentitySnapshot:
     version: str | None = field(repr=False)
 
 
+def _installed_version() -> str | None:
+    try:
+        return version(PRODUCT)
+    except UnicodeDecodeError:
+        return None
+
+
 def capture_identity() -> IdentitySnapshot:
     """Capture the configured value and installed package version once."""
 
-    try:
-        installed_version = version(PRODUCT)
-    except UnicodeDecodeError:
-        installed_version = None
-    return IdentitySnapshot(os.environ.get(INSTALLATION_ID_ENV), installed_version)
+    return IdentitySnapshot(os.environ.get(INSTALLATION_ID_ENV), _installed_version())
+
+
+def product_user_agent() -> str:
+    """The product-only User-Agent, whatever installation is configured (A6.2b).
+
+    For emitters that carry no installation identity; the installed version is read and
+    validated here, with the refusal `user_agent` gives.
+    """
+
+    return _label(_installed_version(), None)
 
 
 def installation_label(snapshot: IdentitySnapshot) -> str:
@@ -47,12 +60,35 @@ def installation_label(snapshot: IdentitySnapshot) -> str:
     raw_id = snapshot._raw_id
     if raw_id is None:
         raise _invalid_id("is missing")
+    return _label(snapshot.version, _valid_id(raw_id))
+
+
+def user_agent(snapshot: IdentitySnapshot) -> str:
+    """The User-Agent a server sends (A6.2b): the product label, with the installation when set.
+
+    An unset id is not an error here: identification serves platform monitoring, not access
+    control. A configured id that is malformed is refused, as `installation_label` refuses it.
+    """
+
+    if snapshot._raw_id is None:
+        return _label(snapshot.version, None)
+    return installation_label(snapshot)
+
+
+def _valid_id(raw_id: str) -> InstallationId:
     if _INSTALLATION_ID.fullmatch(raw_id) is None:
         raise _invalid_id("must be exactly 32 lowercase hexadecimal characters")
-    installation_id = InstallationId(raw_id)
-    if not isinstance(snapshot.version, str) or _VERSION_TOKEN.fullmatch(snapshot.version) is None:
+    return InstallationId(raw_id)
+
+
+def _label(installed_version: str | None, installation_id: InstallationId | None) -> str:
+    if (
+        not isinstance(installed_version, str)
+        or _VERSION_TOKEN.fullmatch(installed_version) is None
+    ):
         raise _invalid_version()
-    label = f"{PRODUCT}/{snapshot.version} (installation={installation_id}; +{PROJECT_URL})"
+    installation = f"installation={installation_id}; " if installation_id else ""
+    label = f"{PRODUCT}/{installed_version} ({installation}+{PROJECT_URL})"
     if len(label.encode("ascii")) > MAX_LABEL_BYTES:
         raise _invalid_version()
     return label

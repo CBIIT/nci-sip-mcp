@@ -93,12 +93,14 @@ A6:
     A6.1: Every tool call emits telemetry of timestamp, tool, parameters, release, outbound requests with retries, result size, truncation, response code and elapsed time.
     A6.2: A supplied _meta.correlationId is accepted only as a string fully matching [A-Za-z0-9._:-]{1,128}, recorded on every telemetry entry, passed upstream on every platform request and returned; one is generated where none is supplied. An explicitly supplied malformed, empty or non-string value is invalid_request naming _meta.correlationId, under a freshly generated safe identifier; the rejected value appears in no header, error, telemetry or log.
     A6.2a: The platform is given the audit context only the module knows (tool, consumer, workflow correlation) through the parameters or headers it defines.
+    A6.2b: "Every platform request the server sends carries the User-Agent nci-sip-mcp/<installed version> (installation=<id>; +https://github.com/CBIIT/nci-sip-mcp), where installation=<id> is present only when NCI_SIP_INSTALLATION_ID is configured. The configuration and version are captured once at start-up. A configured id that is not exactly 32 lowercase hexadecimal characters, or a version that cannot form a safe label, refuses start-up with invalid_request naming the setting before any platform is contacted, and the rejected value appears in no error, header or log. The label identifies the installation to platform teams; it grants no authority and neither replaces nor changes the per-call correlation identifier (A6.2)."
     A6.3: Log records share one structured format and field vocabulary across both modules.
     A6.4: Telemetry records no more content than needed, and no caller free text where a hash suffices.
     A6.5: The module does not rate-limit in place of the platform; it honours 429 and Retry-After with jittered back-off and counts retries against its budget.
   why:
     A6.2: A bounded header-safe identifier prevents header encoding failures and unbounded audit amplification; reassess header transport and audit budgets before changing its form or length.
     A6.2a: One question may cross both modules; without a shared correlation identifier the two audit trails cannot be joined.
+    A6.2b: "Platform teams recognise traffic and assist its operators from their access logs, so a stable, opaque installation label belongs in the one header every client already sends; a missing label must not stop local or fixture use (owner decision 2026-11-24), but a configured value that is wrong would mislabel traffic silently, so it is refused where the operator is looking. Reassess the form with the platform teams before changing it."
 A7:
   title: Identifiers, terminologies and scoping
   rules:
