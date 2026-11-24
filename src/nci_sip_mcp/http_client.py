@@ -18,6 +18,7 @@ import json
 import logging
 import random
 import re
+import socket
 import ssl
 import time
 from collections.abc import Callable, Mapping
@@ -42,7 +43,7 @@ from .bounds import (
     current_budget,
     current_deadline,
 )
-from .errors import PlatformError, current_correlation_id
+from .errors import PlatformError, current_correlation_id, with_next_step
 from .errors import RequestPolicyError as RequestPolicyError  # noqa: PLC0414 - public export.
 from .errors import UpstreamError as UpstreamError  # noqa: PLC0414 - public export.
 from .request_policy import (
@@ -127,9 +128,11 @@ class _Transient(Exception):  # noqa: N818 - control flow inside this module, ne
         status: int | None = None,
         retry_after: str | None = None,
         retryable: bool = True,
+        unresolved: bool = False,
     ) -> None:
         super().__init__(message)
         self.message = message
+        self.unresolved = unresolved
         self.timed_out = timed_out
         self.status = status
         self.retry_after = retry_after
@@ -306,6 +309,12 @@ def _certificate_verification_failure(failure: Exception) -> bool:
     )
 
 
+def _unresolved_host(failure: Exception) -> bool:
+    return isinstance(failure, socket.gaierror) or isinstance(
+        getattr(failure, "reason", None), socket.gaierror
+    )
+
+
 def _transport_failure(exc: Exception) -> str:
     if _timed_out(exc):
         return "timeout"
@@ -350,7 +359,9 @@ class HttpClient:
         credentials: Mapping[str, str] | None = None,
         redact_values: tuple[str, ...] = (),
         request_policy: RequestPolicy | None = None,
+        unresolved_hint: str = "",
     ) -> None:
+        self.unresolved_hint = unresolved_hint
         self.request_policy = (
             request_policy if request_policy is not None else current_request_policy()
         )
@@ -619,6 +630,7 @@ class HttpClient:
                 failure = _Transient(
                     self._redact(f"{self.label} request failed for {path}: transport failure"),
                     timed_out=_timed_out(exc),
+                    unresolved=_unresolved_host(exc),
                 )
         # Raised outside the handlers, so that no chain carries the failure as it came: an
         # HTTP status line can hold anything the platform chose to echo.
@@ -714,8 +726,13 @@ class HttpClient:
                 seconds=self.timeout_seconds,
                 attempts=attempts,
             )
+        message = failure.message
+        if failure.unresolved and self.unresolved_hint:
+            message = with_next_step(
+                message, f"The host name did not resolve; {self.unresolved_hint}."
+            )
         return UpstreamUnavailableError(
-            failure.message, surface=self.surface, attempts=attempts, **last_http
+            message, surface=self.surface, attempts=attempts, **last_http
         )
 
     def _wait(self, path: str, attempt: int, delay: float, reason: str) -> None:
