@@ -28,7 +28,8 @@ Three forms exist. `<v>` is the installed package version.
 - **The installer's reachability probe and the Shared SI contract script** send the second form,
   never an installation id.
 - **Only the server and core can send `installation=`.** There is no separate installation header,
-  and no identity passes from a parent process to a child.
+  and the acceptance harness gives the server it launches no identity (it removes every
+  `NCI_SIP_*` variable from that server's environment).
 - **Localhost-only callers send no label.** The dependency-age script identifies itself to the
   public package registries as `nci-sip-mcp-dependency-age`; that is not a platform service and
   carries no installation.
@@ -59,15 +60,17 @@ correlation id, use the section above.
 ## Start-up checks and troubleshooting
 
 The server reads `NCI_SIP_INSTALLATION_ID` and the installed version once, at start-up, and refuses
-to start before contacting any upstream when either is unusable. The error names the setting and
-never repeats the rejected value. Local-only CLI commands (`search`, `lookup`, and the others) start
+to start before contacting any upstream when either is unusable. A malformed id gives an error
+that names `NCI_SIP_INSTALLATION_ID` and never repeats the rejected value. An unsafe installed
+version gives an error that names the package metadata and asks you to reinstall the package.
+Local-only CLI commands (`search`, `lookup`, and the others) start
 the same context and stop too.
 
 | Situation | Result |
 |---|---|
 | No id configured | Starts; sends the product-only label |
 | Id is not exactly 32 lowercase hexadecimal characters | Refused at start-up, naming `NCI_SIP_INSTALLATION_ID` |
-| Installed version cannot form a safe label, or the label exceeds 256 ASCII bytes | Refused at start-up, naming the installed version |
+| Installed version cannot form a safe label, or the label exceeds 256 ASCII bytes | Refused at start-up, naming the package metadata; reinstall the package |
 | Two deployments share one id | Not detected; give independent deployments independent ids |
 
 ## Generate and inspect from a checkout
