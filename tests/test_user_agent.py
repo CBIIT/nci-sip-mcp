@@ -10,8 +10,10 @@ import logging
 import os
 import sys
 import tempfile
+import threading
+import unittest
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
-from dataclasses import replace
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.metadata import version
 from pathlib import Path
 from unittest.mock import patch
@@ -21,8 +23,8 @@ from nci_sip_mcp.audit import JsonFormatter
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.context import Context
 from nci_sip_mcp.errors import correlated
-from test_http_client import Reply, ServerTestCase
-from test_server import ServerFixture
+from nci_sip_mcp.index_adapter import LocalIndexAdapter
+from ncit_index.index import LocalIndex
 
 INSTALLATION = "0123456789abcdef0123456789abcdef"
 OTHER_INSTALLATION = "fedcba9876543210fedcba9876543210"
@@ -51,11 +53,46 @@ def user_agent(installation=None):
     return f"nci-sip-mcp/{version('nci-sip-mcp')} ({detail}https://github.com/CBIIT/nci-sip-mcp)"
 
 
-class ReceiverCase(ServerTestCase):
+class Handler(BaseHTTPRequestHandler):
+    """Record the path and headers of each request; answer with the next scripted status."""
+
+    def do_GET(self):
+        self.server.seen.append((self.path, {k.lower(): v for k, v in self.headers.items()}))
+        status = self.server.statuses.pop(0) if self.server.statuses else 200
+        body = b'{"ok": true}'
+        self.send_response(status)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.do_GET()
+
+    def log_message(self, *_):
+        pass
+
+
+class ReceiverCase(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name)
+
+    def serve(self, *statuses):
+        """A local receiver that answers `statuses` in turn, then 200; returns it."""
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        server.seen, server.statuses = [], list(statuses)
+        thread = threading.Thread(
+            target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        server.url = f"http://127.0.0.1:{server.server_port}"
+        return server
 
     def environment(self, server, **settings):
         return {
@@ -107,7 +144,7 @@ class ContextTest(ReceiverCase):
         self.assertEqual(self.user_agents(server), [user_agent()] * 6)
 
     def test_the_label_is_the_one_captured_at_start_up_for_every_attempt_and_call(self):
-        server = self.serve(Reply(503))
+        server = self.serve(503)
         with patch.dict(os.environ, {"NCI_SIP_INSTALLATION_ID": INSTALLATION}):
             context = Context(self.settings(server))
         with patch.dict(os.environ, {"NCI_SIP_INSTALLATION_ID": OTHER_INSTALLATION}):
@@ -215,15 +252,16 @@ class CliTest(ReceiverCase):
         self.assertEqual(server.seen, [])
 
 
-class ContainerEntryTest(ServerFixture):
+class ContainerEntryTest(ReceiverCase):
     def test_a_malformed_id_stops_startup_naming_only_the_setting(self):
         logging.disable(logging.NOTSET)
-        settings = replace(self.settings, transport="streamable-http")
+        settings = Settings(data_dir=self.path, transport="streamable-http")
+        index = LocalIndexAdapter(LocalIndex(self.path))
         with (
             patch.dict(os.environ, {"NCI_SIP_INSTALLATION_ID": "not-an-id-secret"}),
             patch.object(container_entry.Settings, "from_env", return_value=settings),
             patch.object(container_entry, "configure_logging"),
-            patch.object(container_entry, "prepared_index", return_value=self.context.index),
+            patch.object(container_entry, "prepared_index", return_value=index),
             patch.object(container_entry, "run_http") as serve,
             self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as logs,
         ):
