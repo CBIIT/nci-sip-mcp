@@ -123,6 +123,19 @@ unit remains serial. Any baseline failure names its domain and fails the run. Th
 `baseline_domains` records freshly computed domain outcomes and seconds; imported PR-CI runs leave
 that list empty. Do not use the unselected local command to launch a second full catalogue.
 
+**Allowlist preflight.** `pdm run mutation-gate --base <B> --head <B>` (the same commit twice)
+validates `scripts/validation/mutation-allowlist.yaml` against the working tree with the gate's own
+validator and stops there: the selection is empty, so it runs no baseline and no mutant (about 14 s
+measured once at `bbbd1ae`). Exit 0 with `{"outcome": "EMPTY", ...}` means every entry still matches
+exactly one current candidate; exit 2 with an `INFRA` record names the first stale, duplicate or
+ambiguous entry. Run it before the pre-PR sample and other heavy gates whenever the diff touches a
+file named in the allowlist, and before pushing a review-round fix to an open milestone PR. Its
+`EMPTY` line is not a source-bound selection or a sample record. It checks that the allowlist and the
+source agree, not that any mutant is equivalent. For a failing entry: re-key it only when the same
+intended mutation is still equivalent after the source change; remove it, with review, when the site is
+gone or the exemption is obsolete; when behaviour changed, the old reason cannot move to a new key
+and needs a fresh equivalence review.
+
 Ordinary `pdm run test` stores combined coverage in `tmp/coverage/unit/.coverage`;
 `pdm run acceptance-selftest` uses `tmp/coverage/harness/.coverage`. PDM supplies the required
 absolute root so children and xdist workers share their command's scratch destination even
