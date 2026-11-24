@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import unittest
+from contextlib import closing
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -271,20 +272,20 @@ class SupersededBuildRemovalTest(ServerFixture):
         return {item["build_id"] for item in invoke(self.context, "index_builds")["builds"]}
 
     def rows(self, build_id):
-        with sqlite3.connect(self.local_index.db_path) as conn:
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn:
             return conn.execute(
                 "SELECT COUNT(*) FROM manifests WHERE build_id = ?", (build_id,)
             ).fetchone()[0]
 
-    def fail_second_removal(self):
-        """The second superseded build cannot be deleted: the database is busy."""
+    def fail_removals_after(self, deleted):
+        """After `deleted` successful removals, the next superseded build cannot be deleted."""
 
         real = index_module.delete_build
         removed = []
 
         def flaky(conn, build_id):
             removed.append(build_id)
-            if len(removed) > 1:
+            if len(removed) > deleted:
                 busy = sqlite3.OperationalError("database is locked")
                 busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
                 raise busy
@@ -293,7 +294,7 @@ class SupersededBuildRemovalTest(ServerFixture):
         return patch.object(index_module, "delete_build", flaky)
 
     def test_a_failed_removal_is_reported_and_leaves_the_activation_and_the_rollback_target(self):
-        with captured() as stream, self.fail_second_removal():
+        with captured() as stream, self.fail_removals_after(1):
             result = invoke(self.context, "index_activate", self.replacement.build_id)
 
         active = self.context.index.get_active_manifest()
@@ -315,8 +316,19 @@ class SupersededBuildRemovalTest(ServerFixture):
             [("WARNING", [self.stale[1]])],
         )
 
+    def test_removal_stops_at_the_first_storage_failure_and_names_every_build_left(self):
+        with captured() as stream, self.fail_removals_after(0):
+            result = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(result["pendingRemoval"], self.stale)
+        self.assertEqual([self.rows(build_id) for build_id in self.stale], [1, 1])
+        self.assertEqual(
+            [item["build_ids"] for item in records(stream, "index_build_removal_pending")],
+            [self.stale],
+        )
+
     def test_the_next_activation_removes_what_is_left_and_the_rollback_target_survives(self):
-        with self.fail_second_removal():
+        with self.fail_removals_after(1):
             invoke(self.context, "index_activate", self.replacement.build_id)
 
         hidden = invoke(self.context, "index_activate", self.stale[1])
@@ -332,7 +344,7 @@ class SupersededBuildRemovalTest(ServerFixture):
         self.assertEqual(self.listed(), {self.active.build_id, self.replacement.build_id})
 
     def test_a_removal_failure_that_is_not_a_storage_failure_propagates_after_activation(self):
-        with sqlite3.connect(self.local_index.db_path) as conn:
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn, conn:
             conn.execute(
                 "CREATE TRIGGER refuse_delete BEFORE DELETE ON manifests "
                 "BEGIN SELECT RAISE(ABORT, 'refused'); END"

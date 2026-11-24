@@ -220,9 +220,14 @@ class RevisionSourceTest(unittest.TestCase):
         modules = self.fake_modules("/cache/models--org--model/snapshots/main")
         with (
             patch.dict(sys.modules, modules),
-            self.assertRaisesRegex(IndexCompatibilityError, "commit"),
+            self.assertRaises(IndexCompatibilityError) as refused,
         ):
             SentenceTransformersProvider("org/model", local_files_only=True)
+        self.assertEqual(
+            str(refused.exception),
+            "The cached snapshot of model org/model is not a commit folder; "
+            "refresh the model cache from the Hub.",
+        )
 
     def test_a_directory_model_is_hashed_not_mistaken_for_a_hub_commit_by_its_path(self):
         with tempfile.TemporaryDirectory() as directory:

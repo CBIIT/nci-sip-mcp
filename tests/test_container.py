@@ -260,12 +260,22 @@ class ContainerOfflineTest(ServerFixture):
         ):
             self.assertEqual((container_entry.main(), served), (0, ["served"]))
             (model / "weights.bin").write_bytes(b"w2")
-            with self.assertLogs("nci_sip_mcp.index", level="INFO") as logs:
+            with (
+                self.assertLogs("nci_sip_mcp.index", level="INFO") as logs,
+                self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as startup,
+            ):
                 code = container_entry.main()
         mismatch = [
             r.structured for r in logs.records if r.structured["event"].endswith("_mismatch")
         ]
         self.assertEqual((code, served), (1, ["served"]))
+        self.assertEqual(
+            [
+                (r.structured["event"], r.structured["asset"], r.structured["errorType"])
+                for r in startup.records
+            ],
+            [("container_startup_failed", "index", "IndexModelRevisionError")],
+        )
         self.assertEqual(len(mismatch), 1)
         stored, runtime = mismatch[0]["stored_revision"], mismatch[0]["runtime_revision"]
         self.assertTrue(stored.startswith("sha256:") and runtime.startswith("sha256:"))
