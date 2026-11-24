@@ -233,7 +233,7 @@ class SSISClient:
     client neither compares it with EVS nor fabricates a registry release from a date.
     """
 
-    def __init__(self, settings: Settings, *, user_agent: str | None = None) -> None:
+    def __init__(self, settings: Settings, *, user_agent: str) -> None:
         transport = partial(
             HttpClient,
             timeout_seconds=settings.timeout_seconds,

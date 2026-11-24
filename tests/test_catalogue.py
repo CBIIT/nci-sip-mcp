@@ -11,6 +11,7 @@ from nci_sip_mcp.bounds import Budget
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
 
@@ -194,7 +195,9 @@ class CatalogueTest(ServerFixture):
 class CatalogueHttpTest(ServerFixture):
     def setUp(self):
         super().setUp()
-        self.client = EVSClient("https://example.invalid", retry_backoff_seconds=0)
+        self.client = EVSClient(
+            "https://example.invalid", retry_backoff_seconds=0, user_agent=product_user_agent()
+        )
         self.context.evs = self.client
 
     def listing(self, **arguments):

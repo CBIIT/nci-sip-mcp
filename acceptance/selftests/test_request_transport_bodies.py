@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Event, current_thread
 
 import pytest
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 
 from nci_sip_acceptance.request_authorization import Authorization, Limits, RequestGrant
 from nci_sip_acceptance.request_budget import AttemptLease
@@ -47,11 +47,16 @@ def owned_client(receiver, owner, *, limit=64, attempts=1):
         max_response_bytes=limit,
         size_bound="owned",
         request_policy=ControlledHttpPolicy(owner.run),
+        user_agent=PRODUCT_USER_AGENT,
     )
 
 
 def owned_run(tmp_path, receiver, *, response_bytes=64, total_bytes=8194, seconds=300):
-    grant = RequestGrant("GET", receiver.origin + "/owned", (("accept", "application/json"),))
+    grant = RequestGrant(
+        "GET",
+        receiver.origin + "/owned",
+        (("accept", "application/json"), ("user-agent", PRODUCT_USER_AGENT)),
+    )
     return SupervisedRun.create(
         Authorization(
             (grant,),
@@ -387,10 +392,16 @@ def test_form_absence_is_interpreted_by_existing_consumer(tmp_path):
     reply = f"HTTP/1.1 200 OK\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
     path = "/NCIFormAPI.v2_0:NciFormApiRad/Form/5406471"
     with WireReceiver([reply]) as receiver:
-        grant = RequestGrant("GET", receiver.origin + path, (("accept", "application/json"),))
+        grant = RequestGrant(
+            "GET",
+            receiver.origin + path,
+            (("accept", "application/json"), ("user-agent", PRODUCT_USER_AGENT)),
+        )
         owner = SupervisedRun.create(Authorization((grant,), Limits(), "a" * 64), tmp_path)
         with owner, using_request_policy(ControlledHttpPolicy(owner.run)):
-            client = CaDSRClient(Settings(cadsr_base_url=receiver.origin))
+            client = CaDSRClient(
+                Settings(cadsr_base_url=receiver.origin), user_agent=PRODUCT_USER_AGENT
+            )
             with pytest.raises(PlatformError) as caught:
                 client.get_form("5406471")
         assert caught.value.code == "not_found"
@@ -508,6 +519,7 @@ def test_expected_transport_and_entry_receipt_failures_have_fixed_public_record(
             receiver.origin + "/owned",
             (
                 ("accept", "application/json"),
+                ("user-agent", PRODUCT_USER_AGENT),
                 ("x-correlation-id", "policy-test"),
             ),
         )

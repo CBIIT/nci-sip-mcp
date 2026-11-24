@@ -20,6 +20,7 @@ from nci_sip_mcp.errors import ErrorCode
 from nci_sip_mcp.evs import EVSClient, verify_release
 from nci_sip_mcp.permissions import authority_scope
 from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_docs import QUICKSTART, section
 from test_evs_client import FakeResponse
 from test_handlers import NEOPLASM, HandlerTestCase, release
@@ -43,7 +44,12 @@ def from_the_client(answer, call=lambda client: client.get_api_version()):
         patch("nci_sip_mcp.http_client._open", side_effect=[answer]),
         patch("nci_sip_mcp.http_client.time.sleep"),
     ):
-        client = EVSClient("https://example.invalid", max_attempts=1, max_response_bytes=5)
+        client = EVSClient(
+            "https://example.invalid",
+            max_attempts=1,
+            max_response_bytes=5,
+            user_agent=product_user_agent(),
+        )
         try:
             call(client)
         except Exception as error:  # noqa: BLE001 - whatever the client raises is the case

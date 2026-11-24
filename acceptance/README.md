@@ -31,8 +31,8 @@ pdm run spec-render                                  # regenerate docs/specifica
 
 The [request identification guide](../docs/request-identification.md) describes the acceptance
 distribution's separate local identity utility. Governed live requests and the release preflight
-send the product `User-Agent` `nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`
-(#597). The recorder and the citation reads send
+send the product `User-Agent` `nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`.
+The recorder and the citation reads send
 `nci-sip-acceptance/<version> (+https://github.com/CBIIT/nci-sip-mcp)`. None of them sends an
 installation identity.
 

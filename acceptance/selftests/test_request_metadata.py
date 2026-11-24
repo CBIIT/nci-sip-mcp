@@ -98,6 +98,21 @@ def test_metadata_family_refuses_changed_request_fields(
         assert owner.snapshot()["state"] == "failed"
 
 
+def test_metadata_family_admits_the_exact_product_request(tmp_path):
+    # The control of the refusal rows above: the same policy admits the one request they vary.
+    with WireReceiver() as receiver:
+        policy = request_catalogue.compile_policy(selected(receiver.origin))
+        owner = SupervisedRun.create(policy.authorization, tmp_path)
+        result = call(
+            "owned",
+            lambda: metadata_request(owner, receiver.origin, "/api/v1/version", None, {}, None),
+        )
+        assert result == {"ok": True}
+        assert receiver.contacts == 1
+        sent = {name.lower(): value for name, value in receiver.requests[0][2]}
+        assert sent["user-agent"] == PRODUCT_USER_AGENT
+
+
 def test_metadata_family_refuses_another_origin(tmp_path):
     with WireReceiver() as selected_receiver, WireReceiver() as other:
         policy = request_catalogue.compile_policy(selected(selected_receiver.origin))

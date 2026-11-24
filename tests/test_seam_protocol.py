@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 from fakes import FakeSSIS, primary_element
 from nci_sip_mcp.cli import build_parser
 from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_seam import NCIT, element, gdc_map
 from test_server import ServerFixture
 
@@ -300,7 +301,7 @@ class CrossDomainRecordSchemaTest(ServerFixture):
         self.rejects_missing(validator, data, [("permissibleValue",)])
 
     def test_gdc_hit_and_evidence_have_strict_mapset_source_records(self, _):
-        self.context.evs = EVSClient("https://evs.test")
+        self.context.evs = EVSClient("https://evs.test", user_agent=product_user_agent())
         with patch.object(
             self.context.evs,
             "_get_existing",
