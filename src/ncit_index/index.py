@@ -13,6 +13,7 @@ from dataclasses import replace
 from itertools import batched, chain, groupby
 from pathlib import Path
 from tempfile import TemporaryFile
+from time import monotonic
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -40,6 +41,7 @@ from .storage import (
     create_fts,
     delete_build,
     fts_table,
+    holds_index,
     migrate,
     name_key,
     vector_bytes,
@@ -230,26 +232,47 @@ class LocalIndex:
             raise
 
     def _init_db(self) -> None:
+        migration: tuple[int, float] | None = None
         with self._connect() as conn:
-            if self._schema_current(conn):
+            if self._schema_version(conn) == SCHEMA_VERSION:
                 return
             if conn.execute("PRAGMA page_count").fetchone()[0] == 0:
                 # Larger pages avoid overflow-page reads for per-concept vector BLOBs.
                 conn.execute("PRAGMA page_size = 65536")
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("BEGIN IMMEDIATE")
-            # Another opener may have migrated while this one waited for the lock.
-            if not self._schema_current(conn):
+            # Another opener may have migrated while this one waited for the lock, so the
+            # version this migration starts from is the one read under it.
+            version = self._schema_version(conn)
+            if version != SCHEMA_VERSION:
+                migration = self._announce_migration(conn, version)
                 migrate(conn)
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        # Past the commit: a start record without this one means the migration rolled back.
+        if migration is not None:
+            self._event(
+                "index_migration_finished",
+                from_version=migration[0],
+                to_version=SCHEMA_VERSION,
+                elapsed_seconds=monotonic() - migration[1],
+            )
 
-    def _schema_current(self, conn: sqlite3.Connection) -> bool:
+    def _announce_migration(
+        self, conn: sqlite3.Connection, version: int
+    ) -> tuple[int, float] | None:
+        """Record the start of a migration of an existing file; a new empty file is only created."""
+        if not holds_index(conn):
+            return None
+        self._event("index_migration_started", from_version=version, to_version=SCHEMA_VERSION)
+        return version, monotonic()
+
+    def _schema_version(self, conn: sqlite3.Connection) -> int:
         version = int(conn.execute("PRAGMA user_version").fetchone()[0])
         if version > SCHEMA_VERSION:
             raise IndexCompatibilityError(
                 f"Index schema {version} at {self.db_path} is newer than supported {SCHEMA_VERSION}"
             )
-        return version == SCHEMA_VERSION
+        return version
 
     @staticmethod
     def _manifest(row: sqlite3.Row) -> IndexManifest:

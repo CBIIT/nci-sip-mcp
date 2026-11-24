@@ -220,6 +220,14 @@ Operational constraints apply whichever AWS services implement these boxes:
   Build/evaluate/activate in an operator workspace, then roll out matching snapshots and models.
   Rollback activates the predecessor in that workspace and redistributes it. The server does
   not synchronize assets or sessions; an asset rollout can invalidate build-bound cursors.
+- **Migrate an older index before serving.** A file with an older schema migrates on first
+  open, in one write transaction, before the process serves. Do that in the operator workspace
+  while no server holds the file (any operator command, for example `index-builds`, opens it),
+  then distribute the migrated file. The `nci_sip_mcp.index` log records
+  `index_migration_started` and, after the commit, `index_migration_finished` with
+  `from_version`, `to_version` and `elapsed_seconds`. A start without a finish means the
+  migration rolled back or the process stopped; the file is still at `from_version`. A new empty
+  file is created without either record.
 - **Readiness gates local compatibility.** Probe each replica with an allowed Host header.
   Neither health endpoint guarantees live upstream service, issued caDSR credentials, or
   production retrieval quality. The container smoke uses a test-only model.

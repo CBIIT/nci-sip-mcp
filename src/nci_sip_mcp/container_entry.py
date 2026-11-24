@@ -17,7 +17,7 @@ from .audit import emit
 from .config import Settings, configure_logging, require_local_stdio_access
 from .context import Context
 from .errors import PlatformError
-from .index_adapter import LocalIndexAdapter
+from .index_adapter import LocalIndexAdapter, index_event
 from .server import create_mcp
 from .transport import run_http
 
@@ -44,7 +44,7 @@ def startup_failure(asset: str, error: Exception) -> None:
 def prepared_index(settings: Settings) -> LocalIndexAdapter:
     if settings.http_require_index and not (settings.data_dir / "nci_si.sqlite3").is_file():
         raise NoActiveIndexError("Supply the index in NCI_SIP_DATA_DIR")
-    index = LocalIndexAdapter(LocalIndex(settings.data_dir))
+    index = LocalIndexAdapter(LocalIndex(settings.data_dir, on_event=index_event))
     manifest = index.get_active_manifest()
     if manifest is None:
         if settings.http_require_index:
