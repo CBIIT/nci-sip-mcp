@@ -71,7 +71,7 @@ class MigrationRecordsTest(unittest.TestCase):
             container_entry.prepared_index(Settings(data_dir=self.path))
         self.assert_one_migration(self.records(logs))
 
-    def test_elapsed_time_runs_from_inside_the_lock_to_after_the_commit(self):
+    def test_elapsed_time_runs_from_the_start_record_to_after_the_commit(self):
         self.schema_five_directory()
         events, versions = [], []
 
@@ -81,8 +81,7 @@ class MigrationRecordsTest(unittest.TestCase):
                 versions.append(conn.execute("PRAGMA user_version").fetchone()[0])
             return 10.0 if len(versions) == 1 else 12.5
 
-        # `create=True`: before the index reads a clock the name is absent and the assertions fail.
-        with patch("ncit_index.index.monotonic", clock, create=True):
+        with patch("ncit_index.index.monotonic", clock):
             LocalIndex(self.path, on_event=lambda name, details: events.append((name, details)))
 
         self.assertEqual(versions, [5, SCHEMA_VERSION])

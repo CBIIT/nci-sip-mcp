@@ -64,8 +64,9 @@ bakeoff. They establish neither superiority over alternatives nor clinical or sp
 Definitions provide additional indexed fields, but the model card's entity-name task does not
 by itself establish quality for arbitrary long definitions or downstream workflows.
 
-The actual [provider](../src/ncit_index/embeddings.py) constructs
-`SentenceTransformer(model_name)` and calls `encode` with `normalize_embeddings=True` and
+The actual [provider](../src/ncit_index/embeddings.py) loads a
+`SentenceTransformer` from the model directory or the cached Hub snapshot (a cached snapshot is
+used as it is; refresh the cache to update the model, since only an empty cache downloads) and calls `encode` with `normalize_embeddings=True` and
 `show_progress_bar=False`, then converts the result to float32. Pooling, tokenization, truncation
 and inference batching are delegated to the loaded model/library; this wrapper specifies no
 CLS pooling or model-card example length. Do not copy those example settings into a description
@@ -81,17 +82,29 @@ call is added for it). The cases:
   `IndexModelRevisionError` naming both, and one `index_model_revision_mismatch` record per build
   and process is logged. Serve the model files the build was embedded with, or run `index-rebuild`
   with the serving model and activate its evaluated build.
-- Stored known, runtime unknown (for example a model supplied as a directory): refused the same
-  way, because the two cannot be compared.
-- Stored unknown (a build made before this check, or from a model directory): served after the
+- Stored known, runtime unknown (a custom provider that cannot tell): refused the same way,
+  because the two cannot be compared.
+- Stored unknown (a build made before this check): served after the
   checks above, and one `index_model_revision_unknown` record per build and process is logged. A
   stored build is never backfilled; rebuild to record a revision. `index-builds` shows
   `embedding_revision` (`null` when unknown). The hashing provider's revision names its algorithm.
 
-A model supplied as a directory has no revision until its files are identified separately, so
-such a deployment is still unprotected against a changed same-named model. Preserve the actual
-frozen model assets, software versions and evaluation data externally when reproducing a run;
-the commands below alone do not provide a byte-reproducible model pin.
+A model supplied as a directory is identified by its content: the revision is `sha256:` followed
+by the SHA-256 of the lines `<relative path>\0<file SHA-256 hex>\n` for every file, sorted by
+relative path. A file link counts as the content of its target under the link's own path (a Hub
+snapshot folder of links into `blobs/` hashes like a copy); location and modification time do not
+count, a changed byte, a rename or an added file does. A directory link, a broken link, a special
+file or an empty directory is refused, naming the path. Copy a model directory unchanged: the
+path comparison is exact, including case. The hash covers the files as read once, when the
+provider is created (at build and at start-up), so the container serving `/model` refuses to start
+when the directory it finds then differs from the one the index was embedded with. The directory,
+including the targets of its links, must stay unchanged while a process runs: a later or
+concurrent change is not detected. On one proxy sample (the cached `all-mpnet-base-v2` snapshot,
+438.7 MB in 11 files, warm file cache, one machine; not the SapBERT model) hashing took about
+0.17 s; this is not an upper bound, since a cold cache or network storage can be slower. A build made before this check stores no
+revision and stays in the "stored unknown" case until it is rebuilt. Preserve the actual
+software versions and evaluation data externally when reproducing a run; the commands below
+alone do not provide a byte-reproducible model pin.
 
 ## How retrieval uses the fields
 
@@ -185,7 +198,8 @@ available. Verify search/readiness with the same embedding settings
 and intended release after activating; distribute matching assets separately to any serving replica.
 
 For rollback, set `PREVIOUS_BUILD_ID` to the retained predecessor, keep its matching embedding
-settings, and explicitly activate it:
+settings and model files (the revision check applies to a rollback too), and explicitly
+activate it:
 
 ```bash
 pdm run nci-sip-mcp index-activate "$PREVIOUS_BUILD_ID"

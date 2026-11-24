@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import unittest
+from contextlib import closing
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -14,7 +15,8 @@ from nci_sip_mcp.indexing import full_build
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.release import ReleaseContext
 from ncit_index import index as index_module
-from ncit_index.errors import IndexBuildError, IndexCompatibilityError
+from ncit_index.errors import IndexBuildError, IndexCompatibilityError, IndexStorageError
+from ncit_index.index import LocalIndex
 from test_audit import captured, records
 from test_evaluation_sets import sample_set_payload
 from test_evs_client import FakeResponse
@@ -271,20 +273,20 @@ class SupersededBuildRemovalTest(ServerFixture):
         return {item["build_id"] for item in invoke(self.context, "index_builds")["builds"]}
 
     def rows(self, build_id):
-        with sqlite3.connect(self.local_index.db_path) as conn:
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn:
             return conn.execute(
                 "SELECT COUNT(*) FROM manifests WHERE build_id = ?", (build_id,)
             ).fetchone()[0]
 
-    def fail_second_removal(self):
-        """The second superseded build cannot be deleted: the database is busy."""
+    def fail_removals_after(self, deleted):
+        """After `deleted` successful removals, the next superseded build cannot be deleted."""
 
         real = index_module.delete_build
         removed = []
 
         def flaky(conn, build_id):
             removed.append(build_id)
-            if len(removed) > 1:
+            if len(removed) > deleted:
                 busy = sqlite3.OperationalError("database is locked")
                 busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
                 raise busy
@@ -293,7 +295,7 @@ class SupersededBuildRemovalTest(ServerFixture):
         return patch.object(index_module, "delete_build", flaky)
 
     def test_a_failed_removal_is_reported_and_leaves_the_activation_and_the_rollback_target(self):
-        with captured() as stream, self.fail_second_removal():
+        with captured() as stream, self.fail_removals_after(1):
             result = invoke(self.context, "index_activate", self.replacement.build_id)
 
         active = self.context.index.get_active_manifest()
@@ -315,8 +317,116 @@ class SupersededBuildRemovalTest(ServerFixture):
             [("WARNING", [self.stale[1]])],
         )
 
+    def test_removal_stops_at_the_first_storage_failure_and_names_every_build_left(self):
+        with captured() as stream, self.fail_removals_after(0):
+            result = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(result["pendingRemoval"], self.stale)
+        self.assertEqual([self.rows(build_id) for build_id in self.stale], [1, 1])
+        self.assertEqual(
+            [item["build_ids"] for item in records(stream, "index_build_removal_pending")],
+            [self.stale],
+        )
+
+    def failing_activation_commit(self):
+        """Make the commit of an activation fail: a deferred constraint broken by the switch."""
+
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn, conn:
+            conn.executescript(
+                "CREATE TABLE IF NOT EXISTS parent (id INTEGER PRIMARY KEY);"
+                "CREATE TABLE IF NOT EXISTS child (parent_id INTEGER REFERENCES parent(id) "
+                "DEFERRABLE INITIALLY DEFERRED);"
+                "CREATE TRIGGER IF NOT EXISTS break_on_switch AFTER UPDATE OF active ON manifests "
+                "WHEN NEW.active = 1 BEGIN INSERT INTO child VALUES (999); END;"
+            )
+        connect = sqlite3.connect
+
+        class Enforcing(sqlite3.Connection):
+            def __init__(self, *arguments, **options):
+                super().__init__(*arguments, **options)
+                self.execute("PRAGMA foreign_keys = ON")
+
+        return patch(
+            "ncit_index.index.sqlite3.connect",
+            lambda path, **options: connect(path, factory=Enforcing, **options),
+        )
+
+    def test_a_failed_activation_commit_announces_nothing_and_keeps_the_old_build(self):
+        provider = self.context.embedding_provider
+        operations = {
+            "index-activate": lambda index: index.activate(self.replacement.build_id),
+            "sample": lambda index: index.upsert_concepts(
+                normalized([concept("C2", "Two")]), None, provider
+            ),
+        }
+        for label, operation in operations.items():
+            with self.subTest(label):
+                events = []
+                index = LocalIndex(
+                    self.local_index.data_dir,
+                    on_event=lambda name, _d, sink=events: sink.append(name),
+                )
+                with self.failing_activation_commit(), self.assertRaises(sqlite3.IntegrityError):
+                    operation(index)
+                self.assertEqual([name for name in events if name == "index_activated"], [])
+                self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
+
+    def listing_fault(self, *, fail_after):
+        """Make the listing of superseded builds fail once `fail_after` listings have run.
+
+        Returns the patch and the list of listings seen, so a test can prove the fault matched.
+        """
+
+        connect = sqlite3.connect
+        listings = []
+
+        class Listing(sqlite3.Connection):
+            def execute(self, statement, *parameters):
+                if "'superseded'" in statement and statement.lstrip().upper().startswith("SELECT"):
+                    listings.append(statement)
+                    if len(listings) > fail_after:
+                        full = sqlite3.OperationalError("database or disk is full")
+                        full.sqlite_errorcode = sqlite3.SQLITE_FULL
+                        raise full
+                return super().execute(statement, *parameters)
+
+        return (
+            patch(
+                "ncit_index.index.sqlite3.connect",
+                lambda path, **options: connect(path, factory=Listing, **options),
+            ),
+            listings,
+        )
+
+    def test_the_superseded_listing_is_read_inside_the_activation_transaction(self):
+        """If the first listing fails the activation fails: it cannot be a read after the commit."""
+
+        events = []
+        index = LocalIndex(
+            self.local_index.data_dir, on_event=lambda name, _d, sink=events: sink.append(name)
+        )
+        fault, listings = self.listing_fault(fail_after=0)
+        with fault, self.assertRaises(IndexStorageError):
+            index.activate_and_report(self.replacement.build_id)
+
+        self.assertEqual(len(listings), 1)
+        self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
+        self.assertEqual([name for name in events if name == "index_activated"], [])
+
+    def test_the_activation_result_needs_no_read_after_the_commit(self):
+        """One listing, inside the transaction; a later listing would fail and must not be made."""
+
+        fault, listings = self.listing_fault(fail_after=1)
+        with fault:
+            result = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(len(listings), 1)
+        self.assertEqual(result.get("buildId"), self.replacement.build_id)
+        self.assertEqual(result.get("pendingRemoval"), [])
+        self.assertEqual([self.rows(build_id) for build_id in self.stale], [0, 0])
+
     def test_the_next_activation_removes_what_is_left_and_the_rollback_target_survives(self):
-        with self.fail_second_removal():
+        with self.fail_removals_after(1):
             invoke(self.context, "index_activate", self.replacement.build_id)
 
         hidden = invoke(self.context, "index_activate", self.stale[1])
@@ -332,7 +442,7 @@ class SupersededBuildRemovalTest(ServerFixture):
         self.assertEqual(self.listed(), {self.active.build_id, self.replacement.build_id})
 
     def test_a_removal_failure_that_is_not_a_storage_failure_propagates_after_activation(self):
-        with sqlite3.connect(self.local_index.db_path) as conn:
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn, conn:
             conn.execute(
                 "CREATE TRIGGER refuse_delete BEFORE DELETE ON manifests "
                 "BEGIN SELECT RAISE(ABORT, 'refused'); END"

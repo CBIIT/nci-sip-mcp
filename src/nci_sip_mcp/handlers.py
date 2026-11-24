@@ -314,14 +314,15 @@ def index_activate(context: Context, build_id: str) -> dict[str, Any]:
     """Activate a completed build; the replaced build is retained for rollback.
 
     `pendingRemoval` names builds the activation superseded but could not yet delete (a
-    storage failure, logged as `index_build_removal_pending`); activating any build retries.
+    storage failure, logged as `index_build_removal_pending`); activating any completed build
+    (the active one included) retries.
     """
     index = indexing.open_index(context.settings.data_dir)
-    active = index.activate(build_id)
+    active, pending = index.activate_and_report(build_id)
     return {
         "buildId": active.build_id,
         "manifest": manifest_record(active).to_result(),
-        "pendingRemoval": index.pending_removal(),
+        "pendingRemoval": pending,
     }
 
 

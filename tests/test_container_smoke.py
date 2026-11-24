@@ -399,6 +399,13 @@ class SmokeClient:
 
 
 class SmokeSurfaceTest(unittest.TestCase):
+    def probe(self, manifest, client):
+        with TemporaryDirectory() as directory:
+            assets = Path(directory)
+            (assets / "manifest.json").write_text(json.dumps(manifest))
+            with patch.object(container_smoke, "Client", return_value=client):
+                asyncio.run(container_smoke.surface(8000, assets))
+
     def test_protocol_probes_reject_wrong_profile_manifest_and_validation(self):
         cases = (
             ({"tools": set()}, "unified profile"),
@@ -406,16 +413,16 @@ class SmokeSurfaceTest(unittest.TestCase):
             ({"concepts": 0}, "another index manifest"),
             ({"error": "upstream_unavailable"}, "before upstream I/O"),
         )
-        with TemporaryDirectory() as directory:
-            assets = Path(directory)
-            (assets / "manifest.json").write_text('{"release_version": "26.09d"}')
-            for changes, message in cases:
-                with (
-                    self.subTest(changes=changes),
-                    patch.object(container_smoke, "Client", return_value=SmokeClient(**changes)),
-                    self.assertRaisesRegex(RuntimeError, message),
-                ):
-                    asyncio.run(container_smoke.surface(8000, assets))
+        manifest = {"release_version": "26.09d", "embedding_revision": "sha256:" + "0" * 64}
+        for changes, message in cases:
+            with self.subTest(changes=changes), self.assertRaisesRegex(RuntimeError, message):
+                self.probe(manifest, SmokeClient(**changes))
+
+    def test_the_directory_model_must_be_identified_by_its_content_hash(self):
+        for revision in (None, "a" * 40):
+            manifest = {"release_version": "26.09d", "embedding_revision": revision}
+            with self.subTest(revision=revision), self.assertRaisesRegex(RuntimeError, "hash"):
+                self.probe(manifest, SmokeClient())
 
 
 class SmokeEngine:

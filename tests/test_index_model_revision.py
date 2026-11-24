@@ -220,16 +220,23 @@ class RevisionSourceTest(unittest.TestCase):
         modules = self.fake_modules("/cache/models--org--model/snapshots/main")
         with (
             patch.dict(sys.modules, modules),
-            self.assertRaisesRegex(IndexCompatibilityError, "commit"),
+            self.assertRaises(IndexCompatibilityError) as refused,
         ):
             SentenceTransformersProvider("org/model", local_files_only=True)
+        self.assertEqual(
+            str(refused.exception),
+            "The cached snapshot of model org/model is not a commit folder; "
+            "refresh the model cache from the Hub.",
+        )
 
-    def test_a_directory_model_has_no_revision_even_when_its_path_looks_like_a_snapshot(self):
+    def test_a_directory_model_is_hashed_not_mistaken_for_a_hub_commit_by_its_path(self):
         with tempfile.TemporaryDirectory() as directory:
             snapshot = Path(directory) / "snapshots" / COMMIT
             snapshot.mkdir(parents=True)
+            (snapshot / "config.json").write_text("{}")
             with patch.dict(sys.modules, self.fake_modules(str(snapshot))):
-                self.assertIsNone(self.revision(str(snapshot), local_files_only=True))
+                revision = self.revision(str(snapshot), local_files_only=True)
+        self.assertTrue(str(revision).startswith("sha256:"), revision)
 
     def test_hashing_and_custom_providers_report_what_they_declare(self):
         class Custom(EmbeddingProvider):
@@ -245,6 +252,66 @@ class RevisionSourceTest(unittest.TestCase):
             ),
             ("hashing-v1", None),
         )
+
+    def hub(self, *, cached):
+        """Fake modules for a Hub model: a mutable cache, the loads made, no download allowed.
+
+        `cache["ref"]` names the commit the cache serves (R1 at first) and `cached` says whether
+        the model is in the cache at all. A load by name is the library's download and fills the
+        cache; every load leaves the ref at R2, as a concurrent refresh would.
+        """
+        cache = {"ref": "1" * 40, "cached": cached}
+        loads = []
+
+        def path(commit):
+            return f"/cache/models--org--model/snapshots/{commit}"
+
+        class Model:
+            def __init__(self, name, *, local_files_only=False):
+                loads.append((name, local_files_only))
+                if name == "org/model":
+                    cache["cached"] = True
+                cache["ref"] = "2" * 40
+
+            def encode(self, texts, **_):
+                return [[1.0, 0.0] for _ in texts]
+
+        def snapshot(name, *, local_files_only=False):
+            if not local_files_only:
+                raise OSError("a download is not allowed")
+            if not cache["cached"]:
+                raise FileNotFoundError("no cached snapshot")
+            return path(cache["ref"])
+
+        modules = {
+            "sentence_transformers": types.SimpleNamespace(SentenceTransformer=Model),
+            "huggingface_hub": types.SimpleNamespace(snapshot_download=snapshot),
+        }
+        return modules, loads, path
+
+    def test_the_revision_is_the_snapshot_that_was_loaded_even_if_the_ref_moves(self):
+        for options in ({"local_files_only": True}, {}):
+            with self.subTest(**options):
+                modules, loads, path = self.hub(cached=True)
+                with patch.dict(sys.modules, modules):
+                    revision = self.revision("org/model", **options)
+                self.assertEqual(revision, "1" * 40)
+                self.assertEqual(loads, [(path("1" * 40), True)])
+
+    def test_a_cold_cache_is_filled_by_one_name_load_then_the_snapshot_is_loaded(self):
+        modules, loads, path = self.hub(cached=False)
+        with patch.dict(sys.modules, modules):
+            revision = self.revision("org/model")
+        self.assertEqual(
+            (revision, loads),
+            ("2" * 40, [("org/model", False), (path("2" * 40), True)]),
+        )
+
+    def test_a_cold_cache_offline_fails_without_loading_anything(self):
+        modules, loads, _ = self.hub(cached=False)
+        with patch.dict(sys.modules, modules), self.assertRaises(FileNotFoundError):
+            SentenceTransformersProvider("org/model", local_files_only=True)
+        self.assertEqual(loads, [])
 
     @staticmethod
     def fake_modules(snapshot_path):

@@ -8,7 +8,7 @@ class IndexCompatibilityError(RuntimeError):
 
 
 class IndexModelRevisionError(IndexCompatibilityError):
-    """The serving model is not the revision the active index was embedded with."""
+    """The serving model is not the revision the build was embedded with."""
 
 
 class IndexBuildError(RuntimeError):

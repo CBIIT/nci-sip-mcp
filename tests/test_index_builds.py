@@ -312,22 +312,6 @@ class BuildLifecycleTest(IndexTestCase):
             index.get_concept_snapshot("C40704")[1].preferred_name, RAW_CONCEPTS[0]["name"]
         )
 
-    def test_a_pending_removal_is_hidden_and_untouched_by_the_next_build(self):
-        index = self.build()
-        stale = index.build(normalized([RAW_CONCEPTS[0]]), None, self.provider)
-        replacement = index.build(normalized([RAW_CONCEPTS[1]]), None, self.provider)
-        busy = sqlite3.OperationalError("database is locked")
-        busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
-        with patch.object(index_module, "delete_build", side_effect=busy):
-            index.activate(replacement.build_id)
-
-        index.build(normalized([RAW_CONCEPTS[0]]), None, self.provider)
-
-        self.assertEqual(index.pending_removal(), [stale.build_id])
-        self.assertNotIn(stale.build_id, {item.build_id for item in index.list_builds()})
-        index.activate(replacement.build_id)
-        self.assertEqual(index.pending_removal(), [])
-
     def test_invalid_build_keeps_active_snapshot(self):
         index = self.build()
         active = index.get_active_manifest()

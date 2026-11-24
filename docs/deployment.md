@@ -226,12 +226,17 @@ Operational constraints apply whichever AWS services implement these boxes:
   then distribute the migrated file. The `nci_sip_mcp.index` log records
   `index_migration_started` and, after the commit, `index_migration_finished` with
   `from_version`, `to_version` and `elapsed_seconds`. A start without a finish means the
-  migration rolled back or the process stopped; the file is still at `from_version`. A new empty
+  outcome is unknown (rolled back, or the process stopped before or after the commit): inspect
+  `PRAGMA user_version` of the file to see whether it reached `to_version`. A new empty
   file is created without either record.
-- **Directory models are not identified.** A model supplied as a directory (such as the
-  container's `/model`) has no revision, so an index built from it stores none and the
-  deployment is not protected against a changed same-named model. A Hub model served from the
-  local cache is checked by its commit (see the
+- **Directory models are identified by a hash.** A model supplied as a directory (such as the
+  container's `/model`) is hashed over its files when the process starts; an index records the
+  hash it was embedded with, and a different directory refuses start-up with an
+  `index_model_revision_mismatch` record. The hash covers the files as read once at start-up:
+  keep the directory, including link targets, unchanged while the process runs; a later change is
+  not detected. Copy the model directory unchanged to each replica.
+  An index built before this check stores no revision: rebuild, evaluate and activate it to
+  record one. A Hub model served from the local cache is checked by its commit (see the
   [semantic index notes](ncit-semantic-index.md)).
 - **Readiness gates local compatibility.** Probe each replica with an allowed Host header.
   Neither health endpoint guarantees live upstream service, issued caDSR credentials, or

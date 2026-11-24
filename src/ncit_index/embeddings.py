@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from importlib import import_module
 from pathlib import Path
+from typing import Any, NamedTuple
 
 from .errors import IndexCompatibilityError
 
@@ -21,7 +23,7 @@ from .errors import IndexCompatibilityError
 class EmbeddingProvider(ABC):
     name: str
     model: str
-    # The commit of the model files in use; None when a provider cannot tell.
+    # Commit, content hash or algorithm name of the model in use; None when unknown.
     revision: str | None = None
 
     @abstractmethod
@@ -58,25 +60,12 @@ class HashingEmbeddingProvider(EmbeddingProvider):
 
 class SentenceTransformersProvider(EmbeddingProvider):
     def __init__(self, model_name: str, *, local_files_only: bool = False) -> None:
-        resolved_name = _local_model(model_name) if local_files_only else model_name
-        # An optional extra with heavy dependencies, imported only when configured.
-        try:
-            from sentence_transformers import (  # pyright: ignore[reportMissingImports]
-                SentenceTransformer,
-            )
-        except ImportError as exc:
-            raise RuntimeError(
-                "The sentence-transformers provider needs the 'embeddings' extra "
-                f"(pdm install -G embeddings). Import failed: {exc}"
-            ) from exc
+        resolved = _local_model(model_name, local_files_only)
         self.name = "sentence-transformers"
         self.model = model_name
-        self._model = (
-            SentenceTransformer(resolved_name, local_files_only=True)
-            if local_files_only
-            else SentenceTransformer(model_name)
-        )
-        self.revision = _cache_revision(model_name)
+        # Load from the path the revision is taken from, so the record names what was loaded.
+        self._model = _sentence_transformer()(resolved.path, local_files_only=True)
+        self.revision = _loaded_revision(model_name, resolved)
 
     def embed(self, texts: Iterable[str]) -> Sequence[Sequence[float]]:
         vectors = self._model.encode(
@@ -86,34 +75,126 @@ class SentenceTransformersProvider(EmbeddingProvider):
         return list(import_module("numpy").asarray(vectors, dtype="<f4"))
 
 
-def _local_model(model_name: str) -> str:
-    """Check supplied assets before the embedding library emits startup diagnostics."""
+def _sentence_transformer() -> Any:
+    # An optional extra with heavy dependencies, imported only when configured.
+    try:
+        from sentence_transformers import (  # pyright: ignore[reportMissingImports]
+            SentenceTransformer,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "The sentence-transformers provider needs the 'embeddings' extra "
+            f"(pdm install -G embeddings). Import failed: {exc}"
+        ) from exc
+    return SentenceTransformer
+
+
+class _ResolvedModel(NamedTuple):
+    path: str
+    is_directory: bool  # supplied as a directory, not resolved from the Hub cache
+
+
+def _local_model(model_name: str, local_files_only: bool) -> _ResolvedModel:
+    """The one place a model name becomes a path: a directory as given, else the cached snapshot.
+
+    A cached snapshot wins; updating a Hub model is an explicit cache refresh. Only when online
+    and nothing is cached does the library's own load by name download it, once.
+    """
     path = Path(model_name)
     if path.is_dir():
-        return str(path)
+        return _ResolvedModel(str(path), True)
     if path.is_absolute():
         raise FileNotFoundError("Supply the external model directory")
     from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
 
-    return snapshot_download(model_name, local_files_only=True)
+    try:
+        return _ResolvedModel(snapshot_download(model_name, local_files_only=True), False)
+    except FileNotFoundError:
+        if local_files_only:
+            raise
+    _sentence_transformer()(model_name)  # downloads into the cache; the object is discarded
+    return _ResolvedModel(snapshot_download(model_name, local_files_only=True), False)
 
 
-def _cache_revision(model_name: str) -> str | None:
-    """The commit of a Hub model's cached snapshot, read from the local cache without traffic.
-
-    A model supplied as a directory is not identified by its path, so it has no revision.
-    """
-    if Path(model_name).is_dir():
-        return None
-    from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
-
-    commit = Path(snapshot_download(model_name, local_files_only=True)).name
+def _loaded_revision(model_name: str, resolved: _ResolvedModel) -> str:
+    """Identify what was loaded: a directory by its hash, a Hub snapshot by its commit."""
+    if resolved.is_directory:
+        return model_directory_revision(Path(resolved.path))
+    commit = Path(resolved.path).name
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise IndexCompatibilityError(
             f"The cached snapshot of model {model_name} is not a commit folder; "
             "refresh the model cache from the Hub."
         )
     return commit
+
+
+def model_directory_revision(path: Path) -> str:
+    """Identify a model directory by its content: `sha256:` plus a hash of sorted file lines.
+
+    Each line is `<relative POSIX path>\\0<file SHA-256 hex>\\n`. A file link counts as its
+    target's content under the link's own path, because Hub snapshot folders hold links into
+    `blobs/`. Location, modification time and ordering on disk do not count; a changed byte, a
+    rename or an added file does. Anything that cannot be hashed as a file is refused by path.
+    """
+    lines = sorted(
+        f"{relative}\0{_file_hash(file, relative)}\n" for relative, file in _model_files(path)
+    )
+    return "sha256:" + hashlib.sha256("".join(lines).encode()).hexdigest()
+
+
+def _model_files(root: Path) -> Iterable[tuple[str, Path]]:
+    for current, directories, names in os.walk(root, onerror=_unlistable(root)):
+        here = Path(current)
+        if not directories and not names:
+            raise IndexCompatibilityError(f"Model directory {_relative(here, root)} is empty")
+        for name in directories:
+            _require_real_directory(here / name, root)
+        for name in names:
+            yield _relative(here / name, root), _require_file(here / name, root)
+
+
+def _unlistable(root: Path) -> Callable[[OSError], None]:
+    """os.walk skips a directory it cannot list unless told otherwise; hashing must not."""
+
+    def refuse(error: OSError) -> None:
+        raise IndexCompatibilityError(
+            f"Model directory entry {_relative(Path(str(error.filename)), root)} cannot be listed"
+        ) from error
+
+    return refuse
+
+
+def _require_real_directory(path: Path, root: Path) -> None:
+    if path.is_symlink():
+        raise IndexCompatibilityError(
+            f"Model directory entry {_relative(path, root)} is a directory link"
+        )
+
+
+def _require_file(path: Path, root: Path) -> Path:
+    if not path.is_file():
+        raise IndexCompatibilityError(
+            f"Model directory entry {_relative(path, root)} is not a regular file"
+        )
+    return path
+
+
+def _relative(path: Path, root: Path) -> str:
+    return "." if path == root else path.relative_to(root).as_posix()
+
+
+def _file_hash(path: Path, relative: str) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as stream:
+            while chunk := stream.read(1 << 20):
+                digest.update(chunk)
+    except OSError as error:
+        raise IndexCompatibilityError(
+            f"Model directory entry {relative} cannot be read: {error.strerror}"
+        ) from error
+    return digest.hexdigest()
 
 
 def normalize_embedding_settings(provider: str, model: str) -> tuple[str, str]:

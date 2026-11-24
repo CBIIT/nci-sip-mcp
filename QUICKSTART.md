@@ -312,7 +312,8 @@ the old release (named in the `provenance.release` of each hit), and `lookup` fa
 MCP `search_concepts` in semantic/hybrid mode requires the caller's release to match the index; `get_concept`
 reads the caller's pinned release directly from EVS.
 
-Embedding provider/model/dimensions must match the index. The guide covers
+Embedding provider/model/dimensions must match the index, and so must the model revision when
+both are known (see [model revision](docs/ncit-semantic-index.md#model-rationale-and-reproducibility-limits)). The guide covers
 [offline rebuild and legacy migration](docs/ncit-semantic-index.md#rebuilds-and-future-handover),
 including evaluation and preserved rollback data. Opening the index never re-embeds it.
 
