@@ -7,7 +7,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 from test_request_metadata import selected
 from test_request_release_selection import response
 
@@ -56,6 +56,7 @@ def client(receiver, owner):
         max_response_bytes=1024,
         size_bound="owned",
         request_policy=ControlledHttpPolicy(owner.run),
+        user_agent=PRODUCT_USER_AGENT,
     )
 
 

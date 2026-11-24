@@ -98,11 +98,14 @@ request it makes (convention A6.2b): `nci-sip-mcp/<version> (installation=<id>; 
 With no `NCI_SIP_INSTALLATION_ID` configured it sends the product label alone,
 `nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`; a configured value that is not 32 lowercase hexadecimal characters stops
 start-up with an error naming the variable, before any upstream is contacted. The `generate`
-and `show` commands remain local and send nothing. The acceptance recorder and citation reads
+and `show` commands remain local and send nothing. Governed acceptance requests
+(the exact-request grants of a controlled run, and the release preflight) send the product label
+alone, `nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`, whatever
+`NCI_SIP_INSTALLATION_ID` holds, and each grant declares that exact `user-agent`: a request with
+another value, or none, is refused before contact. The acceptance recorder and citation reads
 send the product-only `nci-sip-acceptance/<version> (+https://github.com/CBIIT/nci-sip-mcp)`;
-the Shared SI contracts script and the installer's reachability checks send the core
-product-only label above. None of them sends an installation identity, and governed live
-acceptance requests do not yet label themselves, so do not rely on traces of those requests
-carrying it. The identity does not replace the per-call correlation ID or change its
-behavior. The CI guidance above describes the configuration lifecycle for an emitting job; it
-applies to the server now and to the acceptance package once that work is released.
+the Shared SI contracts script and the installer's reachability probe send the core product-only
+label above. Only the server, with a configured id, sends `installation=`; no other emitter
+sends an installation identity. The identity does not replace the per-call correlation ID or
+change its behavior. The CI guidance above describes the configuration lifecycle for an emitting
+job; it applies to the server now and to the acceptance package once that work is released.
