@@ -14,7 +14,7 @@ configuration proposals, including startup-settings snapshots
 (`nci-sip-mcp serve --configuration-snapshot PATH`,
 [configuration evidence](docs/local-validation.md#configuration-evidence-and-proposals)). The
 [request identification guide](docs/request-identification.md) covers local identity provisioning;
-the utilities do not label requests yet.
+the server labels its platform requests with it; acceptance traffic does not yet.
 
 ## Upstream access and SSIS transition
 

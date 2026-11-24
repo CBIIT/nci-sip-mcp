@@ -83,7 +83,9 @@ A wheel or container image carries the software, not a real installation ID. Sup
 through runtime configuration; do not bake it into the artifact.
 
 For an isolated CI job that emits this label, provision one job-scoped value per independently
-configured emitting installation, and reuse it for that installation's processes and children.
+configured emitting installation, and reuse it for that installation's own processes. A server
+child launched by the acceptance harness is not given the harness's value: it sends the product
+label alone unless its own configuration sets one.
 Configure server and direct acceptance independently, with a distinct value for each. Give each
 independent job a new value for each installation. This short-lived configuration is distinct from
 a persistent installation's durable value, which remains stable across restarts and upgrades. The
