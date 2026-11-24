@@ -12,6 +12,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import get_args
 
 import anyio
 import pytest
@@ -24,6 +25,7 @@ from nci_sip_acceptance.client import open_session
 from nci_sip_acceptance.request_stdio import StdioOwner
 from nci_sip_acceptance.request_supervision import SupervisedRun
 from nci_sip_mcp.errors import RequestPolicyError
+from nci_sip_mcp.validation import PolicyReason
 
 CHILD = """import json,signal,sys
 mode=sys.argv[1]
@@ -55,6 +57,27 @@ sys.exit(7)
 """
 
 
+def _kind(error):
+    return "BaseExceptionGroup" if isinstance(error, BaseExceptionGroup) else type(error).__name__
+
+
+def _record_finish(resource, monkeypatch):
+    outcome = ["not-called"]
+    actual_finish = resource.finish
+
+    def finish(deadline):
+        try:
+            result = actual_finish(deadline)
+        except BaseException as error:
+            outcome[0] = f"raised:{_kind(error)}"
+            raise
+        outcome[0] = "returned"
+        return result
+
+    monkeypatch.setattr(resource, "finish", finish)
+    monkeypatch.setattr(resource, "finish_outcome", outcome, raising=False)
+
+
 @pytest.fixture
 def terminal_case(tmp_path, monkeypatch):
     owner = SupervisedRun.create(authorization(), tmp_path / "run")
@@ -65,6 +88,7 @@ def terminal_case(tmp_path, monkeypatch):
         token = real_register(resource, **kwargs)
         if isinstance(resource, StdioOwner):
             resources.append(resource)
+            _record_finish(resource, monkeypatch)
         return token
 
     async def open_process(*args, **kwargs):
@@ -358,7 +382,7 @@ def test_caught_initialization_error_closes_peer_before_outer_owner_cleanup(
                 receipt_before_outer = marker.read_bytes()
     except BaseException as error:  # noqa: BLE001 - observe outer failure without swallowing assertions.
         outward = error
-    _assert_failed_terminal_resources_settled(terminal_case, 7)
+    _assert_failed_terminal_resources_settled(terminal_case, 7, outward)
     assert opened is False
     assert (before_outer, receipt_before_outer) == (True, b"owned EOF\n")
     assert caught is not None and outward is not None
@@ -394,6 +418,45 @@ def held_process_cleanup(terminal_case, monkeypatch):
         release.set()
 
 
+def _label(error):
+    if not isinstance(error, RequestPolicyError):
+        return type(error).__name__
+    reason = error.reason if error.reason in get_args(PolicyReason.__value__) else "unknown"
+    return f"{type(error).__name__}:{reason}"
+
+
+def _labels(error):
+    return ",".join(_label(leaf) for leaf in failure_leaves(error))
+
+
+def _outward_label(outward):
+    if not isinstance(outward, BaseExceptionGroup):
+        return "None" if outward is None else _label(outward)
+    return f"{_kind(outward)}({_labels(outward)})"
+
+
+def _terminal_diagnostics(case, outward):
+    # Fixed type labels, flags and validated policy reasons only: never messages, reprs or paths.
+    try:
+        _owner, resources, waited, _closed = case
+        resource = resources[0]
+        settled = (
+            f"waited={resource.waited} process_closed={resource.process_closed} "
+            f"streams_closed={resource.closed == {'stdin', 'stdout', 'stderr'}} "
+            f"endpoints_closed={resource.endpoints_closed} "
+            f"process_present={resource.process is not None}"
+        )
+        errors = ",".join(_label(error) for error in resource.errors)
+        return (
+            f"diagnostics: outward={_outward_label(outward)}; errors=[{errors}]; "
+            f"settled_inputs: {settled}; fixture_waits={len(waited)}; "
+            f"thread_alive={resource.thread.is_alive()}; finish={resource.finish_outcome[0]}; "
+            f"pending=[{','.join(case[0].pending_owners)}]"
+        )
+    except Exception:  # noqa: BLE001 - a failed diagnostic read must never replace the assertion.
+        return "diagnostics: unavailable"
+
+
 def _assert_failed_terminal_resources_settled(case, expected_status, outward=None):
     owner, resources, waited, closed = case
     assert len(resources) == 1
@@ -406,7 +469,7 @@ def _assert_failed_terminal_resources_settled(case, expected_status, outward=Non
         (state.open_send_streams, state.open_receive_streams)
         for state in (resource.read.statistics(), resource.write.statistics())
     ] == [(0, 0), (0, 0)]
-    assert owner.pending_owners == ()
+    assert owner.pending_owners == (), _terminal_diagnostics(case, outward)
     summary = json.loads((owner.run.directory / "summary.json").read_text())
     assert (summary["state"], summary["observationComplete"]) == ("failed", True)
 
@@ -466,6 +529,52 @@ def test_pending_owner_failure_reports_sanitized_settlement_state(terminal_case,
     ) in message
 
 
+def test_finish_recording_keeps_result_and_exception_through_other_wrappers(monkeypatch):
+    returned, failure = object(), LookupError(PRIVATE_TEXT)
+    behaviours = [lambda _deadline: returned, lambda _deadline: (_ for _ in ()).throw(failure)]
+    for behaviour in behaviours:
+        resource = SimpleNamespace(finish=behaviour)
+        _record_finish(resource, monkeypatch)
+        recorded = resource.finish
+        outer_calls = []
+
+        def outer(deadline, inner=recorded, calls=outer_calls):
+            calls.append(deadline)
+            return inner(deadline)
+
+        monkeypatch.setattr(resource, "finish", outer)
+        try:
+            result = resource.finish("deadline")
+            error = None
+        except LookupError as caught:
+            result, error = None, caught
+        assert outer_calls == ["deadline"]
+        if error is None:
+            assert (result, resource.finish_outcome) == (returned, ["returned"])
+        else:
+            assert (result, error, resource.finish_outcome) == (
+                None,
+                failure,
+                ["raised:LookupError"],
+            )
+
+
+def test_unreadable_diagnostics_do_not_replace_the_pending_owner_assertion():
+    owner = SimpleNamespace(pending_owners=("controlled-stdio",))
+    with pytest.raises(AssertionError) as failure:
+        assert owner.pending_owners == (), _terminal_diagnostics((owner, [], [], set()), None)
+    assert str(failure.value).startswith("diagnostics: unavailable")
+
+
+def test_diagnostic_labels_use_only_validated_policy_reasons():
+    invalid = RequestPolicyError("accounting")
+    invalid.reason = PRIVATE_TEXT
+    assert _label(RequestPolicyError("closed")) == "RequestPolicyError:closed"
+    assert _label(invalid) == "RequestPolicyError:unknown"
+    assert _outward_label(None) == "None"
+    assert _outward_label(LookupError(PRIVATE_TEXT)) == "LookupError"
+
+
 def test_sdk_startup_error_is_delivered_while_process_cleanup_is_held(
     terminal_case, held_process_cleanup
 ):
@@ -503,7 +612,7 @@ def test_sdk_startup_error_is_delivered_while_process_cleanup_is_held(
                 caller.join(3)
         except BaseException as error:  # noqa: BLE001 - compare the actual owner failure below.
             outward = error
-        _assert_failed_terminal_resources_settled(terminal_case, 7)
+        _assert_failed_terminal_resources_settled(terminal_case, 7, outward)
         assert (cleanup_seen, delivered, held, producer_alive) == (True, True, True, True)
         assert not caller.is_alive() and opened == []
         assert len(errors) == 1 and outward is not None
@@ -606,7 +715,7 @@ def test_sdk_exit_failure_after_ready_preserves_original_event(
             exit_seen = completed.wait(3)
     except BaseException as error:  # noqa: BLE001 - assert real SDK exit error after physical proof.
         outward = error
-    _assert_failed_terminal_resources_settled(terminal_case, 0)
+    _assert_failed_terminal_resources_settled(terminal_case, 0, outward)
     assert getattr(listing, "tools", unlisted) == []
     assert exit_seen
     assert outward is not None
@@ -677,7 +786,7 @@ def test_real_runner_socket_close_failure_preserves_terminal_event(
     assert observations == [(True, 0, True)]
     assert outward is not None
     assert sum(error is original for error in failure_leaves(outward)) == 1
-    _assert_failed_terminal_resources_settled(terminal_case, 0)
+    _assert_failed_terminal_resources_settled(terminal_case, 0, outward)
     assert not resources[0].thread.is_alive()
     with pytest.raises(RequestPolicyError) as refused:
         owner.run.timeout(1)
@@ -729,7 +838,7 @@ def test_sdk_exit_error_during_owner_cleanup_preserves_original_event(terminal_c
                 listing = session.list_tools()
         except BaseException as error:  # noqa: BLE001 - compare actual error leaves outside capture.
             outward = error
-        _assert_failed_terminal_resources_settled(terminal_case, 7)
+        _assert_failed_terminal_resources_settled(terminal_case, 7, outward)
         assert getattr(listing, "tools", unlisted) == []
         assert delegated_exits == [True]
         assert wait_entered.is_set() and sdk_ready.is_set()
