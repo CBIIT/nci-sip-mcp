@@ -371,6 +371,32 @@ class SupersededBuildRemovalTest(ServerFixture):
                 self.assertEqual([name for name in events if name == "index_activated"], [])
                 self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
 
+    def test_the_activation_result_needs_no_read_after_the_commit(self):
+        """The superseded builds are read once, inside the activation transaction."""
+
+        connect = sqlite3.connect
+        reads = []
+
+        class OneListing(sqlite3.Connection):
+            def execute(self, statement, *parameters):
+                if "state = 'superseded'" in statement and statement.lstrip().startswith("SELECT"):
+                    reads.append(statement)
+                    if len(reads) > 1:
+                        full = sqlite3.OperationalError("database or disk is full")
+                        full.sqlite_errorcode = sqlite3.SQLITE_FULL
+                        raise full
+                return super().execute(statement, *parameters)
+
+        with patch(
+            "ncit_index.index.sqlite3.connect",
+            lambda path, **options: connect(path, factory=OneListing, **options),
+        ):
+            result = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(result.get("buildId"), self.replacement.build_id)
+        self.assertEqual(result.get("pendingRemoval"), [])
+        self.assertEqual([self.rows(build_id) for build_id in self.stale], [0, 0])
+
     def test_the_next_activation_removes_what_is_left_and_the_rollback_target_survives(self):
         with self.fail_removals_after(1):
             invoke(self.context, "index_activate", self.replacement.build_id)
