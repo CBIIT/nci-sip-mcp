@@ -316,8 +316,12 @@ Serving uses `Context.index: IndexPort`; CLI operators open the package directly
    verifies every release, reconciles totals and unique codes, then builds an inactive snapshot.
    Temporary spooling bounds download memory. Progress is structured JSON on stderr every
    ten pages and at completion. HTTP retries remain in the shared client.
-6. `index-activate` changes the active manifest in one transaction and deletes all builds
-   except the new active build and its predecessor. Activating that predecessor is rollback.
+6. `index-activate` changes the active manifest in one transaction and marks every other
+   completed build `superseded`, which hides it from every read at once. The superseded builds
+   are deleted after the commit, one transaction each, on every activation (so an interrupted
+   removal is retried by the next one). The result's `pendingRemoval` lists any not yet gone; a
+   storage failure while deleting is logged as the warning `index_build_removal_pending` and
+   never undoes the activation. Activating the predecessor is rollback.
    `index-rebuild` embeds stored payloads offline into an inactive snapshot.
 
 ### Index lifecycle
@@ -341,6 +345,7 @@ stateDiagram-v2
     state "Passing evaluation bound to this build" as Evaluated
     state "Active: serves indexed reads" as Active
     state "Retained predecessor" as Previous
+    state "Superseded: hidden, awaiting removal" as Superseded
     state "Removed" as Removed
     [*] --> Building: reconciled pinned input or offline rebuild
     Building --> Complete: final completion transaction
@@ -349,12 +354,14 @@ stateDiagram-v2
     Evaluated --> Active: explicit index-activate
     Active --> Previous: another build activates
     Previous --> Active: explicit rollback activation
-    Previous --> Removed: another activation no longer retains it
+    Previous --> Superseded: another activation no longer retains it
+    Complete --> Superseded: an activation does not retain it
+    Superseded --> Removed: removed after the activation commits
     Removed --> [*]
 ```
 
-Activation keeps only the selected build and the former active build, deleting other snapshots
-in the same transaction. Distribution to serving replicas is a separate operator step in the
+Activation keeps only the selected build and the former active build. It hides the other
+snapshots in the same transaction and deletes them after the commit. Distribution to serving replicas is a separate operator step in the
 [deployment view](docs/deployment.md#cloud-one-reference-layout).
 
 ### Search
@@ -556,7 +563,7 @@ erDiagram
 Schema 6 retains completed build snapshots. One partial unique index permits only one active
 manifest. Each build has its own FTS5 table, keyed by field id, so inactive builds cannot change
 the active BM25 corpus statistics. Activation retains exactly the new active snapshot and
-its predecessor. Embedding runs outside transactions; bounded writes accumulate under a `building` row.
+its predecessor; the others are marked `superseded` (no schema change) and removed after commit. Embedding runs outside transactions; bounded writes accumulate under a `building` row.
 Only a final completion transaction makes it eligible for evaluation. Production activation
 also requires a passing report bound to that build, release and embedding configuration;
 samples are exempt. Rebuilt unclassified snapshots become production builds, while their

@@ -174,9 +174,14 @@ pdm run nci-sip-mcp index-builds
 
 Evaluation reads that candidate without activating it. Activation requires a passing report
 bound to its build/release/embedding identity and changes the active snapshot atomically.
-**Activation retains only the selected build and the former active build**, deleting other
-completed snapshots. Preserve needed evidence/backups before activation; do not assume every
-listed candidate will remain available. Verify search/readiness with the same embedding settings
+**Activation retains only the selected build and the former active build.** The other
+completed snapshots are hidden at once (they no longer appear in `index-builds` and cannot be
+activated) and deleted after the activation commits. A failed deletion never undoes the
+activation: the result lists the builds still awaiting removal in `pendingRemoval`, the log
+carries a warning `index_build_removal_pending`, and their disk space stays in use until a later
+activation, for example `index-activate` of the already active build, removes them. Preserve
+needed evidence/backups before activation; do not assume every listed candidate will remain
+available. Verify search/readiness with the same embedding settings
 and intended release after activating; distribute matching assets separately to any serving replica.
 
 For rollback, set `PREVIOUS_BUILD_ID` to the retained predecessor, keep its matching embedding
