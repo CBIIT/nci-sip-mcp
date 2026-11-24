@@ -447,7 +447,8 @@ class LocalIndex:
         """
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            manifest = self._activate(conn, build_id)
+            manifest, switched = self._activate(conn, build_id)
+        self._announce_activation(manifest, switched)
         self._remove_superseded()
         return manifest
 
@@ -473,7 +474,7 @@ class LocalIndex:
                 self._event("index_build_removal_pending", build_ids=pending[position:])
                 return
 
-    def _activate(self, conn: sqlite3.Connection, build_id: str) -> IndexManifest:
+    def _activate(self, conn: sqlite3.Connection, build_id: str) -> tuple[IndexManifest, bool]:
         row = conn.execute(
             "SELECT payload, active FROM manifests WHERE build_id = ? AND state = 'complete'",
             (build_id,),
@@ -485,7 +486,7 @@ class LocalIndex:
         manifest = LocalIndex._manifest(row)
         _require_evaluated(manifest)
         if manifest.active:
-            return manifest
+            return manifest, False
         previous = conn.execute("SELECT build_id FROM manifests WHERE active = 1").fetchone()
         predecessor = previous["build_id"] if previous else build_id
         conn.execute("UPDATE manifests SET active = 0 WHERE active = 1")
@@ -495,12 +496,14 @@ class LocalIndex:
             "WHERE state = 'complete' AND build_id NOT IN (?, ?)",
             (build_id, predecessor),
         )
-        self._event(
-            "index_activated",
-            build_id=build_id,
-            release=manifest.release_version,
-        )
-        return replace(manifest, active=True)
+        return replace(manifest, active=True), True
+
+    def _announce_activation(self, manifest: IndexManifest, switched: bool) -> None:
+        """Called after the commit: a record of an activation that was rolled back would lie."""
+        if switched:
+            self._event(
+                "index_activated", build_id=manifest.build_id, release=manifest.release_version
+            )
 
     def rebuild(self, build_id: str, provider: EmbeddingProvider) -> IndexManifest:
         """Offline rebuild from stored payloads; explicit activation is a separate step."""
@@ -563,15 +566,16 @@ class LocalIndex:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if _sample_base_is_active(conn, base):
-                manifest = self._activate(conn, build_id)
+                manifest, switched = self._activate(conn, build_id)
             else:
                 # Committed before the error is raised: the unreferenced snapshot is not kept.
                 delete_build(conn, build_id)
-                manifest = None
+                manifest, switched = None, False
         if manifest is None:
             raise IndexStateError(
                 "The active index changed during sample indexing; retry the sample"
             )
+        self._announce_activation(manifest, switched)
         self._remove_superseded()
         return manifest
 
