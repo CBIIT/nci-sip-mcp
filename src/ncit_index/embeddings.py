@@ -9,15 +9,20 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
 from importlib import import_module
 from pathlib import Path
 
+from .errors import IndexCompatibilityError
+
 
 class EmbeddingProvider(ABC):
     name: str
     model: str
+    # The commit of the model files in use; None when a provider cannot tell.
+    revision: str | None = None
 
     @abstractmethod
     def embed(self, texts: Iterable[str]) -> Sequence[Sequence[float]]:
@@ -25,6 +30,9 @@ class EmbeddingProvider(ABC):
 
 
 class HashingEmbeddingProvider(EmbeddingProvider):
+    # Names the algorithm of `_embed_one`; change it whenever those vectors change.
+    revision = "hashing-v1"
+
     def __init__(self, dimensions: int = 128) -> None:
         if dimensions < 1:
             raise ValueError("Hashing embedding dimensions must be at least 1")
@@ -68,6 +76,7 @@ class SentenceTransformersProvider(EmbeddingProvider):
             if local_files_only
             else SentenceTransformer(model_name)
         )
+        self.revision = _cache_revision(model_name)
 
     def embed(self, texts: Iterable[str]) -> Sequence[Sequence[float]]:
         vectors = self._model.encode(
@@ -87,6 +96,24 @@ def _local_model(model_name: str) -> str:
     from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
 
     return snapshot_download(model_name, local_files_only=True)
+
+
+def _cache_revision(model_name: str) -> str | None:
+    """The commit of a Hub model's cached snapshot, read from the local cache without traffic.
+
+    A model supplied as a directory is not identified by its path, so it has no revision.
+    """
+    if Path(model_name).is_dir():
+        return None
+    from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
+
+    commit = Path(snapshot_download(model_name, local_files_only=True)).name
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise IndexCompatibilityError(
+            f"The cached snapshot of model {model_name} is not a commit folder; "
+            "refresh the model cache from the Hub."
+        )
+    return commit
 
 
 def normalize_embedding_settings(provider: str, model: str) -> tuple[str, str]:

@@ -5,6 +5,7 @@ import sys
 import types
 from contextlib import redirect_stderr
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 
 from fakes import concept
@@ -104,7 +105,9 @@ class ContainerTest(ServerFixture):
             SentenceTransformersProvider(absent, local_files_only=True)
 
     def test_cached_model_loads_offline_without_changing_manifest_identity(self):
-        cached = str(self.settings.data_dir)
+        # A Hub cache folder is a commit snapshot; the revision is read from its name.
+        cached = str(self.settings.data_dir / "snapshots" / ("a" * 40))
+        Path(cached).mkdir(parents=True)
 
         class LocalModel:
             def __init__(self, name, *, local_files_only=False):

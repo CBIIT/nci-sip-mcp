@@ -71,12 +71,27 @@ and inference batching are delegated to the loaded model/library; this wrapper s
 CLS pooling or model-card example length. Do not copy those example settings into a description
 of the historical calibration without evidence that they were used.
 
-Runtime compatibility checks **provider, model name and dimensions**, not the recorded model
-revision or asset hashes. There is no model-revision CLI option in this procedure. A changed
-same-named model can therefore pass that identity check. Preserve the actual frozen model assets,
-revision, software versions and evaluation data externally when reproducing a run; the commands
-below alone do not provide a byte-reproducible model pin. Changing that enforcement is separate
-work, not a documentation feature.
+Runtime compatibility checks **provider, model name and dimensions**, and the model **revision**
+when both sides know it. A build records the commit of the model files that embedded it, read
+from the local Hugging Face cache (a Hub model's `snapshots/<commit>` folder; no download or Hub
+call is added for it). The cases:
+
+- Stored and runtime revisions known and equal: served.
+- Both known and different: search, evaluation and `/ready` refuse with an
+  `IndexModelRevisionError` naming both, and one `index_model_revision_mismatch` record per build
+  and process is logged. Serve the model files the build was embedded with, or run `index-rebuild`
+  with the serving model and activate its evaluated build.
+- Stored known, runtime unknown (for example a model supplied as a directory): refused the same
+  way, because the two cannot be compared.
+- Stored unknown (a build made before this check, or from a model directory): served after the
+  checks above, and one `index_model_revision_unknown` record per build and process is logged. A
+  stored build is never backfilled; rebuild to record a revision. `index-builds` shows
+  `embedding_revision` (`null` when unknown). The hashing provider's revision names its algorithm.
+
+A model supplied as a directory has no revision until its files are identified separately, so
+such a deployment is still unprotected against a changed same-named model. Preserve the actual
+frozen model assets, software versions and evaluation data externally when reproducing a run;
+the commands below alone do not provide a byte-reproducible model pin.
 
 ## How retrieval uses the fields
 
