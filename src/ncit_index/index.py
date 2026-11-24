@@ -14,7 +14,7 @@ from itertools import batched, chain, groupby
 from pathlib import Path
 from tempfile import TemporaryFile
 from time import monotonic
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 from uuid import uuid4
 
 from .embeddings import EmbeddingProvider
@@ -178,6 +178,17 @@ def _check_dimensions(previous: int, width: int, compatible: IndexManifest | Non
         raise IndexCompatibilityError(
             f"Embedding mismatch; rebuild {compatible.index_path} with index-rebuild"
         )
+
+
+class _Activation(NamedTuple):
+    manifest: IndexManifest
+    switched: bool  # False when the build was already active
+    superseded: list[str]  # builds hidden by this or an earlier activation, not yet removed
+
+
+def _superseded(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute("SELECT build_id FROM manifests WHERE state = 'superseded'")
+    return sorted(row[0] for row in rows)
 
 
 def _sample_base_is_active(conn: sqlite3.Connection, active: IndexManifest | None) -> bool:
@@ -440,41 +451,41 @@ class LocalIndex:
         return len(seen), dimensions
 
     def activate(self, build_id: str) -> IndexManifest:
-        """Atomically activate a completed snapshot and retain only its predecessor.
+        """Atomically activate a completed snapshot and retain only its predecessor."""
+        return self.activate_and_report(build_id)[0]
+
+    def activate_and_report(self, build_id: str) -> tuple[IndexManifest, list[str]]:
+        """Activate, then remove what the activation superseded; return the builds left over.
 
         The other completed builds are hidden in the same transaction and removed after it
-        commits, so a failed removal can never undo the activation.
+        commits, so a failed removal can never undo the activation. The list of builds to
+        remove is read inside that transaction, so nothing after the commit can fail the call.
         """
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            manifest, switched = self._activate(conn, build_id)
-        self._announce_activation(manifest, switched)
-        self._remove_superseded()
-        return manifest
+            activation = self._activate(conn, build_id)
+        self._announce_activation(activation.manifest, activation.switched)
+        return activation.manifest, self._remove_superseded(activation.superseded)
 
-    def pending_removal(self) -> list[str]:
-        """Builds hidden by an activation whose removal has not completed."""
-        with self._connect() as conn:
-            rows = conn.execute("SELECT build_id FROM manifests WHERE state = 'superseded'")
-            return sorted(row[0] for row in rows)
-
-    def _remove_superseded(self) -> None:
+    def _remove_superseded(self, superseded: list[str]) -> list[str]:
         """Delete superseded builds one transaction each; stop at the first storage failure.
 
         Runs after every activation, including one that changed nothing, so a removal that
-        was interrupted is retried by the next activation of any build.
+        was interrupted is retried by the next activation of any build. Returns the builds
+        still present.
         """
-        pending = self.pending_removal()
-        for position, build_id in enumerate(pending):
+        for position, build_id in enumerate(superseded):
             try:
                 with self._connect() as conn:
                     conn.execute("BEGIN IMMEDIATE")
                     delete_build(conn, build_id)
             except IndexStorageError:
-                self._event("index_build_removal_pending", build_ids=pending[position:])
-                return
+                remaining = superseded[position:]
+                self._event("index_build_removal_pending", build_ids=remaining)
+                return remaining
+        return []
 
-    def _activate(self, conn: sqlite3.Connection, build_id: str) -> tuple[IndexManifest, bool]:
+    def _activate(self, conn: sqlite3.Connection, build_id: str) -> _Activation:
         row = conn.execute(
             "SELECT payload, active FROM manifests WHERE build_id = ? AND state = 'complete'",
             (build_id,),
@@ -486,7 +497,7 @@ class LocalIndex:
         manifest = LocalIndex._manifest(row)
         _require_evaluated(manifest)
         if manifest.active:
-            return manifest, False
+            return _Activation(manifest, False, _superseded(conn))
         previous = conn.execute("SELECT build_id FROM manifests WHERE active = 1").fetchone()
         predecessor = previous["build_id"] if previous else build_id
         conn.execute("UPDATE manifests SET active = 0 WHERE active = 1")
@@ -496,7 +507,7 @@ class LocalIndex:
             "WHERE state = 'complete' AND build_id NOT IN (?, ?)",
             (build_id, predecessor),
         )
-        return replace(manifest, active=True), True
+        return _Activation(replace(manifest, active=True), True, _superseded(conn))
 
     def _announce_activation(self, manifest: IndexManifest, switched: bool) -> None:
         """Called after the commit: a record of an activation that was rolled back would lie."""
@@ -566,18 +577,18 @@ class LocalIndex:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if _sample_base_is_active(conn, base):
-                manifest, switched = self._activate(conn, build_id)
+                activation = self._activate(conn, build_id)
             else:
                 # Committed before the error is raised: the unreferenced snapshot is not kept.
                 delete_build(conn, build_id)
-                manifest, switched = None, False
-        if manifest is None:
+                activation = None
+        if activation is None:
             raise IndexStateError(
                 "The active index changed during sample indexing; retry the sample"
             )
-        self._announce_activation(manifest, switched)
-        self._remove_superseded()
-        return manifest
+        self._announce_activation(activation.manifest, activation.switched)
+        self._remove_superseded(activation.superseded)
+        return activation.manifest
 
     @staticmethod
     def _sample_concepts(

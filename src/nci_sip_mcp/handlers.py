@@ -318,11 +318,11 @@ def index_activate(context: Context, build_id: str) -> dict[str, Any]:
     (the active one included) retries.
     """
     index = indexing.open_index(context.settings.data_dir)
-    active = index.activate(build_id)
+    active, pending = index.activate_and_report(build_id)
     return {
         "buildId": active.build_id,
         "manifest": manifest_record(active).to_result(),
-        "pendingRemoval": index.pending_removal(),
+        "pendingRemoval": pending,
     }
 
 

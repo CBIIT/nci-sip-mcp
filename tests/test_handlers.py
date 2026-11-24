@@ -890,7 +890,9 @@ class OperatorErrorRemedyTest(ServerFixture):
             with (
                 self.subTest(error=error),
                 patch("nci_sip_mcp.indexing.open_index", return_value=self.local_index),
-                patch.object(self.local_index, "activate", side_effect=error("Rejected build.")),
+                patch.object(
+                    self.local_index, "activate_and_report", side_effect=error("Rejected build.")
+                ),
             ):
                 result = invoke(self.context, "index_activate", "a" * 32)
                 self.assertEqual(result["error"]["code"], "internal_error")
