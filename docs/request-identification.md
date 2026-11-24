@@ -25,8 +25,9 @@ Three forms exist. `<v>` is the installed package version.
 - **Governed acceptance runs and the release preflight** send the second form: product only, never
   an installation id. A server launched by the acceptance suite receives none: the suite strips
   every inherited `NCI_SIP_*` variable from its environment and sets only its own run settings.
-- **The installer's reachability probe and the Shared SI contract script** send the second form,
-  never an installation id.
+- **The installer's EVS and caDSR reachability checks (`evs_reachable`, `cadsr_reachable`) and the
+  Shared SI contract script** send the second form, never an installation id. The installer's
+  check of the local HTTP `/ready` endpoint is not platform traffic and sends no label.
 - **Only the server and core can send `installation=`.** There is no separate installation header,
   and the acceptance harness gives the server it launches no identity (it strips every inherited
   `NCI_SIP_*` variable from that server's environment, then sets only its own run settings).
@@ -178,8 +179,8 @@ retention):
   or CI traffic, or from the recorder (a different product token).
 - `X-Correlation-ID` joins one request to the audit record of the call that made it. Send us the
   value and the time and we find the call from our stderr records. Requests made outside a call
-  carry `User-Agent` only and no correlation id: the installer's reachability probe, the Shared SI
-  contract script, and the recorder and citation reads.
+  carry `User-Agent` only and no correlation id: the installer's EVS and caDSR reachability checks,
+  the Shared SI contract script, and the recorder and citation reads.
 - Both fields are self-reported. They are meant for monitoring and assistance, not authentication
   or access control.
 
