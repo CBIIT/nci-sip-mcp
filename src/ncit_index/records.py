@@ -45,6 +45,8 @@ class IndexManifest:
     build_kind: Literal["legacy", "sample", "production"] = "legacy"
     evaluation_report: dict[str, Any] | None = None
     unclassified_source_build: str | None = None
+    # The model commit the build was embedded with; None when it was not known (never backfilled).
+    embedding_revision: str | None = None
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> Self:

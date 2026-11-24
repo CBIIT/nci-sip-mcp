@@ -228,6 +228,11 @@ Operational constraints apply whichever AWS services implement these boxes:
   `from_version`, `to_version` and `elapsed_seconds`. A start without a finish means the
   migration rolled back or the process stopped; the file is still at `from_version`. A new empty
   file is created without either record.
+- **Directory models are not identified.** A model supplied as a directory (such as the
+  container's `/model`) has no revision, so an index built from it stores none and the
+  deployment is not protected against a changed same-named model. A Hub model served from the
+  local cache is checked by its commit (see the
+  [semantic index notes](ncit-semantic-index.md)).
 - **Readiness gates local compatibility.** Probe each replica with an allowed Host header.
   Neither health endpoint guarantees live upstream service, issued caDSR credentials, or
   production retrieval quality. The container smoke uses a test-only model.

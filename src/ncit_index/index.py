@@ -24,6 +24,7 @@ from .errors import (
     IndexCompatibilityError,
     IndexCursorError,
     IndexEvaluationError,
+    IndexModelRevisionError,
     IndexReleaseError,
     IndexStateError,
     IndexStorageError,
@@ -205,6 +206,8 @@ class LocalIndex:
         self, data_dir: Path, *, on_event: Callable[[str, dict[str, Any]], None] | None = None
     ) -> None:
         self.on_event = on_event
+        # (event, build) pairs already recorded by this process, so a probe loop stays quiet.
+        self._noted: set[tuple[str, str]] = set()
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.data_dir / "nci_si.sqlite3"
@@ -387,6 +390,7 @@ class LocalIndex:
             build_id=build_id,
             build_kind=build_kind,
             unclassified_source_build=unclassified_source_build,
+            embedding_revision=provider.revision,
         )
         with build_lease(self.data_dir, build_id):
             self._start_build(manifest)
@@ -656,6 +660,7 @@ class LocalIndex:
             conn.execute("BEGIN")
             manifest = _completed_manifest(conn, build_id)
             _require_searchable(manifest, provider)
+            self._require_revision(manifest, provider)
             hits, _ = _ranked_page(conn, manifest, provider, query, limit, mode)
             return hits, manifest
 
@@ -674,7 +679,34 @@ class LocalIndex:
                 requested_release or manifest.release_version, manifest.release_version
             )
         _require_searchable(manifest, provider)
+        self._require_revision(manifest, provider)
         return manifest
+
+    def _require_revision(self, manifest: IndexManifest, provider: EmbeddingProvider) -> None:
+        """Refuse a model revision other than the stored one; note a build that stores none."""
+        stored, runtime = manifest.embedding_revision, provider.revision
+        if stored is None:
+            self._note("index_model_revision_unknown", manifest, runtime_revision=runtime)
+        elif stored != runtime:
+            self._note(
+                "index_model_revision_mismatch",
+                manifest,
+                stored_revision=stored,
+                runtime_revision=runtime,
+            )
+            if runtime is None:
+                raise IndexModelRevisionError(
+                    f"Index model revision {stored} cannot be compared: "
+                    "the serving model revision cannot be determined"
+                )
+            raise IndexModelRevisionError(
+                f"Index model revision {stored} does not match the serving model revision {runtime}"
+            )
+
+    def _note(self, event: str, manifest: IndexManifest, **details: str | None) -> None:
+        if (event, manifest.build_id) not in self._noted:
+            self._noted.add((event, manifest.build_id))
+            self._event(event, build_id=manifest.build_id, **details)
 
 
 def _require_searchable(manifest: IndexManifest, provider: EmbeddingProvider) -> None:

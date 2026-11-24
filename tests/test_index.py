@@ -726,6 +726,7 @@ class SearchTest(IndexTestCase):
         class NoEmbedProvider(EmbeddingProvider):
             name = "hashing"
             model = "hashing-128"
+            revision = HashingEmbeddingProvider.revision
 
             def embed(self, texts):
                 raise AssertionError("BM25-only search must not embed the query")
