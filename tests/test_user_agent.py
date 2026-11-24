@@ -220,7 +220,9 @@ class InstallerProbeTest(ReceiverCase):
                 data_dir.mkdir()
                 arguments = [command, "--target", "local"]
                 if command != "check":
-                    arguments += ["--data-dir", str(data_dir), "--non-interactive"]
+                    arguments += ["--data-dir", str(data_dir)]
+                if command == "run":
+                    arguments.append("--non-interactive")
                 if command == "status":
                     installer_state.write_state(
                         data_dir,
