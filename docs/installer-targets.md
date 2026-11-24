@@ -8,7 +8,8 @@ reference explains identity, state and failures.
 
 Local server checks cover macOS/Linux, the running Python 3.14 or newer, the Git executable used
 by pip for the released VCS URL, and the configured EVS/caDSR endpoints. They require neither
-PDM nor a Git checkout. Checks change nothing. Expected failures carry static corrections; bugs
+PDM nor a Git checkout. Checks change nothing; the endpoint checks identify themselves with the
+product `User-Agent` `nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`. Expected failures carry static corrections; bugs
 propagate. The index, documentation site and validation companion are installed independently
 with their documented local commands; they are not installer targets or flags.
 

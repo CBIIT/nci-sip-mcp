@@ -18,7 +18,7 @@ from importlib.metadata import version
 from pathlib import Path
 from unittest.mock import patch
 
-from nci_sip_mcp import cli, container_entry, traffic_identity
+from nci_sip_mcp import cli, container_entry, installer, traffic_identity
 from nci_sip_mcp.audit import JsonFormatter
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.context import Context
@@ -189,6 +189,21 @@ class HttpClientTest(ReceiverCase):
         client.get_json("/x")
 
         self.assertEqual(self.user_agents(server), [""])
+
+
+class InstallerProbeTest(ReceiverCase):
+    def test_the_reachability_probe_sends_the_product_label_and_never_an_installation(self):
+        server = self.serve()
+        ids = {
+            "NCI_SIP_INSTALLATION_ID": INSTALLATION,
+            "NCI_SIP_ACCEPTANCE_INSTALLATION_ID": INSTALLATION,
+        }
+
+        with patch.dict(os.environ, ids):
+            reachable = installer.reachability_prerequisite("x", server.url, "fix").observe()
+
+        self.assertTrue(reachable)
+        self.assertEqual(self.user_agents(server), [user_agent()])
 
 
 def run_main(*argv, **environment):

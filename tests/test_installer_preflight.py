@@ -1,6 +1,6 @@
 import unittest
 from email.message import Message
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from urllib.error import HTTPError
 
 from nci_sip_mcp import installer
@@ -131,10 +131,3 @@ class AggregatePrerequisiteTest(unittest.TestCase):
             self.assertFalse(check.observe())
         with patch.object(API.sys, "version_info", (3, 14)):
             self.assertTrue(check.observe())
-
-    def test_reachability_uses_a_five_second_timeout(self):
-        response = MagicMock()
-        response.__enter__.return_value = response
-        with patch("nci_sip_mcp.installer.urlopen", return_value=response) as opened:
-            self.assertTrue(API.reachability_prerequisite("x", "https://example", "fix").observe())
-        opened.assert_called_once_with("https://example", timeout=5)

@@ -52,10 +52,23 @@ def installation_label(snapshot: IdentitySnapshot) -> str:
     raw_id = snapshot._raw_id
     if raw_id is None or _INSTALLATION_ID.fullmatch(raw_id) is None:
         raise ValueError(ID_ERROR)
-    installation_id = InstallationId(raw_id)
-    if not isinstance(snapshot.version, str) or _VERSION_TOKEN.fullmatch(snapshot.version) is None:
+    return _label(snapshot.version, InstallationId(raw_id))
+
+
+def product_user_agent(snapshot: IdentitySnapshot) -> str:
+    """The User-Agent of acceptance's direct requests: the product alone, never an installation."""
+
+    return _label(snapshot.version, None)
+
+
+def _label(installed_version: str | None, installation_id: InstallationId | None) -> str:
+    if (
+        not isinstance(installed_version, str)
+        or _VERSION_TOKEN.fullmatch(installed_version) is None
+    ):
         raise ValueError(VERSION_ERROR)
-    label = f"{PRODUCT}/{snapshot.version} (installation={installation_id}; +{PROJECT_URL})"
+    installation = f"installation={installation_id}; " if installation_id else ""
+    label = f"{PRODUCT}/{installed_version} ({installation}+{PROJECT_URL})"
     if len(label.encode("ascii")) > MAX_LABEL_BYTES:
         raise ValueError(VERSION_ERROR)
     return label

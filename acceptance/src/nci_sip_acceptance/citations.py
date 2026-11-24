@@ -7,6 +7,8 @@ import json
 from typing import Any
 from urllib.request import Request, urlopen
 
+from nci_sip_acceptance.traffic_identity import capture_identity, product_user_agent
+
 
 def _identity(item):
     assert all(isinstance(item[key], str) and item[key].strip() for key in ("publicId", "version"))
@@ -65,7 +67,10 @@ def verify_citations(tools: Any, base_url: str) -> dict[str, Any]:
     """GET 2200604/v4 once; failures and in-place edit races stay visible without retry."""
     request = Request(  # noqa: S310 - the harness's fixture URL; controlled live callers refuse before entry.
         base_url.rstrip("/") + "/NCIAPI/1.0/api/DataElement/2200604?version=4",
-        headers={"Accept": "application/json"},
+        headers={
+            "Accept": "application/json",
+            "User-Agent": product_user_agent(capture_identity()),
+        },
     )
     with urlopen(request, timeout=120) as response:  # noqa: S310 - same controlled URL.
         body = json.load(response)

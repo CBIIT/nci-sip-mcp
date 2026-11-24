@@ -22,7 +22,7 @@ from email.parser import Parser
 from pathlib import Path
 from typing import Any, cast
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from . import __version__
 from .config import UpstreamConfigurationError, upstream_base_urls
@@ -37,6 +37,7 @@ from .installer_state import (
     validate_outcomes,
     write_state,
 )
+from .traffic_identity import product_user_agent
 from .validation import PROFILES
 
 COMPONENTS = ("server",)
@@ -209,9 +210,12 @@ def executable_prerequisite(name: str, fix: str) -> Prerequisite:
 
 
 def reachability_prerequisite(name: str, url: str, fix: str) -> Prerequisite:
+    # Built here, not in `reachable`: unsafe metadata is a bug that propagates, never "unreachable".
+    request = Request(url, headers={"User-Agent": product_user_agent()})  # noqa: S310 - operator-configured HTTP(S) endpoint
+
     def reachable() -> bool:
         try:
-            with urlopen(url, timeout=5):  # noqa: S310 - operator-configured HTTP(S) endpoint
+            with urlopen(request, timeout=5):  # noqa: S310 - the same endpoint
                 return True
         except HTTPError:
             return True
