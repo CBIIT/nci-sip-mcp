@@ -43,8 +43,10 @@ class ModelRevisionTest(ServerFixture):
         return self.local_index.get_active_manifest()
 
     def revision_records(self, logs):
+        """The revision events with their own fields (not timestamp, level or correlation)."""
+        own = {"build_id", "stored_revision", "runtime_revision"}
         return [
-            (row.structured["event"], {k: v for k, v in row.structured.items() if k != "event"})
+            (row.structured["event"], {k: v for k, v in row.structured.items() if k in own})
             for row in logs.records
             if row.structured["event"].startswith("index_model_revision_")
         ]
