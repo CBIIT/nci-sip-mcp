@@ -196,12 +196,14 @@ class RevisionSourceTest(unittest.TestCase):
         ):
             SentenceTransformersProvider("org/model", local_files_only=True)
 
-    def test_a_directory_model_has_no_revision_even_when_its_path_looks_like_a_snapshot(self):
+    def test_a_directory_model_is_hashed_not_mistaken_for_a_hub_commit_by_its_path(self):
         with tempfile.TemporaryDirectory() as directory:
             snapshot = Path(directory) / "snapshots" / COMMIT
             snapshot.mkdir(parents=True)
+            (snapshot / "config.json").write_text("{}")
             with patch.dict(sys.modules, self.fake_modules(str(snapshot))):
-                self.assertIsNone(self.revision(str(snapshot), local_files_only=True))
+                revision = self.revision(str(snapshot), local_files_only=True)
+        self.assertTrue(str(revision).startswith("sha256:"), revision)
 
     def test_hashing_and_custom_providers_report_what_they_declare(self):
         class Custom(EmbeddingProvider):

@@ -2,6 +2,7 @@ import io
 import json
 import logging
 import sys
+import tempfile
 import types
 from contextlib import redirect_stderr
 from dataclasses import replace
@@ -176,6 +177,15 @@ class OfflineModel:
 
 
 class ContainerOfflineTest(ServerFixture):
+    def model_directory(self):
+        """An external model directory of its own: the data directory holds a live database."""
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name)
+        (path / "config.json").write_text("{}")
+        (path / "weights.bin").write_bytes(b"w1")
+        return path
+
     def test_legacy_active_index_fails_startup_until_operator_rebuilds_it(self):
         settings = replace(self.settings, transport="streamable-http", http_require_index=True)
         self.local_index.upsert_concepts(
@@ -203,7 +213,7 @@ class ContainerOfflineTest(ServerFixture):
             transport="streamable-http",
             http_require_index=True,
             embedding_provider="sentence-transformers",
-            embedding_model=str(self.settings.data_dir),
+            embedding_model=str(self.model_directory()),
         )
         served = []
 
@@ -224,3 +234,36 @@ class ContainerOfflineTest(ServerFixture):
                 self.assertEqual(container_entry.main(), 0)
         self.assertEqual(served, [[[3.0, 1.0]]])
         self.assertEqual(self.context.index.get_active_manifest(), before)
+
+    def test_startup_refuses_a_model_directory_that_changed_since_the_index_was_built(self):
+        model = self.model_directory()
+        settings = replace(
+            self.settings,
+            transport="streamable-http",
+            http_require_index=True,
+            embedding_provider="sentence-transformers",
+            embedding_model=str(model),
+        )
+        modules = {"sentence_transformers": types.SimpleNamespace(SentenceTransformer=OfflineModel)}
+        logging.disable(logging.NOTSET)
+        with patch.dict(sys.modules, modules):
+            provider = SentenceTransformersProvider(str(model), local_files_only=True)
+            self.local_index.upsert_concepts(normalized([concept("C1")]), None, provider)
+            served = []
+            with (
+                patch.object(container_entry.Settings, "from_env", return_value=settings),
+                patch.object(container_entry, "configure_logging"),
+                patch.object(container_entry, "run_http", lambda *_: served.append("served")),
+            ):
+                self.assertEqual((container_entry.main(), served), (0, ["served"]))
+                (model / "weights.bin").write_bytes(b"w2")
+                with self.assertLogs("nci_sip_mcp.index", level="INFO") as logs:
+                    code = container_entry.main()
+        mismatch = [
+            r.structured for r in logs.records if r.structured["event"].endswith("_mismatch")
+        ]
+        self.assertEqual((code, served), (1, ["served"]))
+        self.assertEqual(len(mismatch), 1)
+        stored, runtime = mismatch[0]["stored_revision"], mismatch[0]["runtime_revision"]
+        self.assertTrue(stored.startswith("sha256:") and runtime.startswith("sha256:"))
+        self.assertNotEqual(stored, runtime)
