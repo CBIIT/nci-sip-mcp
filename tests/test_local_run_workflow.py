@@ -716,8 +716,8 @@ class LocalRunWorkflowTest(unittest.TestCase):
             "uv tool install --exclude-newer 5d --with 'hishel==1.2.1' "
             "--with 'unearth==0.18.2' --with 'virtualenv==21.15.2' 'pdm==2.29.2'\n",
         )
-        setup = load(WORKFLOWS.parent / "actions" / "setup" / "action.yml")
-        self.assertEqual(setup["runs"]["steps"][0]["with"]["version"], "2.29.2")
+        requirements = (ROOT / "container/pdm-bootstrap-requirements.txt").read_text()
+        self.assertIn("\npdm==2.29.2 \\\n", requirements)
 
     def test_the_workflow_exists_beside_the_others(self):
         self.assertEqual(

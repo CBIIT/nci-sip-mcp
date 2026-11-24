@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -154,13 +155,17 @@ class BootstrapPipEvidenceTest(unittest.TestCase):
             (None, "Missing"),
             ("", "Incomplete"),
             ("unrelated installation details\n", "Incomplete"),
-            ("time Using pip 26.2.2 from /tool/pip (python 3.14)\n", "Incomplete"),
         ):
             with self.subTest(content=content):
                 result = self.execute(content)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stderr, reason + " bootstrap pip version evidence\n")
                 self.assertEqual(result.stdout, "")
+
+    def test_one_record_from_each_actual_invocation_is_enough(self):
+        result = self.execute("time Using pip 26.2.2 from /tool/pip (python 3.14)\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '["26.2.2"]\n')
 
     def test_unrecognized_pip_evidence_is_not_silently_dropped(self):
         result = self.execute(
@@ -171,3 +176,36 @@ class BootstrapPipEvidenceTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "Unrecognized bootstrap pip version evidence\n")
         self.assertEqual(result.stdout, "")
+
+
+BOOTSTRAP_ROOTS = {"pdm": "2.29.2", "hishel": "1.2.1", "unearth": "0.18.2", "virtualenv": "21.15.2"}
+
+
+class BootstrapRequirementsTest(unittest.TestCase):
+    def requirements(self):
+        text = (ROOT / "container/pdm-bootstrap-requirements.txt").read_text()
+        joined = text.replace("\\\n", " ")
+        lines = [line for line in joined.splitlines() if line.strip() and line[0] != "#"]
+        return [" ".join(line.split()) for line in lines]
+
+    def test_the_four_roots_equal_every_pin_the_bootstrap_is_checked_against(self):
+        pins = {}
+        for line in self.requirements():
+            name, _, rest = line.partition("==")
+            pins[name] = rest.split()[0]
+        self.assertEqual({name: pins.get(name) for name in BOOTSTRAP_ROOTS}, BOOTSTRAP_ROOTS)
+        setup = (ROOT / ".github/actions/setup/action.yml").read_text()
+        guard = dict(re.findall(r'"(\w+)": "([\d.]+)"', setup))
+        self.assertEqual(guard, BOOTSTRAP_ROOTS)
+        local = (ROOT / ".github/workflows/local-run.yml").read_text()
+        installed = re.findall(r"--with '(\w+)==([\d.]+)'", local) + re.findall(
+            r"'(pdm)==([\d.]+)'", local
+        )
+        self.assertEqual(dict(installed), BOOTSTRAP_ROOTS)
+
+    def test_every_requirement_is_an_exact_pin_with_only_sha256_hashes(self):
+        lines = self.requirements()
+        self.assertGreater(len(lines), len(BOOTSTRAP_ROOTS))
+        for line in lines:
+            with self.subTest(line=line.split()[0]):
+                self.assertRegex(line, r"^[A-Za-z0-9_.-]+==[^\s=]+( --hash=sha256:[0-9a-f]{64})+$")
