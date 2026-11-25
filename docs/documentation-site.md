@@ -93,7 +93,8 @@ the source tree was modified. Installed package version is recorded separately. 
 label is accepted only with `--release-tag vX.Y.Z` when that tag resolves to the clean source
 commit. An installed version alone does not establish a release. Relative navigation and assets
 allow the artifact to be mounted at a versioned URL prefix without rebuilding it. The host
-supplies error pages; the artifact omits the generator's root-specific 404 page.
+supplies error pages; the artifact omits the generator's root-specific 404 page, and a build
+whose generator wrote none fails before anything is published (#433).
 
 Pages retain semantic headings, links and tables in static HTML; essential documentation is
 readable without JavaScript. Search and rendered Mermaid diagrams require JavaScript. Diagrams
