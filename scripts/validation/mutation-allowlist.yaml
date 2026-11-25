@@ -1318,3 +1318,12 @@
   original: "353401809590fce03527be76d16055befec3bf00b4443d2e1a26c5300e3da6a4"
   mutated: "f5536f3bcd07de6521df23e5ac1e0ad1b443ac79485b5f4ed71373fd170b3670"
   reason: "Equivalent: _label is the only consumer and refuses every non-str version with the same _invalid_version(); None and False give identical refusals. Reassess if another consumer reads IdentitySnapshot.version."
+# Approved: PR #624 comment 7151671206; run 45533253969 attempt 2 shard 3; equivalent SURVIVED, source-reviewed.
+- file: "src/ncit_index/index.py"
+  qualname: "LocalIndex._remove_superseded"
+  operator: "call:remove"
+  site: "/body/1/body/0/body/0/body/0"
+  context: "c56e92b01fe11f486ff6391f916bf033a6f59308161e15b6ea9ac626d97c369c"
+  original: "2112bbd785b458aa8b647971aff2a8123c3abfb0fce59c227f72ee46a96cd605"
+  mutated: "ccdee505c02b1e17fd63a7256de3a0f103df85be974e9fe12a88d81c6916ed1a"
+  reason: "_connect uses the default sqlite3 legacy transaction control (isolation_level ''), so the first DELETE of delete_build implicitly begins a transaction that also covers the remaining DELETEs and the DROP, committed or rolled back once by `with conn`. A DELETE takes the write lock at statement start, before any read, through the same busy-handler path as BEGIN IMMEDIATE. Checked on SQLite 3.54.1: same statements apart from the BEGIN keyword, same rollback when the 4th DELETE or the DROP fails, same 5 s busy wait then IndexStorageError under a held writer, same WAL reader isolation. Reassess if delete_build reads before its first write or _connect changes isolation_level/autocommit."

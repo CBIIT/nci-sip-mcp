@@ -9,7 +9,7 @@ from .cadsr import CaDSRClient
 from .config import Settings
 from .evs import LICENSE_KEY_HEADER, EVSClient
 from .http_client import HttpClient
-from .index_adapter import LocalIndexAdapter
+from .index_adapter import LocalIndexAdapter, index_event
 from .index_port import IndexPort
 from .ssis import SSISClient
 from .traffic_identity import capture_identity, user_agent
@@ -41,7 +41,9 @@ class Context:
             license_key=settings.evs_license_key,
             user_agent=agent,
         )
-        self.index: IndexPort = index or LocalIndexAdapter(LocalIndex(settings.data_dir))
+        self.index: IndexPort = index or LocalIndexAdapter(
+            LocalIndex(settings.data_dir, on_event=index_event)
+        )
         self.fhir = HttpClient(
             settings.evs_fhir_base_url,
             label="EVS_FHIR",

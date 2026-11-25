@@ -156,6 +156,8 @@ async def surface(port: int, assets: Path) -> None:
         if {tool.name for tool in tools.tools} != MCP_TOOLS:
             raise RuntimeError("The container did not expose the unified profile")
         manifest = json.loads((assets / "manifest.json").read_text())
+        if not str(manifest.get("embedding_revision")).startswith("sha256:"):
+            raise RuntimeError("The directory model was not identified by its content hash")
         release = manifest["release_version"]
         resource = await client.read_resource(f"ncit://index/manifest/{release}")
         content = json.loads(resource.model_dump(mode="json")["contents"][0]["text"])
