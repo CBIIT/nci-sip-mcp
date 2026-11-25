@@ -2177,3 +2177,38 @@ def test_unreadable_refusal_ledger_never_replaces_the_refusal_and_is_reported(
     assert [error.reason for error in refusals] == ["accounting"]
     notes = [note for error in refusals for note in error.__notes__]
     assert "immediate ledger refusals: [] dropped=unknown" in notes
+
+
+class UnformattableCount(int):
+    def __format__(self, spec):
+        raise MemoryError("note formatting")
+
+
+def unreadable_refusals():
+    raise MemoryError("snapshot copy")
+
+
+def unformattable_refusals():
+    return {"records": [], "dropped": UnformattableCount(1)}
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [None, unreadable_refusals, unformattable_refusals],
+    ids=["note", "fallback", "format"],
+)
+def test_failing_note_sink_never_replaces_the_refusal(tmp_path, monkeypatch, snapshot):
+    owner = supervisor(tmp_path)
+    if snapshot is not None:
+        monkeypatch.setattr(owner.run, "immediate_refusals", snapshot)
+    add_note = RequestPolicyError.add_note
+
+    def sink(self, note):
+        if note.startswith("immediate ledger refusals: "):
+            raise MemoryError("note sink")
+        add_note(self, note)
+
+    monkeypatch.setattr(RequestPolicyError, "add_note", sink)
+    errors = final_errors_after_refused_heartbeat(owner, monkeypatch)
+    assert [type(error) for error in errors] == [RequestPolicyError]
+    assert errors[0].reason == "accounting"
