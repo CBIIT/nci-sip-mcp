@@ -103,7 +103,7 @@ class TestReportWorkflowTest(unittest.TestCase):
             {
                 "name": "test (3.14, ${{ matrix.shard }})",
                 "runs-on": "ubuntu-24.04",
-                "timeout-minutes": 10,
+                "timeout-minutes": 15,
                 "strategy": {
                     "fail-fast": False,
                     "matrix": {"shard": ["1/4", "2/4", "3/4", "4/4"]},
