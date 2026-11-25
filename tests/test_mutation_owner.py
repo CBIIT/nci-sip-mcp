@@ -816,8 +816,10 @@ class ProgramOwnershipTest(unittest.TestCase):
                 self.assertEqual(rows[0].sid, child.pid)
             self.assertEqual(child.wait(timeout=5), 0)
         finally:
-            child.wait(timeout=5)
-            child.stdout.close()
+            try:
+                child.wait(timeout=5)
+            finally:
+                child.stdout.close()
 
     def test_early_leader_exit_allows_worker_cleanup_without_group_departure(self):
         with TemporaryDirectory() as directory:
