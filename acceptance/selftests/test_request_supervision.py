@@ -2096,14 +2096,18 @@ def test_unrelated_body_group_keeps_observed_child_failure(tmp_path):
 
 def test_heartbeat_refusal_reaches_the_final_failure_note(tmp_path, monkeypatch):
     owner = supervisor(tmp_path)
+    locked = threading.Event()
     pulsed = threading.Event()
     heartbeat = owner.run.heartbeat
 
     def observed():
+        # Pulse only a heartbeat run under the held lock; the bounded waits are hang protection.
+        held = locked.wait(10)
         try:
             heartbeat()
         finally:
-            pulsed.set()
+            if held:
+                pulsed.set()
 
     monkeypatch.setattr(owner.run, "heartbeat", observed)
     failure = None
@@ -2113,8 +2117,12 @@ def test_heartbeat_refusal_reaches_the_final_failure_note(tmp_path, monkeypatch)
             closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as blocker,
             blocker,
         ):
-            blocker.execute("BEGIN EXCLUSIVE")
-            assert pulsed.wait(10), "The observer never pulsed"
+            try:
+                blocker.execute("BEGIN EXCLUSIVE")
+                locked.set()
+                assert pulsed.wait(10), "The observer never pulsed under the held lock"
+            finally:
+                locked.set()
     except (RequestPolicyError, BaseExceptionGroup) as error:
         failure = error
     assert failure is not None
