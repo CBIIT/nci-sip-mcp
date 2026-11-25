@@ -6,6 +6,7 @@ import json
 import subprocess
 import threading
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import TracebackType
@@ -283,9 +284,15 @@ class SupervisedRun:
         detail = self.run.failure_detail()
         if detail is not None:
             error.add_note(f"ledger failure detail: {json.dumps(detail)}")
-        refusals = self.run.immediate_refusals()
+        try:
+            refusals = self.run.immediate_refusals()
+        except Exception:  # noqa: BLE001 - a diagnostic read must not replace the failure.
+            error.add_note("immediate ledger refusals: [] dropped=unknown")
+            return
         if refusals["records"] or refusals["dropped"]:
-            records, dropped = json.dumps(refusals["records"]), refusals["dropped"]
+            records, dropped = "[]", refusals["dropped"] + len(refusals["records"])
+            with suppress(Exception):  # Serialisation is diagnostic too: its records count as lost.
+                records, dropped = json.dumps(refusals["records"]), refusals["dropped"]
             error.add_note(f"immediate ledger refusals: {records} dropped={dropped}")
 
     def _cleanup(self, errors: list[BaseException], *, terminal: bool) -> None:

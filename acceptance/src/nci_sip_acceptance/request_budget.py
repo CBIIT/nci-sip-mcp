@@ -460,9 +460,14 @@ class ControlledRun:
         except Exception:  # noqa: BLE001 - a failed diagnostic must never replace the refusal; it is counted.
             record = None
         with self._refusals_lock:
+            stored = False
             if record is not None and len(self._refusals) < MAX_IMMEDIATE_REFUSALS:
-                self._refusals.append(record)
-            else:
+                with suppress(
+                    Exception
+                ):  # Storage is diagnostic too: a failure is counted as loss.
+                    self._refusals.append(record)
+                    stored = True
+            if not stored:
                 self._refusals_dropped += 1
 
     def _immediate_record(

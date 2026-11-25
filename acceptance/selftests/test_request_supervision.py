@@ -2161,3 +2161,19 @@ def test_note_serialisation_failure_never_replaces_the_refusal(tmp_path, monkeyp
     notes = [note for error in refusals for note in error.__notes__]
     (note,) = [note for note in notes if note.startswith("immediate ledger refusals: ")]
     assert note.rpartition(" dropped=")[2] == "1", note
+
+
+def test_unreadable_refusal_ledger_never_replaces_the_refusal_and_is_reported(
+    tmp_path, monkeypatch
+):
+    owner = supervisor(tmp_path)
+
+    def unreadable():
+        raise MemoryError("snapshot copy")
+
+    monkeypatch.setattr(owner.run, "immediate_refusals", unreadable)
+    errors = final_errors_after_refused_heartbeat(owner, monkeypatch)
+    refusals = [error for error in errors if isinstance(error, RequestPolicyError)]
+    assert [error.reason for error in refusals] == ["accounting"]
+    notes = [note for error in refusals for note in error.__notes__]
+    assert "immediate ledger refusals: [] dropped=unknown" in notes
