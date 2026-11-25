@@ -42,6 +42,8 @@ _LITERAL_SAFE = frozenset(string.ascii_letters + string.digits + " .,:;!?()-_/'"
 _HEADING = re.compile(r"^#{1,6}(?:\s|$)")
 _HEADINGS = re.compile(r"# \S[^\n]*" + "".join(f"\n## {name}" for name in SECTIONS))
 _REQUIRED_HEADINGS = ", ".join(["'# <title>'", *(f"'## {name}'" for name in SECTIONS)])
+_HTTP_STATUS = re.compile(r"HTTP/\S+ (\d{3})")
+_REPOSITORY = re.compile(r"[\w.-]+/[\w.-]+")
 _OUTPUT_NOTES = re.compile(r"release_notes<<EOF\n(.*)EOF\n", re.DOTALL)
 _PREVIEW_IDENTITY = ("-c", "user.name=release-notes-preview", "-c", "user.email=preview@invalid")
 
@@ -287,13 +289,23 @@ def preview(base: str, head: str, repository_url: str) -> str:
         return report + (f"\n{tool_notes()}" if plan.due else "")
 
 
-def release_absent(tag: str) -> bool:
-    result = run("gh", "release", "view", tag, "--json", "url")
-    if result.returncode == 0:
-        return False
-    if "release not found" in result.stderr:
-        return True
-    raise ReleaseNotesError(f"could not tell whether {tag} has a release; nothing was created")
+def remote_tag_commit(repository: str, tag: str) -> str:
+    result = run("gh", "api", f"repos/{repository}/commits/refs/tags/{tag}")
+    sha = json.loads(result.stdout).get("sha") if result.returncode == 0 else None
+    if not isinstance(sha, str):
+        raise ReleaseNotesError(f"could not read the remote tag {tag} in {repository}")
+    return sha
+
+
+def release_exists(repository: str, tag: str) -> bool:
+    """The structured HTTP status of the release lookup: 200 exists, 404 absent, else refuse."""
+    result = run("gh", "api", "-i", f"repos/{repository}/releases/tags/{tag}")
+    status = _HTTP_STATUS.match(result.stdout)
+    if status and status[1] in {"200", "404"}:
+        return status[1] == "200"
+    raise ReleaseNotesError(
+        f"could not tell whether {tag} has a release in {repository}; nothing was created"
+    )
 
 
 def frozen_notes(tag: str, commit: str, repository: str) -> str:
@@ -308,8 +320,8 @@ def frozen_notes(tag: str, commit: str, repository: str) -> str:
         return tool_notes()
 
 
-def recover(tag: str, repository: str) -> None:
-    """Create the GitHub release of an existing tag whose release is missing."""
+def verified_commit(tag: str, repository: str) -> str:
+    """The commit of a local tag that is checked out, green in CI and the same on the remote."""
     found = run("git", "rev-parse", "--verify", "-q", f"refs/tags/{tag}^{{commit}}")
     if found.returncode:
         raise ReleaseNotesError(f"no tag {tag} here; fetch it first")
@@ -322,13 +334,29 @@ def recover(tag: str, repository: str) -> None:
         release_ci.verify_ci(repository, commit)
     except ValueError as error:
         raise ReleaseNotesError(str(error)) from error
-    if not release_absent(tag):
+    remote = remote_tag_commit(repository, tag)
+    if remote != commit:
+        raise ReleaseNotesError(
+            f"the remote tag {tag} in {repository} is {remote}, not the verified {commit}"
+        )
+    return commit
+
+
+def recover(tag: str, repository: str) -> None:
+    """Create the GitHub release of an existing tag whose release is missing."""
+    if not _REPOSITORY.fullmatch(repository):
+        raise ReleaseNotesError(f"{repository!r} is not an owner/name repository")
+    commit = verified_commit(tag, repository)
+    if release_exists(repository, tag):
         raise ReleaseNotesError(f"{tag} already has a release; notes are never overwritten")
     notes = frozen_notes(tag, commit, repository)
     with tempfile.TemporaryDirectory() as directory:
         file = Path(directory) / "notes.md"
         file.write_text(notes, encoding="utf-8")
-        created = run("gh", "release", "create", tag, "--verify-tag", "--notes-file", str(file))
+        created = run(
+            "gh", "release", "create", tag, "--repo", repository, "--verify-tag",
+            "--notes-file", str(file),
+        )  # fmt: skip
     if created.returncode:
         raise ReleaseNotesError(f"gh release create failed: {created.stderr.strip()}")
 

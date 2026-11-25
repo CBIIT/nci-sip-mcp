@@ -596,6 +596,7 @@ class RecoveryTest(unittest.TestCase):
                 None,
                 "the remote tag v0.2.0 in example/scratch is",
             ),
+            ("malformed repository", {}, "malformed", "is not an owner/name repository"),
             ("other repository", {}, "fork", "No CI run for the main commit"),
             ("ci not green", {"FAKE_GH_CI": "failure"}, None, "Newest CI run has not completed"),
             ("tag is not head", {}, "advance", "is not the checked-out commit"),
@@ -611,6 +612,8 @@ class RecoveryTest(unittest.TestCase):
                 result = (
                     project.notes_tool("recover", "v0.2.0", "--repository", "other/fork")
                     if setup == "fork"
+                    else project.notes_tool("recover", "v0.2.0", "--repository", "a/b?x=1")
+                    if setup == "malformed"
                     else self.recover(project, "v0.9.9" if setup == "other-tag" else "v0.2.0")
                 )
                 self.assertEqual(result.returncode, 1)
