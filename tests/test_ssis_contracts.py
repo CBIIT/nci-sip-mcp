@@ -4,11 +4,14 @@ import ast
 import copy
 import inspect
 import json
+import os
 import re
 import subprocess
 import sys
 import unittest
+from importlib import metadata
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 from scripts.ssis_contracts import REGISTER, request, validate
@@ -118,6 +121,20 @@ class SSISContractCommandTest(ServerTestCase):
             check=False,
         )
         return result, server
+
+    def test_every_request_carries_the_product_user_agent_and_never_an_installation(self):
+        # Given both installation ids configured, when the real CLI runs against a local
+        # server, then each POST sends exactly the product label and its Accept is unchanged.
+        ids = {"NCI_SIP_INSTALLATION_ID": "a" * 32, "NCI_SIP_ACCEPTANCE_INSTALLATION_ID": "b" * 32}
+        with patch.dict(os.environ, ids):
+            _, server = self.command(bodies())
+
+        expected = (
+            f"nci-sip-mcp/{metadata.version('nci-sip-mcp')} (+https://github.com/CBIIT/nci-sip-mcp)"
+        )
+        sent = {(headers["user-agent"], headers["accept"]) for _, headers in server.seen}
+        self.assertEqual(sent, {(expected, "application/sparql-results+json")})
+        self.assertEqual(len(server.seen), 5)
 
     def test_bad_success_body_reports_all_families_without_upstream_prose(self):
         # Given a bad first HTTP 200 and four valid responses, when the real CLI runs,

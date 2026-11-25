@@ -11,10 +11,15 @@ The planned in-process MCP concept call was **unexecuted**, blocked by discovery
 new native live-suite run or UAT. The cause and issuing layer of the 403 are unknown.
 [First result and independent disposition](https://github.com/CBIIT/nci-sip-mcp/issues/461#issuecomment-6830205261).
 
-Production caDSR traffic is prohibited, SSIS traffic is paused, protected caDSR credentials have
-not been issued, and automated Acceptance(live) is disabled. These runner restrictions do not
-establish that every separately authorized individual diagnostic is impossible. No further
-request is authorized by this page. See the [dated access guidance](../QUICKSTART.md#upstream-access-and-ssis-transition).
+**Current access policy (not part of the 12 November checkpoint).** No caDSR service is
+prohibited; small spot tests are permitted and larger tests are announced to the upstream teams
+first, with a request count before any larger automated run. SSIS queries stay bounded, with no
+Cartesian products. Acceptance(live) stays disabled until a reviewed run plan exists. The
+**24 November recheck** ([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516))
+again recorded 401 for protected staging attempts (cause not inferred); it used direct HTTP,
+not an MCP acceptance run, and access is unverified. The earlier 23 November recheck
+([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)) recorded the same. This page records evidence and grants no permission; the policy is owned by the
+[access guidance](../QUICKSTART.md#upstream-access-and-ssis-transition).
 
 ## What the evidence covers
 
@@ -41,6 +46,8 @@ every wire variant of that operation ran separately.
 
 A configured URL identifies where a client would send a request. A dated response establishes
 only the particular observed request, not the availability of every operation on that host.
+The rows record the contacts of the 12 November checkpoint and earlier; they are
+not a report on the current release.
 SSIS is the service; production, stage and fixture/local name environments.
 
 | Service / environment | Exact base or operation | Evidence of contact |
@@ -51,8 +58,8 @@ SSIS is the service; production, stage and fixture/local name environments.
 | caDSR export / production-configured | `https://cadsr.nci.nih.gov/ftp/caDSR_Downloads`; `/CDE/XML/` and its export files | Historical export metadata; no new export download. |
 | caDSR published contracts / production-configured | `https://cadsrapi.cancer.gov/invoke/pub.swagger:getSwaggerJsonDoc` | Retained contract recordings; reading a contract does not prove operation access. |
 | caDSR DataElement / stage | `https://cadsrapi-stage.cancer.gov/rad/NCIAPI/1.0/api/DataElement/2200604` | Exactly one 11 November direct diagnostic succeeded. No registry release/export/refresh identity established. |
-| Shared SI REST / production-configured | `https://cadsrapi.cancer.gov`; `/si-api/v1/…` | Historical recorded façade responses; current traffic paused. |
-| Shared SI SPARQL / production-configured | `https://shared.semantics.cancer.gov/sparql` | Historical recorded queries/refusals; current traffic paused. No replacement adopted. |
+| Shared SI REST / production-configured | `https://cadsrapi.cancer.gov`; `/si-api/v1/…` | Historical recorded façade responses; no later request recorded in this checkpoint's evidence. |
+| Shared SI SPARQL / production-configured | `https://shared.semantics.cancer.gov/sparql` | Historical recorded queries/refusals; no later request recorded in this checkpoint's evidence. No replacement adopted. |
 | CDE AI Engine / stage, investigator-reported | `https://cadsrapi-stage.cancer.gov/rad/cdeai.api.producer.v2:cdeai_rad/getEmbeddingVariants` | The 2 November manifest identifies this request target and 401; body/authentication headers were not retained. Deployment/contract authority remains unresolved; AI matching unexecuted. |
 | Fixture / local | Owned loopback fixture origins with dynamic ports; the native report does not retain an exact receiver URL | The 1,005-case suite used fixture/stdio mode. Local driver controls used an independent owned loopback receiver. Neither contacted the services above. |
 
@@ -111,7 +118,7 @@ questions. No newly unblocked live tests are claimed from the registry-release w
 
 | Capability / operation | Service, interface and evidence | Limitation / next owner |
 |---|---|---|
-| Graph identities and concept-to-CDE joins (OP-S01) | Shared SI SPARQL; `find_data_elements_for_concept`, `get_release_alignment`, `ground_value`; `/sparql` | Recorded queries and crafted bounds cover graph identities, roles, release mismatch and missing version. Traffic paused; current graph identity not refreshed. |
+| Graph identities and concept-to-CDE joins (OP-S01) | Shared SI SPARQL; `find_data_elements_for_concept`, `get_release_alignment`, `ground_value`; `/sparql` | Recorded queries and crafted bounds cover graph identities, roles, release mismatch and missing version. No later request recorded in this checkpoint's evidence; current graph identity not refreshed. |
 | REST façade queries (OP-S02) | Shared SI REST `/si-api/v1/database/graph_names`, `/data_elements/with_concept_id`, `/data_elements/with_specific_object_class` | Historical cap/ignored-argument responses do not establish complete results. Required joins use registered SPARQL contracts, not an assumed equivalent REST replacement. |
 | Permissible-value joins (OP-S04) | Shared SI SPARQL; `get_concept_for_permissible_value`, `find_data_elements_for_concept`, `resolve_stored_value` and workflow hops | Fixture graph/API-primary distinctions and unresolved references pass. No current live join or replacement endpoint validation. |
 | Cohort and grounding orchestration | `expand_cohort`, `ground_value`, `harmonize_data_dictionary` | Fixture orchestration passes; this does not establish a complete live workflow or UAT journey. |
@@ -130,14 +137,14 @@ reported stage contract and access failure; it does not silently replace that as
 | Operation | Retained evidence | Missing / untested |
 |---|---|---|
 | OpenAPI identity | Embedded HTML reported version 2.0; selected downloaded JSON reported 1.0 | Original complete contracts were not retained. Producer.v2 spelling is not version authority; authoritative contract/schema and deployment identity remain unresolved; the reported request hostname is known. |
-| getEmbeddingVariants | Historical 401, cause unknown | No repeat, entitlement comparison or model-list request authorized. |
+| getEmbeddingVariants | Historical 401, cause unknown | No repeat, entitlement comparison or model-list request recorded in this checkpoint's evidence. |
 | performCDEAIMatch | No matching call | Model/revision, semantics, bounds, provenance and compatibility with CDE Match/vmMatch unestablished; no quality/latency evaluation. |
 
 ## Next checkpoints
 
 - The project coordinator owns [#381's access/route follow-up](https://github.com/CBIIT/nci-sip-mcp/issues/381).
-  The single 12 November authorization is consumed. There is no repeat or automatic
-  troubleshooting authorization. The 403 does not establish a VPN, credential or EVS defect.
+  As of 12 November, the single authorization was consumed and no repeat or automatic
+  troubleshooting authorization existed; the current policy is above. The 403 does not establish a VPN, credential or EVS defect.
 - The selected native-suite milestone depends on the offline [#479 lane](https://github.com/CBIIT/nci-sip-mcp/issues/479).
   Its later scheduled run needs its own disposition; today's in-process proposal produced
   no MCP content result and cannot count toward native-suite readiness.

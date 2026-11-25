@@ -25,6 +25,7 @@ import yaml
 from jsonschema import Draft202012Validator
 from mcp.client import Client
 
+from nci_sip_acceptance import traffic_identity as acceptance_identity
 from nci_sip_mcp.audit import Audit
 from nci_sip_mcp.cli import build_parser
 from nci_sip_mcp.config import DEFAULT_CALL_DEADLINE_SECONDS, DEFAULT_EXCLUSION_ROLE_CODES, Settings
@@ -35,6 +36,7 @@ from nci_sip_mcp.http_client import MAX_RETRY_DELAY_SECONDS
 from nci_sip_mcp.models import IndexManifest
 from nci_sip_mcp.registry import SPECS
 from nci_sip_mcp.server import create_mcp
+from nci_sip_mcp.traffic_identity import IdentitySnapshot, installation_label, user_agent
 from nci_sip_mcp.transport import GRACEFUL_SHUTDOWN_SECONDS, create_http_app
 from nci_sip_mcp.validation import (
     MAX_DICTIONARY_TEXT,
@@ -238,6 +240,66 @@ class FunctionalStatusDocumentationTest(unittest.TestCase):
         self.assertIn("(evidence/acceptance-fixture/2026-11-12.json)", page)
         self.assertIn("(evidence/acceptance-fixture/2026-11-12.yaml)", page)
         self.assertIn("(evidence/functional-status/2026-11-12.yaml)", page)
+
+    def test_current_access_policy_is_separate_from_the_dated_checkpoint(self):
+        page = read("docs/functional-status.md")
+        paragraphs = page.split("\n\n")
+        current = next((p for p in paragraphs if p.startswith("**Current access policy")), "")
+        text = " ".join(current.split())
+        for statement in (
+            "not part of the 12 November checkpoint",
+            "No caDSR service is prohibited",
+            "larger tests are announced",
+            "request count",
+            "no Cartesian products",
+            "Acceptance(live) stays disabled",
+            "24 November",
+            "7139797516",
+            "cause not inferred",
+            "QUICKSTART.md#upstream-access-and-ssis-transition",
+        ):
+            with self.subTest(statement=statement):
+                self.assertIn(statement, text)
+        self.assertIn("grants no permission", text)
+        for stale in ("have not been issued", "traffic is prohibited"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, text)
+        self.assertIn("**Evidence checkpoint: 12 November 2026.**", page)
+        self.assertIn("The cause and issuing layer of the 403 are unknown.", page)
+
+    def test_contact_tables_say_what_the_checkpoint_evidence_records_not_what_never_happened(self):
+        services = section(
+            read("docs/functional-status.md"), "Services, environments and destinations"
+        )
+        self.assertIn("not a report on the current release", services)
+        self.assertIn("no later request recorded in this checkpoint's evidence", services)
+        self.assertNotIn("current traffic paused", services)
+
+    def test_fixture_readme_separates_the_october_history_from_the_current_credential_status(self):
+        text = " ".join(read("acceptance/fixtures/README.md").split())
+        self.assertIn("History: the owner's decision of 3 October 2026 established", text)
+        self.assertIn(
+            "Current status: the project now has a staging credential, but protected access "
+            "remains unverified after the 24 November 401s "
+            "([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516); "
+            "direct HTTP, not an MCP acceptance run; earlier 23 November 401s: "
+            "[#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)), "
+            "so those fixtures remain crafted pending verification.",
+            text,
+        )
+        self.assertNotIn("Until NCI issues credentials", text)
+
+    def test_cadsr_access_entry_asks_for_restored_or_verified_access(self):
+        catalogue = yaml.safe_load((ROOT / "docs/upstream/catalogue.yaml").read_text())
+        entry = next(e for e in catalogue["entries"] if e["id"] == "cadsr-access")
+        self.assertIn("issued for caDSR staging only", entry["observation"])
+        self.assertIn("24 November 2026", entry["observation"])
+        self.assertIn(
+            "https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516",
+            entry["observation"],
+        )
+        self.assertNotIn("No credentials have been issued", entry["observation"])
+        self.assertTrue(entry["expected"].startswith("Restore or verify authorized access"))
 
     def test_dated_fixture_provenance_matches_original_report_bytes_and_results(self):
         directory = ROOT / "docs/evidence/acceptance-fixture"
@@ -813,6 +875,33 @@ class DocumentationTest(unittest.TestCase):
                 block = document[position:].split("\n\n", 1)[0]
                 self.assertIn(f"]({target}#upstream-access-and-ssis-transition)", block)
 
+    def test_quickstart_access_section_states_the_current_policy(self):
+        text = " ".join(section(QUICKSTART, "Upstream access and SSIS transition").split())
+        for statement in (
+            "**Operational status: 2026-11-24.**",
+            "No caDSR service is prohibited",
+            "not unrestricted permission",
+            "Small spot tests are permitted",
+            "larger tests are announced to the team first",
+            "request count before any larger automated run",
+            "SSIS queries stay bounded, with no Cartesian products",
+            "NIH VPN",
+            "run policy",
+            "Acceptance(live) stays disabled",
+            "last recorded 401 on 2026-11-24",
+            "cause is not inferred",
+        ):
+            with self.subTest(statement=statement):
+                self.assertIn(statement, text)
+        for stale in (
+            "requests are prohibited",
+            "traffic is paused",
+            "has not issued",
+            "no new stage or AI requests are authorized",
+        ):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, text)
+
     def test_quickstart_provenance_table_names_the_fields_of_the_specification(self):
         text = section(QUICKSTART, "Provenance and truncation")
 
@@ -998,10 +1087,16 @@ class DocumentationTest(unittest.TestCase):
             '"$ACCEPTANCE_VENV/bin/python" -m nci_sip_acceptance.traffic_identity show',
             guide_text,
         )
-        self.assertIn(
-            "The server does not yet read this identity or include it in HTTP requests",
-            guide_text,
+        # The guide's three label examples are the labels the code renders, with placeholders.
+        configured = IdentitySnapshot("0" * 32, "1.2.3")
+        unconfigured = IdentitySnapshot(None, "1.2.3")
+        acceptance = acceptance_identity.product_user_agent(
+            acceptance_identity.IdentitySnapshot(None, "1.2.3")
         )
+        for label in (installation_label(configured), user_agent(unconfigured), acceptance):
+            with self.subTest(label=label):
+                example = label.replace("1.2.3", "<v>").replace("0" * 32, "<32 lowercase hex>")
+                self.assertIn(f"`{example}`", guide_text)
         self.assertNotIn("pdm run --working-dir acceptance", guide_text)
         self.assertIn(
             "pdm run python -m nci_sip_acceptance.traffic_identity show",

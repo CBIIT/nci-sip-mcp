@@ -1116,7 +1116,11 @@ class LocalInstallerTest(unittest.TestCase):
         identity = "Sun Oct 18 19:59:57 2026 /owned/server"
         record.write_text(json.dumps({"pid": 4321, "identity": identity}) + "\n")
         dead = subprocess.CompletedProcess(["ps"], 1, stdout="")
-        with patch.object(installer.subprocess, "run", return_value=dead):
+        # No process answers to the pid: patched, so the result cannot depend on the host's pids.
+        with (
+            patch.object(installer.subprocess, "run", return_value=dead),
+            patch.object(installer.os, "kill", side_effect=ProcessLookupError),
+        ):
             self.assertIsNone(installer._owned_process(runtime))  # pyright: ignore[reportPrivateUsage]
         self.assertFalse(record.exists())
         for value in ({"pid": True, "identity": identity}, {"pid": 2, "identity": ""}):

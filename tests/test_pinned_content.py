@@ -6,6 +6,7 @@ from unittest.mock import patch
 from fakes import concept, release
 from nci_sip_mcp.evs import EVSClient, EVSReleaseMismatchError, EVSResponseError
 from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
 
@@ -25,7 +26,7 @@ class PinnedClientTest(unittest.TestCase):
         code = "8001/3?#% name"
         selected = release("29_0", terminology="mdr")
         payload = concept(code, terminology="mdr", version="29_0")
-        client = EVSClient("https://example.invalid")
+        client = EVSClient("https://example.invalid", user_agent=product_user_agent())
         with patch(
             "nci_sip_mcp.http_client._open",
             return_value=FakeResponse(json.dumps(payload).encode()),
@@ -39,7 +40,7 @@ class PinnedClientTest(unittest.TestCase):
         )
 
     def test_single_and_batch_payloads_fail_closed_on_missing_or_different_version(self):
-        client = EVSClient("https://example.invalid")
+        client = EVSClient("https://example.invalid", user_agent=product_user_agent())
         for version in (None, "different"):
             raw = concept("C1", version=version)
             for method, payload in (("get_concept", raw), ("get_concepts_by_codes", [raw])):
@@ -53,7 +54,7 @@ class PinnedClientTest(unittest.TestCase):
                 self.assertEqual(raised.exception.details["served"], [version or "unknown"])
 
     def test_matching_version_does_not_make_another_terminology_acceptable(self):
-        client = EVSClient("https://example.invalid")
+        client = EVSClient("https://example.invalid", user_agent=product_user_agent())
         for terminology in (None, "other"):
             for method in ("get_concept", "get_concepts_by_codes"):
                 raw = concept("C1", terminology=terminology)
@@ -66,7 +67,7 @@ class PinnedClientTest(unittest.TestCase):
                     getattr(client, method)("C1" if method == "get_concept" else ["C1"], release())
 
     def test_compact_descendants_are_pinned_without_inventing_payload_identity(self):
-        client = EVSClient("https://example.invalid")
+        client = EVSClient("https://example.invalid", user_agent=product_user_agent())
         compact = [{"code": "8001/3", "name": "Example", "level": 1, "leaf": True}]
         with patch.object(client.http, "get_json", return_value=compact) as request:
             actual = client.get_descendants("A/B", 2, release("old", terminology="other"))
@@ -80,7 +81,7 @@ class PinnedClientTest(unittest.TestCase):
         )
 
     def test_batch_preserves_codes_of_a_terminology_without_a_stated_form(self):
-        client = EVSClient("https://example.invalid")
+        client = EVSClient("https://example.invalid", user_agent=product_user_agent())
         raw = concept(" A/B ", terminology="other", version="old")
         with patch(
             "nci_sip_mcp.http_client._open",

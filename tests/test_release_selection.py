@@ -15,6 +15,7 @@ from nci_sip_mcp.evs import EVSClient, EVSReleaseNotFoundError
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.release_selection import SessionRelease, session_scope
 from nci_sip_mcp.server import create_mcp
+from nci_sip_mcp.traffic_identity import product_user_agent
 from nci_sip_mcp.transport import create_http_app
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
@@ -228,7 +229,9 @@ class ReleaseSelectionTest(ServerFixture):
         self.assertEqual(sum(c[0] == "get_terminologies" for c in self.evs.calls), 1)
 
     def test_implicit_discovery_spends_the_same_outbound_budget_as_the_catalogue(self):
-        self.context.evs = EVSClient("https://evs.invalid", max_attempts=1)
+        self.context.evs = EVSClient(
+            "https://evs.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
         with (
             patch("nci_sip_mcp.content.Budget", return_value=Budget(requests=1)),
             patch(
@@ -500,7 +503,9 @@ class ReleaseSelectionBoundaryTest(ServerFixture):
                 self.assertEqual(self.evs.calls, [])
 
     def test_discovery_spends_the_hierarchy_and_neighborhood_request_budget(self):
-        self.context.evs = EVSClient("https://evs.invalid", max_attempts=1)
+        self.context.evs = EVSClient(
+            "https://evs.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
         for operation, arguments in (
             ("get_concept_hierarchy", {"direction": "child"}),
             ("get_concept_hierarchy", {"direction": "pathsToRoot"}),

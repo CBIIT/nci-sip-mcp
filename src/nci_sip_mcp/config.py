@@ -9,6 +9,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Final
 from urllib.parse import urlsplit
 
 from ncit_index.embeddings import normalize_embedding_settings
@@ -61,6 +62,7 @@ def _require_between(name: str, value: float, low: int, high: int) -> None:
 
 
 DEFAULT_EVS_BASE_URL = "https://api-evsrest.nci.nih.gov"
+CADSR_STAGING_ORIGIN: Final[str] = "https://cadsrapi-stage.cancer.gov"
 DEFAULT_EMBEDDING_MODEL = "hashing"
 # The production base URL of each surface, as acceptance/fixtures/manifest.yaml records them. The
 # server adds the platform's own paths: /api/v1/... to EVS, FHIR operations to the FHIR base,

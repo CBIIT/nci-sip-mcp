@@ -433,6 +433,39 @@ class MutationOperatorsTest(unittest.TestCase):
             self.assertEqual(status, 2)
             self.assertIn("Stale", rows[-1]["message"])
 
+    def test_an_empty_diff_still_validates_the_allowlist_before_reporting_empty(self):
+        # The documented preflight (`mutation-gate --base B --head B`) relies on this order.
+        source = "def answer():\n    return True\n"
+
+        def git(root, *args):
+            subprocess.run(  # noqa: S603 - fixed git subcommands, owned temporary repository
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],  # noqa: S607
+                cwd=root,
+                capture_output=True,
+                check=True,
+            )
+
+        def preflight(root):
+            return command(root, "--base", "HEAD", "--head", "HEAD", "--allowlist", "allow.yaml")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project(root, source)
+            mutants, _ = candidates("src/example.py", source.encode())
+            entry = {**mutants[-1].key(), "reason": "Equivalent for the documented caller."}
+            (root / "allow.yaml").write_text(yaml.safe_dump([entry]))
+            git(root, "init", "-q")
+            git(root, "add", ".")
+            git(root, "commit", "-qm", "base")
+            self.assertEqual(preflight(root), (0, [{"outcome": "EMPTY", "mutants": 0}]))
+
+            (root / "src/example.py").write_text(source.replace("return", "unused = 2\n    return"))
+            git(root, "commit", "-qam", "stale")
+            status, rows = preflight(root)
+            self.assertEqual(status, 2)
+            self.assertEqual([row["outcome"] for row in rows], ["INFRA"])
+            self.assertRegex(rows[0]["message"], "Stale.*src/example.py")
+
     def test_allowlist_rejects_duplicate_ambiguous_malformed_entries(self):
         source = "def answer():\n    return True\n"
         with tempfile.TemporaryDirectory() as temporary:

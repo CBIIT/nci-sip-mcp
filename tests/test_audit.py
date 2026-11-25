@@ -29,6 +29,7 @@ from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.http_client import UpstreamUnavailableError
 from nci_sip_mcp.registry import SPECS, invoke
 from nci_sip_mcp.server import _audit_tools, _validate_inputs
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse, http_error
 from test_http_client import Reply, ServerTestCase
 from test_index import normalized
@@ -396,7 +397,7 @@ class AuditHttpTest(ServerTestCase):
         with tempfile.TemporaryDirectory() as directory:
             context = Context(
                 Settings(data_dir=Path(directory)),
-                evs=EVSClient(server.url, max_response_bytes=1000),
+                evs=EVSClient(server.url, max_response_bytes=1000, user_agent=product_user_agent()),
             )
             with captured() as stream:
                 result = invoke(
@@ -573,7 +574,9 @@ class RegistryAuditPrivacyTest(ServerFixture):
 
 class AuditDiagnosticPrivacyTest(unittest.TestCase):
     def test_request_and_retry_diagnostics_hash_each_original_value(self):
-        client = EVSClient("https://example.invalid", retry_backoff_seconds=0).http
+        client = EVSClient(
+            "https://example.invalid", retry_backoff_seconds=0, user_agent=product_user_agent()
+        ).http
         path = "/private-path-canary"
         reason = f"EVS request failed for {path}: HTTP 503 Service Unavailable"
         with (

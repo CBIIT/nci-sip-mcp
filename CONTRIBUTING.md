@@ -123,6 +123,24 @@ unit remains serial. Any baseline failure names its domain and fails the run. Th
 `baseline_domains` records freshly computed domain outcomes and seconds; imported PR-CI runs leave
 that list empty. Do not use the unselected local command to launch a second full catalogue.
 
+**Allowlist preflight.** `pdm run mutation-gate --base <B> --head <B>` (the same commit twice)
+validates `scripts/validation/mutation-allowlist.yaml` against the working tree with the gate's own
+validator and stops there: the diff is empty, so it runs no baseline and no mutant (once measured at
+about 14 s on one machine, not a promised cost). Exit 0 with `{"outcome": "EMPTY", ...}` means every
+entry still matches exactly one current candidate; exit 2 with an `INFRA` record names the first
+stale, duplicate or ambiguous entry. It is a recommended early diagnostic, for example before the
+pre-PR sample or when a change touches an allowlisted function, the allowlist itself, or the gate's
+candidate generation; it is not a required gate. Two different EMPTY results exist and are recorded
+separately. This preflight's EMPTY comes from an artificial empty diff and only says the allowlist
+and the source agree; it is never the source-bound selection of a candidate. The selection record
+for the pre-PR review comes from the real base and head of that candidate (for a milestone, against
+`main`), with those SHAs frozen. An issue compared against its milestone branch does not replace it.
+The preflight does not show that any mutant is equivalent. For a failing entry: re-key it only when
+the same intended mutation is still equivalent after the source change; remove it, with review, when
+the site is gone or the exemption is obsolete; when behaviour changed, the old reason cannot move to a
+new key and needs a fresh equivalence review. A test that drove the real working-tree allowlist could
+also catch this, but the preflight reuses the existing command and needs no new code.
+
 Ordinary `pdm run test` stores combined coverage in `tmp/coverage/unit/.coverage`;
 `pdm run acceptance-selftest` uses `tmp/coverage/harness/.coverage`. PDM supplies the required
 absolute root so children and xdist workers share their command's scratch destination even
@@ -193,18 +211,20 @@ into a client inside its supervised run:
 from nci_sip_acceptance.request_supervision import SupervisedRun
 from nci_sip_acceptance.request_transport import ControlledHttpPolicy
 from nci_sip_mcp.http_client import HttpClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 
 with SupervisedRun.create(authorization, owned_directory) as owner:
     client = HttpClient(
         base_url, label="diagnostic", timeout_seconds=10, max_attempts=3,
         retry_backoff_seconds=0.25, max_response_bytes=65536,
         size_bound="diagnostic_response", request_policy=ControlledHttpPolicy(owner.run),
+        user_agent=product_user_agent(),
     )
     result = client.get_json(path)
 ```
 
 Every method, absolute URL/raw query, header (including correlation) and body must match a
-grant exactly. The immutable admitted grant supplies every attempt; later Request mutation
+grant exactly; `user_agent` is required, so the grant must declare the same `user-agent` header. The immutable admitted grant supplies every attempt; later Request mutation
 cannot change sent bytes or attempt metadata. Attached callers use the same provider after
 explicit participant authorization/child registration, following the lifecycle below.
 Direct connections ignore ambient proxies, never follow redirects and verify TLS certificates
@@ -491,6 +511,8 @@ scheduler directory; missing or incomplete raw evidence for a nonempty shard blo
 clearance, regardless of the workflow's displayed status. An empty pre-PR sample does not excuse a
 later `NO_TESTS` outcome for a reachable candidate. The raw results do not contain every runner
 phase.
+The producer-evidence exception for a complete, independently verified empty catalogue is stated
+in AGENTS.md; nothing here relaxes a nonempty campaign.
 
 ## Coverage badges
 
@@ -696,6 +718,9 @@ Merge clearance is a reviewer PR comment naming the head commit; a subsequent pu
 clearance, after all triggered workflows pass. See [AGENTS.md](AGENTS.md#how-work-is-done-issues-into-a-milestone-branch-one-reviewed-milestone-into-main)
 for the milestone process and [operations](docs/operations.md) for available signals, ATO
 evidence inputs and open hosting responsibilities.
+
+Issue sizing, milestone bounds, issue clarity and the wait summary are set in
+[AGENTS.md](AGENTS.md#how-work-is-done-issues-into-a-milestone-branch-one-reviewed-milestone-into-main).
 
 Every change reaches `main` through a pull request. Milestone landings use merge commits;
 squash remains an allowed alternative. Use the pull request title as the landing commit
