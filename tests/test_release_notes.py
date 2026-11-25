@@ -535,6 +535,18 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({call["repo"] for call in project.gh_calls()}, {"example/scratch"})
 
+    def test_the_original_tag_date_is_kept_in_the_recovered_body(self):
+        project = Scratch(self)
+        project.history()
+        project.env["GIT_COMMITTER_DATE"] = "2020-03-04T12:00:00+00:00"
+        project.git("tag", "-a", "v0.2.0", "-m", "v0.2.0")
+        del project.env["GIT_COMMITTER_DATE"]
+
+        result = self.recover(project)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("## v0.2.0 (2020-03-04)", project.gh_calls()[-1]["notes"])
+
     def test_the_range_is_frozen_at_the_target_with_an_unrelated_newer_tag(self):
         project = Scratch(self)
         original = self.release_and_notes(project)
