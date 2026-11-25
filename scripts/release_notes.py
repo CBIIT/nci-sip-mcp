@@ -9,6 +9,7 @@ Functions work in the current directory, which is the repository checkout.
 
 import argparse
 import contextlib
+import importlib
 import json
 import os
 import re
@@ -18,13 +19,17 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import unittest.mock
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import semantic_release
 from git import Commit, Repo
 from scripts import release_ci
 from semantic_release.changelog.release_history import ReleaseHistory
+from semantic_release.cli.commands.main import main as tool_main
 from semantic_release.commit_parser import CommitParser, ParseError, ParserOptions
 from semantic_release.commit_parser.token import ParseResult
 from semantic_release.version.algorithm import tags_and_versions
@@ -42,6 +47,8 @@ _LITERAL_SAFE = frozenset(string.ascii_letters + string.digits + " .,:;!?()-_/'"
 _HEADING = re.compile(r"^#{1,6}(?:\s|$)")
 _HEADINGS = re.compile(r"# \S[^\n]*" + "".join(f"\n## {name}" for name in SECTIONS))
 _REQUIRED_HEADINGS = ", ".join(["'# <title>'", *(f"'## {name}'" for name in SECTIONS)])
+_HTTP_STATUS = re.compile(r"HTTP/\S+ (\d{3})")
+_REPOSITORY = re.compile(r"[\w.-]+/[\w.-]+")
 _OUTPUT_NOTES = re.compile(r"release_notes<<EOF\n(.*)EOF\n", re.DOTALL)
 _PREVIEW_IDENTITY = ("-c", "user.name=release-notes-preview", "-c", "user.email=preview@invalid")
 
@@ -242,14 +249,31 @@ def prepare(repository_url: str | None = None) -> Plan:
     return Plan(candidate, plan.tag, True)
 
 
-def tool_notes() -> str:
-    """The complete body the tool renders for the next release, without any side effect."""
+def run_tool_as_of(moment: str, arguments: list[str]) -> None:
+    """Run the release tool with its clock at `moment`; the tool dates a new release by `now`."""
+    clock = SimpleNamespace(now=lambda zone=None: datetime.fromisoformat(moment).astimezone(zone))
+    version_command = importlib.import_module("semantic_release.cli.commands.version")
+    with unittest.mock.patch.object(version_command, "datetime", clock):
+        tool_main(arguments, prog_name="semantic-release")
+
+
+def tool_notes(tagged_at: str | None = None) -> str:
+    """The complete body the tool renders for the next release, without any side effect.
+
+    `tagged_at` (an ISO date-time) dates the release, as the existing tag of a recovery does.
+    """
+    launcher = (
+        [sys.executable, "-m", "scripts.release_notes", "tool-as-of", tagged_at, "--"]
+        if tagged_at
+        else [sys.executable, "-m", "semantic_release"]
+    )
+    root = str(Path(__file__).resolve().parents[1])
     with tempfile.TemporaryDirectory() as directory:
         output = Path(directory) / "output"
         result = run(
-            sys.executable, "-m", "semantic_release", "--noop", "-c", CONFIG, "version",
+            *launcher, "--noop", "-c", CONFIG, "version",
             "--no-commit", "--no-tag", "--no-push", "--no-changelog", "--skip-build",
-            env={**os.environ, "GITHUB_OUTPUT": str(output)},
+            env={**os.environ, "GITHUB_OUTPUT": str(output), "PYTHONPATH": root},
         )  # fmt: skip
         text = output.read_text(encoding="utf-8") if output.exists() else ""
     match = _OUTPUT_NOTES.search(text)
@@ -287,29 +311,40 @@ def preview(base: str, head: str, repository_url: str) -> str:
         return report + (f"\n{tool_notes()}" if plan.due else "")
 
 
-def release_absent(tag: str) -> bool:
-    result = run("gh", "release", "view", tag, "--json", "url")
-    if result.returncode == 0:
-        return False
-    if "release not found" in result.stderr:
-        return True
-    raise ReleaseNotesError(f"could not tell whether {tag} has a release; nothing was created")
+def remote_tag_commit(repository: str, tag: str) -> str:
+    result = run("gh", "api", f"repos/{repository}/commits/refs/tags/{tag}")
+    sha = json.loads(result.stdout).get("sha") if result.returncode == 0 else None
+    if not isinstance(sha, str):
+        raise ReleaseNotesError(f"could not read the remote tag {tag} in {repository}")
+    return sha
+
+
+def release_exists(repository: str, tag: str) -> bool:
+    """The structured HTTP status of the release lookup: 200 exists, 404 absent, else refuse."""
+    result = run("gh", "api", "-i", f"repos/{repository}/releases/tags/{tag}")
+    status = _HTTP_STATUS.match(result.stdout)
+    if status and status[1] in {"200", "404"}:
+        return status[1] == "200"
+    raise ReleaseNotesError(
+        f"could not tell whether {tag} has a release in {repository}; nothing was created"
+    )
 
 
 def frozen_notes(tag: str, commit: str, repository: str) -> str:
-    """Re-render the original body from the history as it was at `tag`."""
+    """Re-render the original body from the history and the date of `tag`."""
     source = Path.cwd()
+    tagged_at = git("for-each-ref", "--format=%(creatordate:iso-strict)", f"refs/tags/{tag}")
     merged = git("tag", "--merged", commit).split()
     with tempfile.TemporaryDirectory() as directory, contextlib.chdir(directory):
         isolated_checkout(source, [commit], [name for name in merged if name != tag])
         plan = prepare(f"https://github.com/{repository}.git")
         if not plan.due or plan.tag != tag:
             raise ReleaseNotesError(f"the history at {tag} no longer yields that release")
-        return tool_notes()
+        return tool_notes(tagged_at)
 
 
-def recover(tag: str, repository: str) -> None:
-    """Create the GitHub release of an existing tag whose release is missing."""
+def verified_commit(tag: str, repository: str) -> str:
+    """The commit of a local tag that is checked out, green in CI and the same on the remote."""
     found = run("git", "rev-parse", "--verify", "-q", f"refs/tags/{tag}^{{commit}}")
     if found.returncode:
         raise ReleaseNotesError(f"no tag {tag} here; fetch it first")
@@ -322,13 +357,29 @@ def recover(tag: str, repository: str) -> None:
         release_ci.verify_ci(repository, commit)
     except ValueError as error:
         raise ReleaseNotesError(str(error)) from error
-    if not release_absent(tag):
+    remote = remote_tag_commit(repository, tag)
+    if remote != commit:
+        raise ReleaseNotesError(
+            f"the remote tag {tag} in {repository} is {remote}, not the verified {commit}"
+        )
+    return commit
+
+
+def recover(tag: str, repository: str) -> None:
+    """Create the GitHub release of an existing tag whose release is missing."""
+    if not _REPOSITORY.fullmatch(repository):
+        raise ReleaseNotesError(f"{repository!r} is not an owner/name repository")
+    commit = verified_commit(tag, repository)
+    if release_exists(repository, tag):
         raise ReleaseNotesError(f"{tag} already has a release; notes are never overwritten")
     notes = frozen_notes(tag, commit, repository)
     with tempfile.TemporaryDirectory() as directory:
         file = Path(directory) / "notes.md"
         file.write_text(notes, encoding="utf-8")
-        created = run("gh", "release", "create", tag, "--verify-tag", "--notes-file", str(file))
+        created = run(
+            "gh", "release", "create", tag, "--repo", repository, "--verify-tag",
+            "--notes-file", str(file),
+        )  # fmt: skip
     if created.returncode:
         raise ReleaseNotesError(f"gh release create failed: {created.stderr.strip()}")
 
@@ -340,6 +391,9 @@ def main(argv: list[str]) -> int:
     show = commands.add_parser("preview")
     for name in ("--base", "--head", "--repository-url"):
         show.add_argument(name, required=True)
+    clock = commands.add_parser("tool-as-of")  # internal: the tool with a historical clock
+    clock.add_argument("moment")
+    clock.add_argument("arguments", nargs=argparse.REMAINDER)
     fix = commands.add_parser("recover")
     fix.add_argument("tag")
     fix.add_argument("--repository", required=True)
@@ -347,6 +401,8 @@ def main(argv: list[str]) -> int:
     try:
         if arguments.command == "prepare":
             prepare()
+        elif arguments.command == "tool-as-of":
+            run_tool_as_of(arguments.moment, arguments.arguments[1:])
         elif arguments.command == "preview":
             sys.stdout.write(preview(arguments.base, arguments.head, arguments.repository_url))
         else:
