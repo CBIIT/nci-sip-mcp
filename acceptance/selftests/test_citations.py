@@ -6,6 +6,7 @@ import runpy
 from copy import deepcopy
 from dataclasses import replace
 from http import HTTPStatus
+from importlib.metadata import version
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -128,8 +129,11 @@ def test_citation_comparison_excludes_names_and_dates():
     tools = Tools(answer() | {"longName": "unrelated name"})
     with FixtureServer(load_fixtures(FIXTURES)) as upstream:
         check(tools, upstream.base_url("cadsr"))
-        assert len(upstream.log()) == 1
+        (logged,) = upstream.log()
     assert len(tools.calls) == 1
+    sent = {name.lower(): value for name, value in logged["headers"].items()}
+    expected = f"nci-sip-acceptance/{version('nci-sip-acceptance')} (+https://github.com/CBIIT/nci-sip-mcp)"
+    assert (sent["user-agent"], sent["accept"]) == (expected, "application/json")
 
 
 def test_reference_http_failure_is_one_attempt_and_never_calls_mcp():

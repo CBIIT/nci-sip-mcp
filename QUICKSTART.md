@@ -14,31 +14,53 @@ configuration proposals, including startup-settings snapshots
 (`nci-sip-mcp serve --configuration-snapshot PATH`,
 [configuration evidence](docs/local-validation.md#configuration-evidence-and-proposals)). The
 [request identification guide](docs/request-identification.md) covers local identity provisioning;
-the utilities do not label requests yet.
+the server labels its platform requests with it; acceptance traffic sends the product label
+without an installation identity.
 
 ## Upstream access and SSIS transition
 
-**Operational status: 2026-11-05.** The [current access decision](https://github.com/CBIIT/nci-sip-mcp/issues/421#issuecomment-6671335647)
-and [stage investigation](https://github.com/CBIIT/nci-sip-mcp/issues/383) distinguish three things:
+**Operational status: 2026-11-24.** The access policy of the project owner
+([#381](https://github.com/CBIIT/nci-sip-mcp/issues/381#issuecomment-7090335026), superseding
+the earlier [access decision](https://github.com/CBIIT/nci-sip-mcp/issues/421#issuecomment-6671335647))
+and the [stage investigation](https://github.com/CBIIT/nci-sip-mcp/issues/383) distinguish
+three things:
 
-- **Technical access:** data-element, vmMatch and Form API operations can be anonymous;
-  protected CDE Match and lists-of-values APIs need credentials that NCI has not issued.
-  Their contract-crafted fixtures establish caller behavior, not live acceptance or access.
-- **Operational authorization:** production caDSR requests are prohibited even anonymously.
-  Shared SI/SSIS traffic is paused; no new stage or AI requests are authorized here, and
-  Acceptance(live) remains disabled. A stage hostname and earlier exploratory contact are
-  recorded, but present access and stage registry identity are unverified. A production export
-  date cannot supply that identity. Existing automatic hosted setup checks retain their
-  [bounded EVS traffic](https://github.com/CBIIT/nci-sip-mcp/issues/421#issuecomment-6671269749);
-  that is separate from offline fixture verification.
-- **Capability:** a pause or missing credential does not prove an API lacks a capability.
-  The [upstream requirements catalogue](docs/upstream/README.md) records the actual contract gaps
-  and needed evidence. Green fixtures are not permission to contact production.
+- **Operational permission:** No caDSR service is prohibited: the production REST API, the
+  export folder and the staging host may be used. Small spot tests are permitted, and larger
+  tests are announced to the team first, so that the upstream teams can watch them. A larger
+  automated run states its request count before any larger automated run starts (a reviewed
+  plan, then the announcement). EVS production is permitted on the same terms. SSIS queries stay
+  bounded, with no Cartesian products and no unbounded joins. This is not unrestricted
+  permission for every service, model, workload or tool: each request stays identifiable by its
+  `X-Correlation-ID`. Staging needs the NIH VPN.
+- **The harness is stricter than that permission.** The acceptance harness's run policy still
+  blocks live caDSR and SSIS traffic, and Acceptance(live) stays disabled until a reviewed run
+  plan exists. Offline fixtures establish caller behavior, not live acceptance or access, and
+  they are the default for automated runs.
+- **Technical access:** data-element, vmMatch and Form API operations can be anonymous. The
+  protected CDE Match and lists-of-values APIs need a credential; the credential issued to this
+  project is for staging only. A stage hostname and earlier exploratory contact are recorded,
+  but stage registry identity is unverified, and a production export date cannot supply it.
+- **Capability:** a missing credential or a hold does not prove an API lacks a capability. The
+  [upstream requirements catalogue](docs/upstream/README.md) records the actual contract gaps
+  and needed evidence.
 
-While holds remain, use [offline fixture validation](CONTRIBUTING.md#complete-fixture-ratchet).
-Do not run live installer connectivity checks against their default production caDSR target.
-The [local guide](docs/local-guide.md#server) describes the lifecycle, not authorization to
-make those requests.
+**Protected caDSR operations (access, not capability).** `match_data_elements`,
+`harmonize_data_dictionary` (its CDE matching calls) and `list_contexts` use the CDE Match and
+lists-of-values APIs, which need a credential accepted by the configured endpoint. The credential
+issued to this project is for caDSR staging: pair it only with
+`NCI_SIP_CADSR_BASE_URL=https://cadsrapi-stage.cancer.gov/rad`, the NIH VPN and
+`NCI_SIP_CADSR_CREDENTIAL`, never with production. A production request without a production
+credential is refused with 401, which says nothing about whether the feature exists there. The
+tools stay listed, and the server never falls back from staging to production. **Protected
+access with the staging credential: last recorded 401 on 2026-11-24
+([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516), direct HTTP, not an MCP acceptance run); the cause is not inferred, and
+restored access is not yet verified.** This status changes only from verification results.
+
+Use [offline fixture validation](CONTRIBUTING.md#complete-fixture-ratchet) for automated runs.
+The [local guide](docs/local-guide.md#server) describes the installer lifecycle; its default
+connectivity checks are small requests to the production caDSR target and need no announcement
+at that size.
 
 ### External configuration and its limits
 
@@ -49,13 +71,13 @@ existing interfaces support them; never commit secrets. The [Settings table](#se
 It also owns `NCI_SIP_CADSR_CREDENTIAL` and `NCI_SIP_EVS_LICENSE_KEY`; service credentials are
 origin-bound, not caller authorization. Live mode fills unset endpoints with production defaults.
 Fixture mode requires all five explicit endpoints, preventing silent fallback; it does not
-reject an explicitly supplied prohibited origin.
+reject an explicitly supplied origin.
 
 `NCI_SIP_PROFILE` limits the served surface. An opt-in `authority_resolver` supplies
 [caller permissions](docs/caller-permissions.md); governed HTTP uses `NCI_SIP_HTTP_AUTH_MODE`
 and `NCI_SIP_HTTP_AUTH_FACTORY` for an approved [authentication/policy integration](docs/governed-http.md).
 These inbound/tool controls are not a universal outbound-environment policy. Current settings
-and credentials neither enforce nor lift the operational holds. Named environment isolation
+and credentials neither enforce nor lift the access policy. Named environment isolation
 and pre-send request safeguards are scheduled in [#447](https://github.com/CBIIT/nci-sip-mcp/issues/447)
 and [#448](https://github.com/CBIIT/nci-sip-mcp/issues/448); they are not implemented here.
 [Deployment egress controls](docs/container.md#gateway-controls-and-outbound-access) remain
@@ -205,7 +227,7 @@ A leading `~` is expanded, and an empty value is rejected. The other settings:
 | `NCI_SIP_UPSTREAM_MODE` | `live` | `live` or `fixture`; selects the five base URLs below as a set (next paragraph) |
 | `NCI_SIP_EVS_BASE_URL` | `https://api-evsrest.nci.nih.gov` | EVS REST endpoint (`http` or `https`) |
 | `NCI_SIP_EVS_FHIR_BASE_URL` | `https://api-evsrest.nci.nih.gov/fhir/r4` | EVS FHIR endpoint; an operator-set URL must be on the platform that issued the EVS licence key, which is sent to both REST and FHIR |
-| `NCI_SIP_CADSR_BASE_URL` | `https://cadsrapi.cancer.gov/rad` | caDSR REST endpoint |
+| `NCI_SIP_CADSR_BASE_URL` | `https://cadsrapi.cancer.gov/rad` | caDSR REST endpoint. Staging is `https://cadsrapi-stage.cancer.gov/rad` and needs the NIH VPN; when its host name does not resolve, the error suggests checking the VPN |
 | `NCI_SIP_CADSR_FTP_URL` | `https://cadsr.nci.nih.gov/ftp/caDSR_Downloads` | caDSR export (FTP) endpoint |
 | `NCI_SIP_SSIS_SPARQL_URL` | `https://shared.semantics.cancer.gov` | Shared Semantic Infrastructure SPARQL endpoint |
 | `NCI_SIP_RELEASE_CHANNEL` | `monthly` | The default channel for discovery and CLI diagnostics: `monthly` or `weekly`. The release is the one EVS row that is latest and tagged with the channel; with none or several the call fails with a release-not-available error. MCP content tools use the release the caller supplies |
@@ -231,10 +253,15 @@ A leading `~` is expanded, and an empty value is rejected. The other settings:
 | `NCI_SIP_HTTP_ALLOWED_ORIGINS` | `http://127.0.0.1:*,http://localhost:*,http://[::1]:*` | Permitted Origin authorities, exact or wildcard port; requests without Origin are allowed |
 | `NCI_SIP_HTTP_REQUIRE_INDEX` | `0` | Boolean switch, read as `0` or `1` only (anything else is a configuration error). Set to 1 when deployment supplies an index: readiness requires an active build compatible with the configured embedding model. With 0 an absent index permits live tools; an existing active build is still verified |
 
-`NCI_SIP_INSTALLATION_ID` is read only by the local identity utility, not by server settings or
-request emission. For a persistent installation, generate one value, replace the placeholder
-below with that saved value, and retain it in durable deployment configuration across restarts and
-upgrades. This `export` lasts only in the current shell; do not generate a fresh value on every
+`NCI_SIP_INSTALLATION_ID` is not a server setting of the table above: the server captures it
+once at start-up and sends it in the `User-Agent` of every platform request
+(`nci-sip-mcp/<version> (installation=<id>; +https://github.com/CBIIT/nci-sip-mcp)`). Unset, the
+server sends the product label without `installation=`; a value that is not exactly 32
+lowercase hexadecimal characters, or installed metadata that cannot form a safe label, stops
+start-up with an `invalid_request` error naming the variable or the installed version, before
+any upstream is contacted. For a persistent installation, generate one value,
+replace the placeholder below with that saved value, and retain it in durable deployment
+configuration across restarts and upgrades. This `export` lasts only in the current shell; do not generate a fresh value on every
 startup. The [request identification guide](docs/request-identification.md) covers artifact and
 ephemeral-job configuration.
 
@@ -261,7 +288,7 @@ release does not inherit that export date.
 The five base URLs are one set. In `live` mode a base URL that is not given takes its production
 default, and one that is given replaces that default. In `fixture` mode every one of the five must be given;
 a missing one stops startup, naming it, rather than silently falling back to production. Explicit
-origins are not checked against the [operational holds](#upstream-access-and-ssis-transition). The
+origins are not checked against the [access policy](#upstream-access-and-ssis-transition). The
 server adds the platform's own paths to each base URL. A setting set to an empty value is
 rejected: unset it instead.
 
@@ -702,12 +729,12 @@ The tools, generated from `spec/tools.yaml` by `pdm run quickstart-tools`:
 | `resolve_registry_release` | caDSR | The registry's content state: published false and the export's date while caDSR publishes no registry release, never an invented identifier; the release itself where one is. |
 | `get_data_element` | caDSR | One data element, at its latest version or the version given, with the sections include selects; without include, the record's own fields. questionText finds it by its preferred question text, an invalid request naming the candidates where several have it and not_found where none has; longName is capability_unavailable until the platform serves that lookup (OP-C02). Item versions compare by exact numeric value (4 equals 4.0); request spelling and the upstream version string in content and provenance are preserved. Latest means highest version regardless of workflow or registration status, including retired and draft. valueDomain preserves raw type and referenceTerminology; URI values stay unchanged. Request valueDomain alongside permissibleValues: an empty value list alone does not distinguish non-enumerated from empty enumerated domains. |
 | `search_data_elements` | caDSR | Search of data elements, filtered by context, status and value-domain type, a page at a time up to the platform's cap of 1,000 results a query, which truncation reports (upstream_cap). semantic and hybrid are capability_unavailable until the platform serves them (OP-C04). Nonempty filters are unsupported today (OP-C03); registrationStatus is a free string, including Superceded and Superseded unchanged, not a normalized closed set. |
-| `match_data_elements` | caDSR | registrationStatus is a free-string match header (Standard, Superceded or Superseded), passed unchanged. Data elements matched to described entities are scored and rule-attributed, at most matchLimit for each entity; the contract's default is 10, and the maximum of 100 is this specification's, the contract stating none. The classificationScheme filter takes both publicId and version. modelVariant and similarityThreshold, which the platform does not take, are an invalid request when given. At most 10 entities a call: the contract states no maximum, and one entity took 28.9 s (10 September 2026) against a match timeout of 45 s. |
+| `match_data_elements` | caDSR | registrationStatus is a free-string match header (Standard, Superceded or Superseded), passed unchanged. Data elements matched to described entities are scored and rule-attributed, at most matchLimit for each entity; the contract's default is 10, and the maximum of 100 is this specification's, the contract stating none. The classificationScheme filter takes both publicId and version. modelVariant and similarityThreshold, which the platform does not take, are an invalid request when given. At most 10 entities a call: the contract states no maximum, and one entity took 28.9 s (10 September 2026) against a match timeout of 45 s. Requires a caDSR credential accepted by the configured endpoint; the credential issued to this project is for caDSR staging and must be paired with the staging address and the NIH VPN. |
 | `match_value_meanings` | caDSR | Value meanings and concepts matched to values, each rule-attributed with its crosswalk and with the matched item's definition where vmMatch gives one; strictness is vmMatch's matchType, terminologyScope its evsTerminologyCodes. At most 10 values a call: the contract states no maximum, and one value took 15.5 s (10 September 2026) against a match timeout of 45 s. |
 | `get_form` | caDSR | A form or case report form by public id, with its definition, type, dates, instructions and classification schemes as the platform gives them, and its modules and questions; a keyword is an invalid request saying the platform needs an identifier (Form/query takes a public or protocol id only). Item versions compare by exact numeric value (1 equals 1.0); request spelling and the upstream version string in content and provenance are preserved. |
 | `get_permissible_value` | caDSR | A permissible value by the identifier caDSR REST publishes for it; capability_unavailable until the platform retrieves a value by it (OP-C10). |
 | `get_code_map` | caDSR | Code maps between source code systems and registered value sets, one per data element of the CRDC crosswalk with the contexts and commons that use it; targetContext selects those a context or commons uses, dataElementId one data element. |
-| `list_contexts` | caDSR | The registry's contexts, by name. |
+| `list_contexts` | caDSR | The registry's contexts, by name. Requires a caDSR credential accepted by the configured endpoint; the credential issued to this project is for caDSR staging and must be paired with the staging address and the NIH VPN. |
 | `list_classification_schemes` | caDSR | Classification schemes as objects with their nested items; capability_unavailable until the platform lists them (OP-C13). A data element's schemes come with get_data_element. |
 | `find_data_elements_for_concept` | Cross-domain | The data elements that use a concept, as an object class, property or permissible value concept, optionally across its descendants; with includePermissibleValues, also the permissible values whose value meaning stands for it (the reverse lookup, OP-S04). Graph associations identify public IDs only, never CDE versions or value-to-version assignments, because Shared SI merges versions. caDSR API item versions remain unchanged. Each use names all graph roles and actual matching concept codes, with optional integer displayOrder; the graph gives no primary flag, so use get_data_element for caDSR's primary indicator. Representation-term use is not covered by this route, so absence does not establish non-use. Only descendant expansion compares the effective release (X-22) with the Shared SI NCIt graph's: release_mismatch on a difference, release_not_available for an absent version. Exact-code queries preserve both actual graph identities and dates, including an optional version only when supplied, without requiring hierarchy alignment. |
 | `get_concept_for_permissible_value` | Cross-domain | The concept a permissible value stands for, named by its data element and value, as the concept record of the release pinned, its provenance naming both content states (release and registry); the caller may name a release or use implicit NCIt resolution (X-22). The data element is read from the caDSR API at version, or the API's latest when omitted; version uses the existing numeric item-version form and comparison, preserving upstream spelling. Only exact NCI_CONCEPT_CODE with a standalone NCIt code resolves through EVS. Otherwise returns unresolved_pv_concept with the exact caDSR code/source and caDSR-only provenance; compound_code, missing_source and non_ncit_source apply in that precedence. Unresolved results make no NCIt concept request but may perform release discovery; release selection and both child permissions remain unchanged. Only primaryIndicator Yes identifies the value meaning's primary concept; missing, invalid or conflicting evidence is upstream_unavailable, identical primary assertions of the same code and source presence/value may collapse. Neither array order, display order nor graph main/minor decides. Resolved provenance includes the caDSR read under upstream.cadsr and the pinned EVS origin, with registry state but no Shared SI graphs or graph reads. Secured callers need get_data_element and get_concept child permissions before any reads; expiry after caDSR blocks EVS. The value is compared locally with the API's permissible values by exact, case-sensitive equality (no trimming, no case-folding), never sent upstream (A7.7); a value it does not have is not_found. By permissibleValueId, capability_unavailable until the platform retrieves a value by it (OP-C10). |
@@ -715,7 +742,7 @@ The tools, generated from `spec/tools.yaml` by `pdm run quickstart-tools`:
 | `get_release_alignment` | Cross-domain | The release of every dataset a cross-domain answer rests on (NCIt, the Shared SI NCIt and caDSR graphs, the caDSR export), each date ISO-8601; intervalDays, the largest interval in days between any two of their dates; and a warning naming maxIntervalDays when intervalDays exceeds it. |
 | `ground_value` | Workflow | For a concept: the data elements that use it, the permissible values that stand for it, and, with commons, the stored values a commons uses for it, each asked by the concept, under one provenance envelope naming both content states (release and registry). Its Shared SI hops are exact-code queries: graph hierarchy lag or an absent optional version does not refuse them; both actual graph identities remain required. EVS content stays pinned. Data element uses name all graph roles and actual matching concept codes, with optional integer displayOrder; the graph gives no primary flag, so use get_data_element for caDSR's primary indicator. Representation-term use is not covered by this route, so absence does not establish non-use. Without commons there is no storedValues. A text is resolved as search_concepts resolves it with its defaults (lexical, limit 10), to its first result, the concept chosen named in the result. Without registryRelease the registry is unpinned, as for every caDSR tool (X-21). A hop holds at most find_data_elements_for_concept's maximum (1,000), its bound `results`; each hop's truncation is carried (perHop), and since each hop is asked by the concept, one hop's bound limits no other. |
 | `expand_cohort` | Workflow | The codes a cohort query should use: the concept itself and its descendants to maxDepth. A code an exclusion role of the concept asked about asserts is withheld from codes and listed in excluded with its assertion, unless includeNegative keeps it in codes (still listed), one excluded record per exclusion assertion; a descendant's own exclusion roles are its own, not the cohort's. maxNodes counts the codes, the concept included. The result equals composing get_concept_hierarchy (child, depth maxDepth) and get_concept_neighborhood (depth 1). |
-| `harmonize_data_dictionary` | Workflow | A data dictionary's columns matched to data elements, one match call per column (its name as the entity, its description as entityUserTip), and each column's sample values aligned to value meanings (vmMatch); unmatched names the columns without a match; every match names one registry state. |
+| `harmonize_data_dictionary` | Workflow | A data dictionary's columns matched to data elements, one match call per column (its name as the entity, its description as entityUserTip), and each column's sample values aligned to value meanings (vmMatch); unmatched names the columns without a match; every match names one registry state. Its CDE matching calls require a caDSR credential accepted by the configured endpoint; the credential issued to this project is for caDSR staging and must be paired with the staging address and the NIH VPN. |
 <!-- tool-summaries:end -->
 
 [docs/specification.md](docs/specification.md#2-tools) gives each tool's inputs, bounds, defaults and
@@ -949,7 +976,7 @@ EVS wraps in a success status but that is an error envelope, an error
 | `not_found` | The requested release has no concept with that code, or `index-sample` named codes the release does not contain (nothing was indexed); Form-by-ID alone also reads HTTP 200 with `form: null` and `apiResponse.type` E as `not_found`, after the id is validated ([cadsr-forms](docs/upstream/cadsr.md#cadsr-forms)) | `identifiers` |
 | `release_not_available` | EVS did not name exactly one latest NCIt release for the channel (`requested` names the requested channel; optional `found` lists versions when several rows were returned), current NCIt tags are malformed (`requested: ncit`), EVS no longer serves the pinned release, or a release resource names an unserved version or one with absent/ambiguous channel metadata; a caDSR matching pin that is not listed upstream | `requested`, `source`, `found` |
 | `release_mismatch` | The local index holds a different release than the requested one, or EVS served a concept of another release than the one requested | `requested`, `served` (a list of releases), `source` |
-| `upstream_unavailable` | EVS could not be reached or kept failing after the retries, rejected the request, or returned something unusable: a malformed, HTML or masked-error body, or a 404 from any request other than a single-concept lookup (check `NCI_SIP_EVS_BASE_URL`); an empty unfiltered terminology listing, with its actual `status` and `attempts`. Call deadline exhaustion uses this code, with `attempts` counting all outbound requests actually started across the call, including retries and release discovery | `surface`, `status`, `attempts`, `retryAfter` (`status` and `retryAfter` where known; deadline `surface` where known) |
+| `upstream_unavailable` | EVS could not be reached or kept failing after the retries, rejected the request, or returned something unusable: a malformed, HTML or masked-error body, or a 404 from any request other than a single-concept lookup (check `NCI_SIP_EVS_BASE_URL`); a caDSR request to the staging origin `https://cadsrapi-stage.cancer.gov` whose host name does not resolve, which adds a suggestion to check the NIH VPN (no other caDSR address or failure gets it); an empty unfiltered terminology listing, with its actual `status` and `attempts`. Call deadline exhaustion uses this code, with `attempts` counting all outbound requests actually started across the call, including retries and release discovery | `surface`, `status`, `attempts`, `retryAfter` (`status` and `retryAfter` where known; deadline `surface` where known) |
 | `timeout` | Every attempt at an upstream request timed out (`NCI_SIP_TIMEOUT_SECONDS`; `NCI_SIP_MATCH_TIMEOUT_SECONDS` for caDSR matching) before the call deadline; timeouts are errors, never empty results | `surface`, `seconds`, `attempts` |
 | `bound_exceeded` | An EVS response exceeds `NCI_SIP_EVS_MAX_RESPONSE_BYTES`, the request budget is exhausted before a graph is available, or hierarchy page replay exhausts its request budget | `bound`, `limit`, `reached` (for response size, the limit plus one when EVS declared no length) |
 | `capability_unavailable` | The requested terminology or operation is not supported yet, or an index resource has no active index; the MCP tool descriptions name the interim limits; a published caDSR registry pin on form lookup, matching or grounding (capability `pinned form lookup`, `pinned matching` or `pinned grounding`), because those APIs have no `registryRelease` field yet ([cadsr-match-parameters](docs/upstream/cadsr.md#cadsr-match-parameters)); no unpinned match is labelled pinned | `capability` |

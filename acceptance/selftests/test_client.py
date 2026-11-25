@@ -53,6 +53,7 @@ def test_standalone_harness_collects_without_server(compliant, monkeypatch, remo
         "try: import nci_sip_mcp\n"
         "except ModuleNotFoundError: Path('core-availability').write_text('absent')\n"
         "else: Path('core-availability').write_text('present')\n"
+        "import nci_sip_acceptance.record, nci_sip_acceptance.citations\n"
     )
     with FixtureServer(FixtureSet({}, {})) as endpoint:
         if remote:

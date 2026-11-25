@@ -4,6 +4,7 @@ import json
 import os
 import unittest
 from contextlib import suppress
+from importlib.metadata import version
 from unittest.mock import patch
 
 from nci_sip_mcp import traffic_identity
@@ -13,6 +14,7 @@ from nci_sip_mcp.traffic_identity import (
     IdentitySnapshot,
     capture_identity,
     installation_label,
+    user_agent,
 )
 
 
@@ -80,3 +82,33 @@ class IdentitySnapshotTest(unittest.TestCase):
         self.assertIn(f"(installation={first_id}; ", first_label)
         self.assertIn(f"(installation={rotated_id}; ", rotated_label)
         self.assertNotEqual(first_label, rotated_label)
+
+
+class ProductUserAgentTest(unittest.TestCase):
+    def test_the_label_is_the_product_alone_even_when_an_installation_is_configured(self):
+        with patch.dict(os.environ, {INSTALLATION_ID_ENV: "a" * 32}, clear=True):
+            label = traffic_identity.product_user_agent()
+
+        self.assertEqual(
+            label,
+            f"nci-sip-mcp/{version('nci-sip-mcp')} (+https://github.com/CBIIT/nci-sip-mcp)",
+        )
+
+    def test_an_unsafe_installed_version_is_refused_as_the_server_label_refuses_it(self):
+        for unsafe in ("not a version", "1." + "0" * 300):
+            with (
+                self.subTest(version=unsafe[:20]),
+                patch.dict(os.environ, {}, clear=True),
+                patch.object(traffic_identity, "version", return_value=unsafe),
+            ):
+                with self.assertRaises(PlatformError) as product:
+                    traffic_identity.product_user_agent()
+                with self.assertRaises(PlatformError) as server:
+                    user_agent(capture_identity())
+
+                refusal = (product.exception.code, product.exception.message)
+                self.assertEqual(refusal, (server.exception.code, server.exception.message))
+                self.assertEqual(product.exception.details, server.exception.details)
+                self.assertEqual(
+                    product.exception.details["parameter"], "nci-sip-mcp installed version"
+                )

@@ -125,6 +125,8 @@ def _main(args: argparse.Namespace) -> int:
         context = Context(settings)
         if serve:
             return _serve_recorded(settings, context, args)
+    except PlatformError as error:
+        return _print_result(serialise(error), errors)
     except _STARTUP_ERRORS as exc:
         emit(logger, logging.DEBUG, "startup_failed", errorType=type(exc).__name__)
         message = with_next_step(f"{type(exc).__name__}: {exc}", "Fix the cause named and rerun.")

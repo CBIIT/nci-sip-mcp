@@ -12,6 +12,7 @@ from nci_sip_mcp.config import DEFAULT_EXCLUSION_ROLE_CODES
 from nci_sip_mcp.evs import INDEX_INCLUDE, LOOKUP_INCLUDE, EVSNotFoundError, verify_content
 from nci_sip_mcp.release import ReleaseContext
 from nci_sip_mcp.ssis import CADSR_GRAPH, NCIT_GRAPH, SSISClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 
 
 class FakeIndex:
@@ -55,7 +56,7 @@ class FakeSSIS(SSISClient):
     """Offline graph rows; records the actual remaining query allowance."""
 
     def __init__(self, settings):
-        super().__init__(settings)
+        super().__init__(settings, user_agent=product_user_agent())
         self.graphs = [
             {"graph": NCIT_GRAPH, "version": "26.06e", "date": "June 29, 2026"},
             {"graph": CADSR_GRAPH, "date": "2026-06-01"},

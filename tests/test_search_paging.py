@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 from fakes import concept, release, terminology_row
 from nci_sip_mcp.evs import EVSClient, EVSReleaseNotFoundError
 from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traffic_identity import product_user_agent
 from ncit_index.embeddings import HashingEmbeddingProvider
 from ncit_index.scoring import rank_page
 from test_evs_client import FakeResponse
@@ -157,7 +158,9 @@ class LiveSearchTest(ServerFixture):
 
     def setUp(self):
         super().setUp()
-        self.context.evs = EVSClient("https://evs.invalid", max_attempts=1)
+        self.context.evs = EVSClient(
+            "https://evs.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
 
     def search(self, **arguments):
         return invoke(
