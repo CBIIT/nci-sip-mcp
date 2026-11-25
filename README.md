@@ -19,9 +19,9 @@ terminology (NCI Thesaurus through EVS) and metadata (common data elements throu
 the cross-domain tools that join them, and it never returns content it did not retrieve:
 [what the server must do](docs/specification.md#what-the-server-must-do).
 
-> **Current upstream access limits:** Green fixtures do not establish live production access.
-> Production caDSR requests are prohibited, Shared SI/SSIS traffic is paused, protected caDSR
-> credentials have not been issued, and Acceptance(live) is disabled. Read the
+> **Current upstream access limits:** Green fixtures do not establish live access. Larger live
+> tests are announced to the upstream teams first, protected caDSR access with our staging
+> credential is unverified, and Acceptance(live) is disabled. Read the
 > [dated access and transition guidance](QUICKSTART.md#upstream-access-and-ssis-transition) before setup.
 
 The repository holds four deliverables:
@@ -95,10 +95,10 @@ explains what was tested, against which service and environment, with dated resu
 and evidence. Passing fixtures do not establish current live access or successful retrieval
 for an operation whose correct result is refusal.
 
-Production caDSR access remains prohibited, SSIS traffic paused, protected credentials unissued
-and automated Acceptance(live) disabled. Cross-domain joins depend on Shared SI; replacement
-gaps remain unresolved. Read the [access guidance](QUICKSTART.md#upstream-access-and-ssis-transition)
-and functional-status checkpoints before any separately authorized diagnostic.
+Protected caDSR access is unverified and automated Acceptance(live) is disabled. Cross-domain
+joins depend on Shared SI; replacement gaps remain unresolved. Read the
+[access guidance](QUICKSTART.md#upstream-access-and-ssis-transition) and functional-status
+checkpoints before any live diagnostic.
 
 The [milestones](https://github.com/CBIIT/nci-sip-mcp/milestones) track open work;
 [deployment guidance](docs/deployment.md) describes the trusted-local default and disabled
@@ -125,7 +125,8 @@ UAT/PROD administration. UAT has not run.
   Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 - **Operators configuring stable identity**: the
   [request identification guide](docs/request-identification.md) covers local provisioning and
-  lifecycle; the current utilities do not label requests.
+  lifecycle; the server labels its platform requests with it; acceptance traffic sends the product label
+  without an installation identity.
 
 ## License
 

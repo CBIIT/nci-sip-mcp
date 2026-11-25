@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 import pytest
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 
 from nci_sip_acceptance.environments import SURFACES, Environment
 from nci_sip_acceptance.request_authorization import Authorization, RequestGrant
@@ -41,6 +41,7 @@ def test_catalogue_preparation_preserves_exact_grant_admission(tmp_path):
                 max_response_bytes=64,
                 size_bound="owned",
                 request_policy=ControlledHttpPolicy(plain.run),
+                user_agent=PRODUCT_USER_AGENT,
             )
             assert client.get_json("/api/v1/version") == {"ok": True}
         strict = SupervisedRun.create(exact, tmp_path / "strict")
@@ -54,6 +55,7 @@ def test_catalogue_preparation_preserves_exact_grant_admission(tmp_path):
                 max_response_bytes=64,
                 size_bound="owned",
                 request_policy=ControlledHttpPolicy(strict.run),
+                user_agent=PRODUCT_USER_AGENT,
             )
             with correlated("not-in-the-exact-grant"):
                 client.get_json("/api/v1/version")
@@ -65,6 +67,7 @@ def test_catalogue_preparation_preserves_exact_grant_admission(tmp_path):
         assert sorted((key.lower(), value) for key, value in receiver.requests[0][2]) == sorted(
             [
                 ("accept", "application/json"),
+                ("user-agent", PRODUCT_USER_AGENT),
                 ("host", receiver.origin.removeprefix("http://")),
                 ("accept-encoding", "identity"),
                 ("connection", "close"),

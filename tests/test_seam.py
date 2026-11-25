@@ -19,6 +19,7 @@ from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.release_selection import SessionRelease, session_scope
 from nci_sip_mcp.ssis import CADSR_GRAPH, NCIT_GRAPH, SSISClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse
 
 NCIT = "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl#"
@@ -59,7 +60,7 @@ class SeamTest(unittest.TestCase):
         self.assertEqual(empty["provenance"]["sourceUri"], origin["sourceUri"])
 
     def test_empty_gdc_results_keep_the_read_mapsets_origin(self):
-        self.context.evs = EVSClient("https://evs.test")
+        self.context.evs = EVSClient("https://evs.test", user_agent=product_user_agent())
         mapset = {"code": "NCIt_Maps_To_GDC", "version": "26.06e"}
         with patch.object(
             self.context.evs,
@@ -334,7 +335,7 @@ class SeamTest(unittest.TestCase):
         self.assertEqual(self.evs.calls, [])
 
     def test_gdc_keeps_only_exact_concept_maps_and_counts_returned_values(self):
-        self.context.evs = EVSClient("https://evs.test")
+        self.context.evs = EVSClient("https://evs.test", user_agent=product_user_agent())
         mapset = {"code": "NCIt_Maps_To_GDC", "version": "26.06e"}
         common = {
             "mapsetCode": mapset["code"],
@@ -374,7 +375,7 @@ class SeamTest(unittest.TestCase):
         )
 
     def test_gdc_malformed_licence_text_is_not_silently_discarded(self):
-        self.context.evs = EVSClient("https://evs.test")
+        self.context.evs = EVSClient("https://evs.test", user_agent=product_user_agent())
         mapset = {"code": "NCIt_Maps_To_GDC", "version": "26.06e", "licenseText": {"bad": "shape"}}
         with patch.object(
             self.context.evs, "_get_existing", side_effect=[self.evs.get_terminologies(), mapset]
@@ -386,7 +387,7 @@ class SeamTest(unittest.TestCase):
         self.assertEqual(result["error"]["details"]["surface"], "evs")
 
     def test_gdc_reads_later_pages_before_filtering_and_counting_exact_matches(self):
-        self.context.evs = EVSClient("https://evs.test")
+        self.context.evs = EVSClient("https://evs.test", user_agent=product_user_agent())
         pages = [
             {"total": 11, "maps": [gdc_map(f"C1{i}") for i in range(10)]},
             {"total": 11, "maps": [gdc_map()]},
@@ -416,7 +417,7 @@ class SeamTest(unittest.TestCase):
             ),
             ([{"total": 1001, "maps": first_page}], "bound_exceeded"),
         )
-        self.context.evs = EVSClient("https://evs.test")
+        self.context.evs = EVSClient("https://evs.test", user_agent=product_user_agent())
         for pages, expected in cases:
             with (
                 self.subTest(expected=expected),
@@ -437,7 +438,7 @@ class SeamTest(unittest.TestCase):
                 self.assertNotIn("storedValues", result)
 
     def test_gdc_individual_maps_must_name_the_requested_release(self):
-        self.context.evs = EVSClient("https://evs.test")
+        self.context.evs = EVSClient("https://evs.test", user_agent=product_user_agent())
         for version in ("26.05d", None):
             with (
                 self.subTest(version=version),
@@ -458,7 +459,7 @@ class SeamTest(unittest.TestCase):
                 self.assertEqual(result["error"]["details"]["served"], [version or "unknown"])
 
     def test_gdc_checks_mapset_release_before_requesting_maps(self):
-        self.context.evs = EVSClient("https://evs.test")
+        self.context.evs = EVSClient("https://evs.test", user_agent=product_user_agent())
         with patch.object(
             self.context.evs,
             "_get_existing",
@@ -648,7 +649,7 @@ class CrossDomainQueryBoundaryTest(unittest.TestCase):
             )
 
     def test_descendant_option_reaches_both_queries_and_binds_the_cursor(self):
-        client = SSISClient(self.context.settings)
+        client = SSISClient(self.context.settings, user_agent=product_user_agent())
         self.context.ssis = client
         rows = [element(123), element(456)]
         values = [{"id": "123", "version": "1", "value": "Male", "concept": NCIT + "C1"}]
@@ -904,7 +905,7 @@ class StoredValueAndAlignmentTest(unittest.TestCase):
         )
 
     def gdc(self, rows, total=None):
-        self.context.evs = EVSClient("https://evs.test")
+        self.context.evs = EVSClient("https://evs.test", user_agent=product_user_agent())
         count = len(rows) if total is None else total
         pages = [
             {"total": count, "maps": rows[start : start + 10]} for start in range(0, len(rows), 10)
@@ -1069,8 +1070,10 @@ class StoredValueAndAlignmentTest(unittest.TestCase):
         self.assertEqual(self.ssis.calls, [])
 
     def test_both_state_tools_share_discovery_and_content_request_allowance(self):
-        self.context.evs = EVSClient("https://evs.test", max_attempts=1)
-        self.context.ssis = SSISClient(self.context.settings)
+        self.context.evs = EVSClient(
+            "https://evs.test", max_attempts=1, user_agent=product_user_agent()
+        )
+        self.context.ssis = SSISClient(self.context.settings, user_agent=product_user_agent())
         for operation, arguments in (
             ("resolve_stored_value", {"conceptCode": "C1", "commons": "GDC"}),
             ("get_release_alignment", {}),

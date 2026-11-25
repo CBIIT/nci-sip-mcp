@@ -17,6 +17,7 @@ from nci_sip_mcp.http_client import (
     UpstreamTooLargeError,
     UpstreamUnavailableError,
 )
+from nci_sip_mcp.traffic_identity import product_user_agent
 
 
 class FakeResponse:
@@ -115,7 +116,7 @@ class EVSClientTest(unittest.TestCase):
         )
 
     def client(self, **options):
-        client = EVSClient("https://example.invalid/", **options)
+        client = EVSClient("https://example.invalid/", **options, user_agent=product_user_agent())
         # No jitter: a backoff is waited in full.
         client.http.jitter = lambda low, high: high
         return client
@@ -276,7 +277,9 @@ class EVSClientTest(unittest.TestCase):
 
         urlopen.side_effect = transport
 
-        version = EVSClient("https://example.invalid", timeout_seconds=2.5).get_api_version()
+        version = EVSClient(
+            "https://example.invalid", timeout_seconds=2.5, user_agent=product_user_agent()
+        ).get_api_version()
 
         self.assertEqual(version, {"timeout": 2.5})
 
@@ -532,7 +535,9 @@ class EVSClientTest(unittest.TestCase):
 
 class EVSContentBoundaryTest(unittest.TestCase):
     def setUp(self):
-        self.client = EVSClient("https://evs.invalid", max_attempts=1)
+        self.client = EVSClient(
+            "https://evs.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
         self.release = release()
 
     def reply(self, value):

@@ -263,6 +263,30 @@ class ServerTest(ServerFixture):
         search_contract = description.split("Call elapsed-time budget:", 1)[0]
         self.assertNotIn("truncation", search_contract)
 
+    def test_protected_cadsr_tools_state_the_credential_requirement_and_no_other_tool_does(self, _):
+        requirement = (
+            "a caDSR credential accepted by the configured endpoint; the credential issued to "
+            "this project is for caDSR staging and must be paired with the staging address and "
+            "the NIH VPN."
+        )
+        expected = {
+            "match_data_elements": "Requires " + requirement,
+            "list_contexts": "Requires " + requirement,
+            "harmonize_data_dictionary": "Its CDE matching calls require " + requirement,
+        }
+        tools = {tool.name: tool for tool in self.session(lambda client: client.list_tools()).tools}
+        for name, sentence in expected.items():
+            with self.subTest(name):
+                self.assertIn(sentence, " ".join(tools[name].description.split()))
+                self.assertIn(sentence, " ".join(TOOLS[name]["summary"].split()))
+                self.assertNotIn("401", tools[name].description)
+                self.assertNotIn("401", TOOLS[name]["summary"])
+        for name, tool in tools.items():
+            if name not in expected:
+                with self.subTest(other=name):
+                    self.assertNotIn("NIH VPN", tool.description)
+                    self.assertNotIn("staging", tool.description)
+
     def test_tool_titles_follow_the_specification_in_each_profile(self, _):
         for profile in ("evs", "cadsr", "unified"):
             self.settings = replace(self.settings, profile=profile)

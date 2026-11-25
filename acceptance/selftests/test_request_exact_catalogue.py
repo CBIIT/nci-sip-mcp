@@ -1,7 +1,7 @@
 """Reviewed exact catalogue forms reach only their independently selected wire targets."""
 
 import pytest
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 from test_request_release_boundaries import ROW
 from test_request_release_selection import response
 
@@ -71,6 +71,7 @@ def test_exact_catalogue_uses_selected_origin_and_bound_release(
                     max_response_bytes=1024,
                     size_bound="owned",
                     request_policy=ControlledHttpPolicy(owner.run),
+                    user_agent=PRODUCT_USER_AGENT,
                     credentials={LICENSE_KEY_HEADER: "synthetic-owned-key"}
                     if surface == "evs"
                     else None,
@@ -103,6 +104,7 @@ def test_exact_catalogue_uses_selected_origin_and_bound_release(
         assert sorted((name.lower(), value) for name, value in headers) == sorted(
             [
                 ("accept", "application/json"),
+                ("user-agent", PRODUCT_USER_AGENT),
                 ("x-correlation-id", "owned-exact-catalogue"),
                 ("host", target.origin.removeprefix("http://")),
                 ("accept-encoding", "identity"),

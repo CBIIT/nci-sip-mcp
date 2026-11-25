@@ -30,6 +30,7 @@ from nci_sip_acceptance.request_authorization import (
 from nci_sip_acceptance.request_budget import ControlledRun
 from nci_sip_mcp.errors import RequestPolicyError
 from nci_sip_mcp.request_policy import LICENSE_KEY_HEADER, using_request_policy
+from nci_sip_mcp.traffic_identity import product_user_agent
 from nci_sip_mcp.validation import RELEASE_CHANNELS, ReleaseChannel
 
 if TYPE_CHECKING:
@@ -175,6 +176,7 @@ def _record_family(
     selected: EnvironmentRecord,
     pin: str,
     headers: list[tuple[str, str]],
+    base: list[tuple[str, str]],
     target: ReleaseTarget,
     correlation: bool,
 ) -> ExactRequestFamily | None:
@@ -188,7 +190,7 @@ def _record_family(
     grant = RequestGrant(
         "GET",
         origin.rstrip("/") + path,
-        headers if surface == "evs" else [("accept", "application/json")],
+        headers if surface == "evs" else base,
         credential_origin=origin,
     )
     return ExactRequestFamily(grant, correlation, target if pinned else None)
@@ -206,6 +208,7 @@ def _recorded(
     manifest: dict[str, Node],
     selected: EnvironmentRecord,
     headers: list[tuple[str, str]],
+    base: list[tuple[str, str]],
     target: ReleaseTarget,
     correlation: bool,
 ) -> tuple[ExactRequestFamily, ...]:
@@ -217,7 +220,7 @@ def _recorded(
         if not target.accepts(pin):
             raise RequestPolicyError("authorization")
         families = tuple(
-            _record_family(row, selected, pin, headers, target, correlation) for row in chosen
+            _record_family(row, selected, pin, headers, base, target, correlation) for row in chosen
         )
         return tuple(family for family in families if family is not None)
     except KeyError, ValueError:
@@ -230,6 +233,7 @@ class CompiledPolicy:
     _origin: str = field(repr=False)
     _license_key: str | None = field(repr=False)
     _target: ReleaseTarget
+    _user_agent: str
 
     def select_release(self, run: ControlledRun, *, channel: ReleaseChannel) -> ReleaseContext:
         """Discover and bind only a declared channel through this controller's policy."""
@@ -249,7 +253,9 @@ class CompiledPolicy:
         run.check_wait(0)
         # HttpClient captures the policy at construction, before the resolver makes any call.
         with using_request_policy(ControlledHttpPolicy(run)):
-            client = EVSClient(self._origin, license_key=self._license_key)
+            client = EVSClient(
+                self._origin, license_key=self._license_key, user_agent=self._user_agent
+            )
             selection = resolve_evs_release(client, self._target.terminology, channel)
         run._commit_release(selection)
         return selection
@@ -296,14 +302,17 @@ def compile_policy(environment: Environment) -> CompiledPolicy:
     origin = selected["origins"]["evs"]
     if origin is None:
         raise RequestPolicyError("authorization")
-    headers = [("accept", "application/json")]
+    # The label is computed once: every grant, and the discovery client, use this value.
+    agent = product_user_agent()
+    base = [("accept", "application/json"), ("user-agent", agent)]
+    headers = list(base)
     if credential := environment.credentials.get("NCI_SIP_EVS_LICENSE_KEY"):
         headers.append((LICENSE_KEY_HEADER, credential))
     grant = RequestGrant(
         "GET", origin.rstrip("/") + "/api/v1/version", headers, credential_origin=origin
     )
     discovery = _discovery(origin, headers, target, correlation)
-    recorded = _recorded(declaration, manifest, selected, headers, target, correlation)
+    recorded = _recorded(declaration, manifest, selected, headers, base, target, correlation)
     concept = ConceptRequestFamily(
         RequestGrant(
             "GET",
@@ -336,4 +345,5 @@ def compile_policy(environment: Environment) -> CompiledPolicy:
         origin,
         credential,
         target,
+        agent,
     )

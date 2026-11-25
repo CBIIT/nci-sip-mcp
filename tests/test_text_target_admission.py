@@ -10,6 +10,7 @@ from nci_sip_mcp.cadsr import CaDSRClient
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.errors import InputValidationError
 from nci_sip_mcp.evs import EVSClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 from nci_sip_mcp.validation import validate_text_target
 from test_cadsr_client import reply
 from test_http_client import Reply, ServerTestCase
@@ -20,7 +21,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
     def test_unpinned_lexical_search_refuses_encoded_target_before_release_discovery(self):
         # Given permitted lexical input, implicit release discovery must not precede admission.
         server = self.serve()
-        self.context.evs = EVSClient(server.url)
+        self.context.evs = EVSClient(server.url, user_agent=product_user_agent())
         result = self.session(
             lambda client: client.call_tool(
                 "search_concepts", {"terminology": "ncit", "query": "😀" * 1000, "mode": "lexical"}
@@ -33,7 +34,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
 
     def test_direct_search_emoji_without_release_refuses_before_discovery(self):
         server = self.serve()
-        self.context.evs = EVSClient(server.url)
+        self.context.evs = EVSClient(server.url, user_agent=product_user_agent())
         with patch("nci_sip_mcp.server.configure_logging"):
             failed, result = self.call("search_concepts", query="😀" * 1000)
         self.assertTrue(failed)
@@ -48,7 +49,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
         for extra in ("x", ""):
             with self.subTest(extra=extra):
                 server = self.serve(reply({"total": 0}))
-                self.context.evs = EVSClient(server.url)
+                self.context.evs = EVSClient(server.url, user_agent=product_user_agent())
                 with patch("nci_sip_mcp.server.configure_logging"):
                     failed, result = self.call(
                         "search_concepts", query=query + extra, release="26.06e"
@@ -94,7 +95,8 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
                         reply({"DataElement": data_element(), "registryRelease": pin}),
                     )
                     self.context.cadsr = CaDSRClient(
-                        replace(self.settings, cadsr_base_url=server.url)
+                        replace(self.settings, cadsr_base_url=server.url),
+                        user_agent=product_user_agent(),
                     )
                     with patch("nci_sip_mcp.server.configure_logging"):
                         failed, result = self.call(
@@ -126,7 +128,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
     def test_emoji_target_is_rejected_by_mcp_before_any_discovery(self):
         # Given legal code-point length but an oversized URL, no source is contacted.
         server = self.serve()
-        self.context.evs = EVSClient(server.url)
+        self.context.evs = EVSClient(server.url, user_agent=product_user_agent())
         self.context.ssis = FakeSSIS(self.settings)
         with patch("nci_sip_mcp.server.configure_logging"):
             failed, result = self.call("ground_value", text="😀" * 1000)
@@ -142,7 +144,7 @@ class GroundTextAdmissionTest(ServerFixture, ServerTestCase):
         suffix = "&type=contains&include=minimal%2Chighlights&fromRecord=0&pageSize=10"
         text = "😀" * 570 + "x" * (7000 - len(prefix + suffix) - 570 * 12)
         server = self.serve(Reply(body=json.dumps([terminology_row()]).encode()))
-        self.context.evs = EVSClient(server.url)
+        self.context.evs = EVSClient(server.url, user_agent=product_user_agent())
         self.context.ssis = FakeSSIS(self.settings)
         with patch("nci_sip_mcp.server.configure_logging"):
             failed, result = self.call("ground_value", text=text)
@@ -174,7 +176,7 @@ class ClientTextAdmissionTest(ServerTestCase):
     def test_evs_checks_full_target_including_base_path_release_offset_and_status(self):
         # A later filtered page can exceed the ceiling although its first page fits.
         server = self.serve(Reply(body=b'{"total":0}'))
-        client = EVSClient(server.url + "/gateway")
+        client = EVSClient(server.url + "/gateway", user_agent=product_user_agent())
         selected = release("release-" + "r" * 50)
         query = "😀" * 568
         self.assertEqual(client.search_concepts(selected, query, "lexical", 0, 10), (0, []))
@@ -199,7 +201,10 @@ class ClientTextAdmissionTest(ServerTestCase):
                 server = self.serve(
                     Reply(body=json.dumps({"DataElements": [], "registryRelease": pin}).encode())
                 )
-                client = CaDSRClient(replace(Settings(), cadsr_base_url=server.url + "/gateway"))
+                client = CaDSRClient(
+                    replace(Settings(), cadsr_base_url=server.url + "/gateway"),
+                    user_agent=product_user_agent(),
+                )
                 method = getattr(client, operation)
                 args = (10,) if operation == "search_data_elements" else ()
                 with self.assertRaises(InputValidationError) as raised:

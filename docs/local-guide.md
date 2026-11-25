@@ -47,8 +47,9 @@ images target Linux amd64.
 
 > **Current upstream access limits:** Read the
 > [dated access and transition guidance](../QUICKSTART.md#upstream-access-and-ssis-transition)
-> before the installer lifecycle. Its default connectivity checks contact production caDSR,
-> which is currently prohibited; use the linked offline fixture validation while holds remain.
+> before the installer lifecycle. Its default connectivity checks are small requests to
+> production caDSR; larger tests are announced first, and offline fixture validation remains
+> the default for automated runs.
 
 Create a virtual environment and install the tagged server package:
 

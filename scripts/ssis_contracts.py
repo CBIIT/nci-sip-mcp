@@ -23,6 +23,7 @@ from nci_sip_mcp.ssis import (
     graph_roles,
     graph_statuses,
 )
+from nci_sip_mcp.traffic_identity import product_user_agent
 from nci_sip_mcp.validation import NCIT_CODE_FORM
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +45,7 @@ class Capture:
 
 
 def request(entry: dict[str, Any]) -> CapturedRequestError:
-    client: Any = SSISClient(Settings())
+    client: Any = SSISClient(Settings(), user_agent=product_user_agent())
     client.sparql_http = Capture()
     try:
         getattr(client, entry["operation"])(*entry["args"], **entry["kwargs"])
@@ -164,6 +165,7 @@ def main() -> None:
         max_response_bytes=10 * 1024 * 1024,
         retry_backoff_seconds=0,
         size_bound="ssis_response_bytes",
+        user_agent=product_user_agent(),
     )
     report = [check(entry, http) for entry in register["queries"]]
     print(json.dumps(report, indent=2))

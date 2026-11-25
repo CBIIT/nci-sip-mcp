@@ -4,26 +4,34 @@ See fixtures/cadsr/README.md for contract URLs. No fixture is a runtime data sou
 """
 
 import base64
+import itertools
 import json
+import socket
+import ssl
 import unittest
+from contextlib import contextmanager
 from http.client import HTTPException
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import URLError
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from nci_sip_mcp.cadsr import CaDSRClient, export_state
 from nci_sip_mcp.config import Settings
-from nci_sip_mcp.errors import InputValidationError, PlatformError
+from nci_sip_mcp.errors import InputValidationError, PlatformError, correlated
 from nci_sip_mcp.http_client import (
     UpstreamRejectedError,
     UpstreamTimeoutError,
     UpstreamTooLargeError,
     UpstreamUnavailableError,
 )
+from nci_sip_mcp.invocation import error_record
 from nci_sip_mcp.release import RegistryMetadataError
+from nci_sip_mcp.request_policy import Exchange, using_request_policy
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import http_error
-from test_http_client import Reply, ServerTestCase
+from test_http_client import Reply, ScriptedPolicy, ServerTestCase
 
 ROOT = Path(__file__).resolve().parents[1]
 LISTING = '<pre><a href="releasedCDEsXML-OD.zip">download</a> 2026-07-01 22:19 116M\n</pre>'
@@ -74,7 +82,7 @@ class ExportListingTest(unittest.TestCase):
 class CaDSRClientTest(ServerTestCase):
     def cadsr(self, api, export=None, **options):
         settings = Settings(cadsr_base_url=api.url, cadsr_ftp_url=(export or api).url, **options)
-        client = CaDSRClient(settings)
+        client = CaDSRClient(settings, user_agent=product_user_agent())
         client.http.sleep = lambda _: None
         client.match_http.sleep = lambda _: None
         return client
@@ -366,7 +374,8 @@ class ClientBoundaryTest(ServerTestCase):
 
     def cadsr(self, server, **options):
         client = CaDSRClient(
-            Settings(cadsr_base_url=server.url, cadsr_ftp_url=server.url, **options)
+            Settings(cadsr_base_url=server.url, cadsr_ftp_url=server.url, **options),
+            user_agent=product_user_agent(),
         )
         for http in (client.http, client.match_http, client.export_http):
             http.sleep = lambda _: None
@@ -522,3 +531,148 @@ class ListingBoundaryTest(unittest.TestCase):
         ):
             with self.subTest(listing=listing):
                 self.assertEqual(export_state(listing).generated_at, "2026-07-01T22:19")
+
+
+STAGING = "https://cadsrapi-stage.cancer.gov"
+PRODUCTION = "https://cadsrapi.cancer.gov"
+HINT = "check the NIH VPN for caDSR staging"
+CREDENTIAL = "reader:synthetic-secret-1"
+
+
+def dns_failure():
+    return socket.gaierror(socket.EAI_NONAME, "synthetic-resolver-detail")
+
+
+def wrapped_dns_failure():
+    return URLError(dns_failure())
+
+
+class AnyTargetPolicy(ScriptedPolicy):
+    """Scripted outcomes for whatever origin the client was configured with; nothing is sent."""
+
+    @contextmanager
+    def request(self, request):
+        self.selected = request
+        yield self
+
+
+class StagingHintTest(unittest.TestCase):
+    """The hint is the server's own wording for one case: the staging origin, DNS failure."""
+
+    def run_call(self, base, outcomes, *, export=False, matching=False, **options):
+        policy = AnyTargetPolicy("", outcomes)
+        with using_request_policy(policy):
+            client = CaDSRClient(
+                Settings(cadsr_base_url=base + "/rad", cadsr_ftp_url=base + "/ftp", **options),
+                user_agent=product_user_agent(),
+            )
+        for http in (client.http, client.match_http, client.export_http):
+            http.sleep = lambda _: None
+        with self.assertRaises(Exception) as raised:
+            if export:
+                client.export_http.get_text("/x")
+            elif matching:
+                client.match_data_element({"entity": "Fixture"}, {})
+            else:
+                client.list_contexts()
+        with correlated():
+            return error_record(raised.exception)["error"], policy
+
+    def test_staging_dns_failure_suggests_checking_the_vpn_and_keeps_its_contract(self):
+        for base, failure, matching in itertools.product(
+            (STAGING, "HTTPS://CadsrAPI-Stage.cancer.gov:443"),
+            (dns_failure, wrapped_dns_failure),
+            (False, True),
+        ):
+            with self.subTest(base=base, failure=failure.__name__, matching=matching):
+                error, policy = self.run_call(
+                    base,
+                    [failure() for _ in range(3)],
+                    matching=matching,
+                    cadsr_credential=CREDENTIAL,
+                )
+                self.assertEqual(error["code"], "upstream_unavailable")
+                self.assertEqual(error["details"], {"surface": "cadsr", "attempts": 3})
+                self.assertIn(HINT, error["message"])
+                self.assertNotIn("synthetic-resolver-detail", error["message"])
+                self.assertNotIn(CREDENTIAL.partition(":")[2], str(error))
+                self.assertEqual(len(policy.entries), 3)
+
+    def test_the_hint_names_a_check_and_never_a_cause(self):
+        error, _ = self.run_call(STAGING, [dns_failure()] * 3)
+        self.assertIn("did not resolve; " + HINT, error["message"])
+        self.assertEqual(
+            error["message"],
+            "CADSR request failed for /NCILovAPI/1.0/api/getContextNames: transport failure. "
+            "The host name did not resolve; " + HINT + ". Retry later.",
+        )
+
+    def test_no_other_target_or_failure_gets_the_hint(self):
+        reset = ConnectionResetError("reset")
+        for name, base, outcomes, code, attempts in (
+            ("production", PRODUCTION, [dns_failure()] * 3, "upstream_unavailable", 3),
+            ("loopback", "http://127.0.0.1:8765", [dns_failure()] * 3, "upstream_unavailable", 3),
+            (
+                "custom host",
+                "https://cadsr.example.test",
+                [dns_failure()] * 3,
+                "upstream_unavailable",
+                3,
+            ),
+            ("lookalike", STAGING + ".evil.test", [dns_failure()] * 3, "upstream_unavailable", 3),
+            ("other port", STAGING + ":8443", [dns_failure()] * 3, "upstream_unavailable", 3),
+            (
+                "plain http",
+                "http://cadsrapi-stage.cancer.gov",
+                [dns_failure()] * 3,
+                "upstream_unavailable",
+                3,
+            ),
+            ("refused", STAGING, [ConnectionRefusedError("no")] * 3, "upstream_unavailable", 3),
+            (
+                "earlier dns",
+                STAGING,
+                [dns_failure(), dns_failure(), reset],
+                "upstream_unavailable",
+                3,
+            ),
+            ("timeout", STAGING, [TimeoutError("slow")] * 3, "timeout", 3),
+            (
+                "tls",
+                STAGING,
+                [URLError(ssl.SSLCertVerificationError("synthetic"))],
+                "upstream_unavailable",
+                1,
+            ),
+        ):
+            with self.subTest(name):
+                error, _ = self.run_call(base, outcomes)
+                self.assertEqual(error["code"], code)
+                self.assertEqual(error["details"]["attempts"], attempts)
+                self.assertNotIn("VPN", error["message"])
+                if name == "production":
+                    self.assertEqual(
+                        error["message"],
+                        "CADSR request failed for /NCILovAPI/1.0/api/getContextNames: "
+                        "transport failure. Retry later.",
+                    )
+
+    def test_staging_401_is_rejected_without_the_hint(self):
+        reply = Exchange(401, {}, b'{"message":"Unauthorized"}')
+        error, policy = self.run_call(STAGING, [reply])
+        self.assertEqual(error["code"], "upstream_unavailable")
+        self.assertEqual(error["details"]["status"], 401)
+        self.assertNotIn("VPN", error["message"])
+        self.assertEqual(urlsplit(policy.selected.full_url).hostname, "cadsrapi-stage.cancer.gov")
+
+    def test_the_export_host_never_gets_the_hint(self):
+        error, _ = self.run_call(STAGING, [dns_failure()] * 3, export=True)
+        self.assertEqual(error["details"], {"surface": "cadsr", "attempts": 3})
+        self.assertNotIn("VPN", error["message"])
+        self.assertEqual(
+            error["message"], "CADSR request failed for /x: transport failure. Retry later."
+        )
+
+    def test_a_base_url_with_user_info_is_rejected_before_any_request(self):
+        with self.assertRaises(ValueError):
+            Settings(cadsr_base_url="https://cadsrapi-stage.cancer.gov@evil.test/rad")
