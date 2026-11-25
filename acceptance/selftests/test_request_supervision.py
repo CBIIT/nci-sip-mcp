@@ -2092,3 +2092,43 @@ def test_unrelated_body_group_keeps_observed_child_failure(tmp_path):
         assert type(leaves[1]) is RequestPolicyError and leaves[1].reason == "transport"
         assert child.returncode == FAILED_WORKER_EXIT
     assert owner.snapshot()["state"] == "failed"
+
+
+def test_heartbeat_refusal_reaches_the_final_failure_note(tmp_path, monkeypatch):
+    owner = supervisor(tmp_path)
+    pulsed = threading.Event()
+    heartbeat = owner.run.heartbeat
+
+    def observed():
+        try:
+            heartbeat()
+        finally:
+            pulsed.set()
+
+    monkeypatch.setattr(owner.run, "heartbeat", observed)
+    failure = None
+    try:
+        with (
+            owner,
+            closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as blocker,
+            blocker,
+        ):
+            blocker.execute("BEGIN EXCLUSIVE")
+            assert pulsed.wait(10), "The observer never pulsed"
+    except (RequestPolicyError, BaseExceptionGroup) as error:
+        failure = error
+    assert failure is not None
+    errors = failure.exceptions if isinstance(failure, BaseExceptionGroup) else (failure,)
+    notes = [note for error in errors for note in getattr(error, "__notes__", ())]
+    prefix = "immediate ledger refusals: "
+    refusals = [note for note in notes if note.startswith(prefix)]
+    assert len(refusals) == 1, notes
+    note = refusals[0]
+    records, _, dropped = note.removeprefix(prefix).rpartition(" dropped=")
+    (record,) = json.loads(records)
+    assert (record["stage"], record["write"], record["caught"], dropped) == (
+        "begin",
+        True,
+        {"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_BUSY"},
+        "0",
+    )

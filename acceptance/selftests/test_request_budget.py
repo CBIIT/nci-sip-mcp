@@ -37,7 +37,12 @@ from nci_sip_acceptance.request_authorization import (
     RequestGrant,
     RunDescriptor,
 )
-from nci_sip_acceptance.request_budget import AttemptLease, ControlledRun, LedgerSnapshot
+from nci_sip_acceptance.request_budget import (
+    BUSY_SECONDS,
+    AttemptLease,
+    ControlledRun,
+    LedgerSnapshot,
+)
 from nci_sip_mcp.http_client import RequestPolicyError
 
 # This explicit local consumer exercises shared accounting through the real HttpClient.
@@ -2465,3 +2470,295 @@ def test_wrong_logical_record_has_sanitized_refusal(tmp_path):
         result = run.snapshot()
         assert (result.logical, result.attempts, result.transport_entries) == (0, 0, 0)
         assert (result.state, result.failure) == ("failed", "authorization")
+
+
+BUSY_DETAIL = {"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_BUSY"}
+CANTOPEN_DETAIL = {
+    "category": "sqlite",
+    "sqlite_errorcode": 14,
+    "sqlite_errorname": "SQLITE_CANTOPEN",
+}
+NO_REFUSALS = {"records": [], "dropped": 0}
+
+
+def immediate(run):
+    # The accessor is read through getattr so its absence fails the equality, not the lookup.
+    return getattr(run, "immediate_refusals", lambda: NO_REFUSALS)()
+
+
+def scripted_clock(*reads):
+    """Return each read in turn, then repeat the last; an exception instance is raised."""
+    pending = list(reads)
+
+    def clock():
+        value = pending.pop(0) if len(pending) > 1 else pending[0]
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    return clock
+
+
+def late_clock(run, remaining, spent=0.25):
+    """A clock whose first read leaves `remaining` seconds and whose second is `spent` later."""
+    first = run.started + run.authorization.limits.seconds - remaining
+    return scripted_clock(first, first + spent), first, first + spent
+
+
+@contextmanager
+def ledger_moved_away(run):
+    ledger = run.directory / "ledger.sqlite"
+    moved = ledger.with_name("moved.sqlite")
+    ledger.rename(moved)
+    try:
+        yield
+    finally:
+        moved.rename(ledger)
+
+
+def test_reader_refused_at_its_first_read_records_the_identity_stage(tmp_path, monkeypatch):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        clock, first, second = late_clock(run, 0)
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+            blocker.execute("BEGIN EXCLUSIVE")
+            monkeypatch.setattr(request_budget_module, "_clock", clock)
+            with pytest.raises(RequestPolicyError):
+                run.snapshot()
+            monkeypatch.undo()
+        assert immediate(run) == {
+            "records": [
+                {
+                    "stage": "identity",
+                    "write": False,
+                    "timeout_s": 0.0,
+                    "elapsed_with_closure_s": second - first,
+                    "caught": BUSY_DETAIL,
+                    "raised_in": "_identity",
+                }
+            ],
+            "dropped": 0,
+        }
+
+
+def test_writer_refused_at_begin_records_the_begin_stage(tmp_path, monkeypatch):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        clock, first, second = late_clock(run, 0)
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+            blocker.execute("BEGIN IMMEDIATE")
+            monkeypatch.setattr(request_budget_module, "_clock", clock)
+            with pytest.raises(RequestPolicyError):
+                run.authorize_participant("late")
+            monkeypatch.undo()
+        assert immediate(run) == {
+            "records": [
+                {
+                    "stage": "begin",
+                    "write": True,
+                    "timeout_s": 0.0,
+                    "elapsed_with_closure_s": second - first,
+                    "caught": BUSY_DETAIL,
+                    "raised_in": "_connection",
+                }
+            ],
+            "dropped": 0,
+        }
+
+
+def test_commit_blocked_by_a_held_reader_records_the_transaction_exit(tmp_path, monkeypatch):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        clock, first, second = late_clock(run, 0)
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as reader:
+            monkeypatch.setattr(request_budget_module, "_clock", clock)
+            with pytest.raises(RequestPolicyError) as refused, run._connection() as connection:
+                connection.execute("INSERT INTO workers VALUES ('late')")
+                reader.execute("BEGIN")
+                reader.execute("SELECT name FROM workers").fetchall()
+            monkeypatch.undo()
+            reader.rollback()
+        caught = refused.value.__context__
+        frame = traceback.extract_tb(caught.__traceback__)[-1]
+        shown = "".join(traceback.format_exception(caught))
+        assert (frame.name, frame.line) == ("_connection", "with connection:"), shown
+        assert immediate(run) == {
+            "records": [
+                {
+                    "stage": "transaction-exit",
+                    "write": True,
+                    "timeout_s": 0.0,
+                    "elapsed_with_closure_s": second - first,
+                    "caught": BUSY_DETAIL,
+                    "raised_in": "_connection",
+                }
+            ],
+            "dropped": 0,
+        }, shown
+
+
+def test_missing_ledger_records_the_connect_stage_with_its_sqlite_code(tmp_path, monkeypatch):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        clock, first, second = late_clock(run, 0)
+        with ledger_moved_away(run):
+            monkeypatch.setattr(request_budget_module, "_clock", clock)
+            with pytest.raises(RequestPolicyError):
+                run.snapshot()
+            monkeypatch.undo()
+        assert immediate(run) == {
+            "records": [
+                {
+                    "stage": "connect",
+                    "write": False,
+                    "timeout_s": 0.0,
+                    "elapsed_with_closure_s": second - first,
+                    "caught": CANTOPEN_DETAIL,
+                    "raised_in": "_connection",
+                }
+            ],
+            "dropped": 0,
+        }
+
+
+def test_body_sql_error_records_the_body_stage_and_the_calling_method(tmp_path, monkeypatch):
+    with tiny_run(tmp_path) as (run, grant, _limits, _upstream):
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as other, other:
+            other.execute("DROP TABLE requests")
+        clock, first, second = late_clock(run, 100)
+        monkeypatch.setattr(request_budget_module, "_clock", clock)
+        with pytest.raises(RequestPolicyError), run.logical(grant):
+            pass
+        monkeypatch.undo()
+        assert immediate(run) == {
+            "records": [
+                {
+                    "stage": "body",
+                    "write": True,
+                    "timeout_s": BUSY_SECONDS,
+                    "elapsed_with_closure_s": second - first,
+                    "caught": {"category": "sqlite"},
+                    "raised_in": "logical",
+                }
+            ],
+            "dropped": 0,
+        }
+
+
+@pytest.mark.parametrize(
+    "context,stage,recorded",
+    [
+        (None, "body", None),
+        (OSError("private"), "unknown", {"category": "other"}),
+    ],
+)
+def test_body_error_with_a_context_member_is_unattributed(tmp_path, context, stage, recorded):
+    # Constructed exceptions: SQLite offers no way to force a rollback failure on demand.
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        error = sqlite3.OperationalError("private")
+        error.__context__ = context
+        with pytest.raises(RequestPolicyError), run._connection():
+            raise error
+        kept = immediate(run)["records"]
+        assert len(kept) == 1, kept
+        record = kept[0]
+        assert (record["stage"], record.get("context"), record["raised_in"]) == (
+            stage,
+            recorded,
+            "_connection",
+        )
+
+
+@pytest.mark.parametrize("remaining", [100, 0.04, 0, -5])
+def test_effective_timeout_and_elapsed_come_from_the_run_clock(tmp_path, monkeypatch, remaining):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        clock, first, second = late_clock(run, remaining)
+        left = run.started + run.authorization.limits.seconds - first
+        with ledger_moved_away(run):
+            monkeypatch.setattr(request_budget_module, "_clock", clock)
+            with pytest.raises(RequestPolicyError):
+                run.snapshot()
+            monkeypatch.undo()
+        kept = immediate(run)["records"]
+        assert len(kept) == 1, kept
+        record = kept[0]
+        assert record["timeout_s"] == max(0, min(BUSY_SECONDS, left))
+        assert record["elapsed_with_closure_s"] == second - first
+
+
+def test_unreadable_start_clock_records_a_zero_timeout_and_no_elapsed(tmp_path, monkeypatch):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        broken = RequestPolicyError("accounting")
+        with ledger_moved_away(run):
+            monkeypatch.setattr(request_budget_module, "_clock", scripted_clock(broken, 5.0))
+            with pytest.raises(RequestPolicyError) as refused:
+                run.snapshot()
+            monkeypatch.undo()
+        assert refused.value.reason == "accounting"
+        assert immediate(run)["records"] == [
+            {
+                "stage": "connect",
+                "write": False,
+                "timeout_s": 0.0,
+                "caught": CANTOPEN_DETAIL,
+                "raised_in": "_connection",
+            }
+        ]
+
+
+def test_unreadable_closing_clock_keeps_the_refusal_and_omits_elapsed(tmp_path, monkeypatch):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        first = run.started
+        broken = RequestPolicyError("accounting")
+        with ledger_moved_away(run):
+            monkeypatch.setattr(request_budget_module, "_clock", scripted_clock(first, broken))
+            with pytest.raises(RequestPolicyError) as refused:
+                run.snapshot()
+            monkeypatch.undo()
+        assert refused.value.reason == "accounting"
+        kept = immediate(run)["records"]
+        assert len(kept) == 1, kept
+        record = kept[0]
+        assert (record["stage"], "elapsed_with_closure_s" in record) == ("connect", False)
+
+
+def test_failed_diagnostic_observes_the_latch_and_never_replaces_the_refusal(tmp_path, monkeypatch):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        entered = []
+
+        def faulty(*args, **kwargs):
+            marker, detail = run.directory / "failed", run.directory / "failed.detail"
+            entered.append(
+                (
+                    marker.read_text() if marker.exists() else None,
+                    json.loads(detail.read_text()) if detail.exists() else None,
+                )
+            )
+            raise RuntimeError("diagnostic fault")
+
+        monkeypatch.setattr(run, "_immediate_record", faulty, raising=False)
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+            blocker.execute("BEGIN IMMEDIATE")
+            with pytest.raises(RequestPolicyError) as refused:
+                run.authorize_participant("late")
+        error = refused.value
+        assert error.reason == "accounting"
+        assert isinstance(error.__context__, sqlite3.OperationalError)
+        assert (error.__cause__, error.__suppress_context__) == (None, True)
+        assert (run.directory / "failed").read_text() == "accounting"
+        assert json.loads((run.directory / "failed.detail").read_text()) == BUSY_DETAIL
+        assert entered == [("accounting", BUSY_DETAIL)]
+        assert immediate(run) == {"records": [], "dropped": 1}
+
+
+def test_immediate_refusals_are_bounded_and_overflow_is_counted(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        with ledger_moved_away(run):
+            for _ in range(10):
+                with pytest.raises(RequestPolicyError):
+                    run.snapshot()
+        kept = immediate(run)
+        assert (len(kept["records"]), kept["dropped"]) == (8, 2)
+        assert {record["stage"] for record in kept["records"]} == {"connect"}
+
+
+def test_healthy_run_records_no_refusal(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        run.snapshot()
+        assert immediate(run) == NO_REFUSALS
