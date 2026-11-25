@@ -2192,6 +2192,9 @@ RENAME_BASE = (
 )
 
 
+# The hunk selection reads a repository the test builds, never the developer's git settings:
+# a global `core.autocrlf=input` turns the CRLF-to-LF change into "nothing to commit".
+@patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
 def scope_between(base_files, head_files):
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary).resolve()
