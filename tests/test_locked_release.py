@@ -18,8 +18,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / ".github/workflows/release.yml"
 CLI = (
-    "pdm run semantic-release -v version --no-commit --tag --push "
-    "--no-changelog --vcs-release --skip-build"
+    "pdm run semantic-release -c .release-notes/semantic-release.json -v version "
+    "--no-commit --tag --push --no-changelog --vcs-release --skip-build"
 )
 INSTALL = (
     "pdm lock --check\n"
@@ -264,7 +264,12 @@ class ReleaseWorkflowTest(unittest.TestCase):
             step
             for step in steps
             if step.get("name")
-            in {"Set up release tooling", "Install locked release group", "Semantic release"}
+            in {
+                "Set up release tooling",
+                "Install locked release group",
+                "Prepare release notes",
+                "Semantic release",
+            }
         ]
         self.assertEqual(
             selected,
@@ -274,6 +279,11 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     "if": "steps.guard.outputs.skip == 'false'",
                     "uses": "$/.github/actions/setup",
                     "with": {"release-only": "true"},
+                },
+                {
+                    "name": "Prepare release notes",
+                    "if": "steps.guard.outputs.skip == 'false'",
+                    "run": "pdm run python -m scripts.release_notes prepare",
                 },
                 {
                     "name": "Semantic release",
@@ -290,6 +300,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 "Check out main",
                 "Decide whether this commit is released",
                 "Set up release tooling",
+                "Prepare release notes",
                 "Semantic release",
                 "Summary",
                 "Select the exact released commit for image publication",
