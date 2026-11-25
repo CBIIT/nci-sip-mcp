@@ -2,7 +2,7 @@
 
 import json
 
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 
 from nci_sip_acceptance.environments import SURFACES, Environment
 from nci_sip_acceptance.request_catalogue import compile_policy
@@ -52,6 +52,7 @@ def test_controller_selection_authorizes_only_validated_pinned_content(tmp_path)
                     max_response_bytes=1024,
                     size_bound="owned",
                     request_policy=ControlledHttpPolicy(owner.run),
+                    user_agent=PRODUCT_USER_AGENT,
                 )
                 return {
                     "selection": release.to_dict(),
@@ -83,6 +84,7 @@ def test_controller_selection_authorizes_only_validated_pinned_content(tmp_path)
             assert sorted((key.lower(), value) for key, value in headers) == sorted(
                 [
                     ("accept", "application/json"),
+                    ("user-agent", PRODUCT_USER_AGENT),
                     ("x-correlation-id", "owned-selection-content"),
                     ("host", receiver.origin.removeprefix("http://")),
                     ("accept-encoding", "identity"),

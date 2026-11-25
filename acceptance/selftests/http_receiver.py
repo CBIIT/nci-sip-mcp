@@ -4,6 +4,7 @@ import ssl
 from collections import deque
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from importlib.metadata import version
 from ipaddress import ip_address
 from threading import Thread
 
@@ -11,6 +12,9 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
+
+# Written out here, not taken from the code under test: the label every governed request must send.
+PRODUCT_USER_AGENT = f"nci-sip-mcp/{version('nci-sip-mcp')} (+https://github.com/CBIIT/nci-sip-mcp)"
 
 
 def tls_certificate(directory, *, address="127.0.0.1"):

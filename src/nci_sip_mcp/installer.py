@@ -22,10 +22,11 @@ from email.parser import Parser
 from pathlib import Path
 from typing import Any, cast
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from . import __version__
 from .config import UpstreamConfigurationError, upstream_base_urls
+from .errors import PlatformError
 from .installer_state import (
     InstallationState,
     InstallerStateError,
@@ -37,6 +38,7 @@ from .installer_state import (
     validate_outcomes,
     write_state,
 )
+from .traffic_identity import product_user_agent
 from .validation import PROFILES
 
 COMPONENTS = ("server",)
@@ -209,9 +211,13 @@ def executable_prerequisite(name: str, fix: str) -> Prerequisite:
 
 
 def reachability_prerequisite(name: str, url: str, fix: str) -> Prerequisite:
+    # Built here, not in `reachable`: unsafe metadata stops check/run/status with exit 2 before any
+    # contact, never "unreachable".
+    request = Request(url, headers={"User-Agent": product_user_agent()})  # noqa: S310 - operator-configured HTTP(S) endpoint
+
     def reachable() -> bool:
         try:
-            with urlopen(url, timeout=5):  # noqa: S310 - operator-configured HTTP(S) endpoint
+            with urlopen(request, timeout=5):  # noqa: S310 - the same endpoint
                 return True
         except HTTPError:
             return True
@@ -819,7 +825,7 @@ def _state_main(args: argparse.Namespace, plan: InstallationPlan) -> int:
         code, record = (
             _guided_run(args, plan) if args.command == "run" else _state_command(args, plan)
         )
-    except (InstallerStateError, UpstreamConfigurationError) as error:
+    except (InstallerStateError, UpstreamConfigurationError, PlatformError) as error:
         sys.stderr.write(str(error) + "\n")
         return 2
     sys.stdout.write(json.dumps(record, indent=2) + "\n")
@@ -987,7 +993,7 @@ def _wait_for_pid(pid: int) -> None:
 def _check_main(plan: InstallationPlan) -> int:
     try:
         code, record = _check_record(plan)
-    except UpstreamConfigurationError as error:
+    except (UpstreamConfigurationError, PlatformError) as error:
         sys.stderr.write(str(error) + "\n")
         return 2
     sys.stdout.write(json.dumps(record, indent=2) + "\n")

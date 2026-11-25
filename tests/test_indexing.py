@@ -12,6 +12,7 @@ from nci_sip_mcp.index_adapter import manifest_record
 from nci_sip_mcp.indexing import full_build
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.release import ReleaseContext
+from nci_sip_mcp.traffic_identity import product_user_agent
 from ncit_index.errors import IndexBuildError, IndexCompatibilityError
 from test_audit import captured, records
 from test_evaluation_sets import sample_set_payload
@@ -33,7 +34,9 @@ class FullBuildTest(ServerFixture):
         super().setUp()
         invoke(self.context, "index_codes", ["C3262"])
         self.active = self.context.index.get_active_manifest()
-        self.context.evs = EVSClient("https://evs.invalid", max_attempts=1)
+        self.context.evs = EVSClient(
+            "https://evs.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
         self.release = ReleaseContext("ncit", "monthly", "26.06e", None, "ncit_26.06e")
 
     def build_pages(self, pages):
@@ -248,7 +251,7 @@ class IndexOperatorResultTest(ServerFixture):
 class FullBuildInputValidationTest(ServerFixture):
     def setUp(self):
         super().setUp()
-        self.context.evs = EVSClient("https://example.invalid")
+        self.context.evs = EVSClient("https://example.invalid", user_agent=product_user_agent())
 
     def test_downloaded_build_must_match_the_requested_release(self):
         with (
@@ -282,7 +285,9 @@ class FullBuildInputValidationTest(ServerFixture):
 
 class FullBuildRequestTest(unittest.TestCase):
     def setUp(self):
-        self.client = EVSClient("https://evs.invalid", max_attempts=1)
+        self.client = EVSClient(
+            "https://evs.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
         self.release = release()
 
     def reply(self, value):

@@ -19,6 +19,7 @@ from .context import Context
 from .errors import PlatformError
 from .index_adapter import LocalIndexAdapter
 from .server import create_mcp
+from .traffic_identity import capture_identity, user_agent
 from .transport import run_http
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,13 @@ def startup_failure(asset: str, error: Exception) -> None:
     # Library exceptions can contain paths, URLs or secrets; retain only a setting's name.
     configure_logging("ERROR")
     logger.setLevel(logging.ERROR)  # A fatal startup diagnostic survives CRITICAL verbosity.
-    parameter = re.search(r"NCI_SIP_[A-Z_]+", str(error)) if asset == "settings" else None
+    fields: dict[str, str | None]
+    if isinstance(error, PlatformError):
+        # Its code and parameter are static names the specification lists, never the value.
+        fields = {"code": error.code, "parameter": error.details.get("parameter")}
+    else:
+        parameter = re.search(r"NCI_SIP_[A-Z_]+", str(error)) if asset == "settings" else None
+        fields = {"parameter": parameter.group() if parameter else None}
     emit(
         logger,
         logging.ERROR,
@@ -37,7 +44,7 @@ def startup_failure(asset: str, error: Exception) -> None:
         errorType="PlatformError"
         if isinstance(error, IndexCapabilityError)
         else type(error).__name__,
-        parameter=parameter.group() if parameter else None,
+        **fields,
     )
 
 
@@ -80,10 +87,15 @@ def main() -> int:
         asset = "index"
         if settings.http_require_index or index.get_active_manifest() is not None:
             index.verify_active(provider)
+        asset = "identity"
+        # Refuses a malformed id or an unsafe version before any client is built; Context
+        # captures the same label again for the clients it creates.
+        user_agent(capture_identity())
+        asset = "context"
+        context = Context(settings, index=index, embedding_provider=provider)
     except (RuntimeError, ValueError, OSError, PlatformError) as exc:
         startup_failure(asset, exc)
         return 1
-    context = Context(settings, index=index, embedding_provider=provider)
     if settings.transport == "streamable-http":
         run_http(settings, context)
     else:

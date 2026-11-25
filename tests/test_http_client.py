@@ -48,6 +48,7 @@ from nci_sip_mcp.http_client import (
 from nci_sip_mcp.invocation import call
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.request_policy import Exchange, using_request_policy
+from nci_sip_mcp.traffic_identity import product_user_agent
 from ncit_index.embeddings import HashingEmbeddingProvider
 from test_evs_client import FakeResponse
 
@@ -157,7 +158,7 @@ class ServerTestCase(unittest.TestCase):
             "max_response_bytes": 1000,
             "size_bound": "BOUND",
         } | options
-        client = HttpClient(server.url, **settings)
+        client = HttpClient(server.url, **settings, user_agent=product_user_agent())
         self.waits = []
         client.sleep = self.waits.append
         client.jitter = lambda low, high: high
@@ -412,6 +413,7 @@ class RequestLogTest(ServerTestCase):
             retry_backoff_seconds=0,
             max_response_bytes=10,
             size_bound="BOUND",
+            user_agent=product_user_agent(),
         )
         records = []
         client.on_request = records.append
@@ -458,7 +460,7 @@ class CredentialsTest(ServerTestCase):
     def test_the_licence_key_is_sent_on_every_evs_request(self):
         server = self.serve(Reply(503))
 
-        EVSClient(server.url, license_key=KEY).get_api_version()
+        EVSClient(server.url, license_key=KEY, user_agent=product_user_agent()).get_api_version()
 
         # The name on the wire, spelled out: the constant is what the client sends.
         sent = [headers["x-evsrestapi-license-key"] for _, headers in server.seen]
@@ -713,7 +715,9 @@ class CredentialsStayOutTest(ServerTestCase):
         outputs, records = [], []
         for label, reply in self.ECHOES.items():
             server = self.serve(reply)
-            client = EVSClient(server.url, max_attempts=1, license_key=KEY)
+            client = EVSClient(
+                server.url, max_attempts=1, license_key=KEY, user_agent=product_user_agent()
+            )
             client.http.on_request = records.append
             with self.subTest(label):
                 try:
@@ -804,7 +808,7 @@ class CredentialsStayOutTest(ServerTestCase):
 
     def test_the_key_does_not_show_in_the_error_from_evs(self):
         server = self.serve(self.ECHOES["an error status"])
-        client = EVSClient(server.url, license_key=KEY)
+        client = EVSClient(server.url, license_key=KEY, user_agent=product_user_agent())
 
         with self.assertRaises(UpstreamRejectedError) as raised:
             client.get_api_version()
@@ -817,7 +821,7 @@ class CredentialsStayOutTest(ServerTestCase):
         # then release classification survives without exposing the key in any value.
         body = json.dumps({"message": f"Terminology not found = {KEY}"}).encode()
         server = self.serve(Reply(404, body))
-        client = EVSClient(server.url, license_key=KEY)
+        client = EVSClient(server.url, license_key=KEY, user_agent=product_user_agent())
 
         result = call("get_concept", lambda: client.get_concept("C4817", release=release()))
 
@@ -830,7 +834,8 @@ class CredentialsStayOutTest(ServerTestCase):
 class ClientBoundaryTest(ServerTestCase):
     def cadsr(self, server, **options):
         client = CaDSRClient(
-            Settings(cadsr_base_url=server.url, cadsr_ftp_url=server.url, **options)
+            Settings(cadsr_base_url=server.url, cadsr_ftp_url=server.url, **options),
+            user_agent=product_user_agent(),
         )
         for http in (client.http, client.match_http, client.export_http):
             http.sleep = lambda _: None
@@ -850,7 +855,9 @@ class ClientBoundaryTest(ServerTestCase):
 
 class CredentialRedactionTest(unittest.TestCase):
     def test_request_observer_receives_a_redacted_url(self):
-        client = EVSClient("https://example.invalid", license_key="key-canary").http
+        client = EVSClient(
+            "https://example.invalid", license_key="key-canary", user_agent=product_user_agent()
+        ).http
         observed = []
         client.on_request = observed.append
         with patch("nci_sip_mcp.http_client._open", return_value=FakeResponse(b"{}")):
@@ -861,7 +868,9 @@ class CredentialRedactionTest(unittest.TestCase):
         )
 
     def test_rejected_content_reason_redacts_credentials(self):
-        client = EVSClient("https://example.invalid", license_key="key-canary").http
+        client = EVSClient(
+            "https://example.invalid", license_key="key-canary", user_agent=product_user_agent()
+        ).http
         with (
             patch("nci_sip_mcp.http_client._open", return_value=FakeResponse(b"{}")),
             self.assertRaises(UpstreamUnavailableError) as raised,
@@ -977,7 +986,7 @@ class CachedPolicyTest(ServerTestCase):
         self.assertNotIn("error", invoke(self.context, "index_codes", ["C3262"]))
         server = ServerTestCase.serve(self, Reply(body=json.dumps(concept("C3262")).encode()))
         with scoped(DeniedPolicy()):
-            self.context.evs = EVSClient(server.url, 1)
+            self.context.evs = EVSClient(server.url, 1, user_agent=product_user_agent())
         with (
             patch.object(self.context.evs, "get_terminologies", return_value=[terminology_row()]),
             correlated("policy-test"),
@@ -1241,6 +1250,7 @@ class BufferedPolicyTest(ServerTestCase):
                     marker,
                     str(caught.exception) + repr(caught.exception.details),
                 )
+                self.assertNotIn("VPN", str(caught.exception))
 
     def test_certificate_after_http_retry_keeps_last_status_and_stops(self):
         """Given a 503 then cert failure, when retried, then status survives; no third send."""
@@ -1416,7 +1426,9 @@ class BufferedPolicyTest(ServerTestCase):
         path = "/NCIFormAPI.v2_0:NciFormApiRad/Form/5406471"
         policy = BufferedPolicy(server.url + path)
         with using_request_policy(policy):
-            cadsr = CaDSRClient(Settings(cadsr_base_url=server.url))
+            cadsr = CaDSRClient(
+                Settings(cadsr_base_url=server.url), user_agent=product_user_agent()
+            )
         with self.assertRaises(PlatformError) as caught:
             cadsr.get_form("5406471")
         self.assertEqual(caught.exception.code, "not_found")

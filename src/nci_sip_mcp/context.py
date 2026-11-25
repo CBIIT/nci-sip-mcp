@@ -12,6 +12,7 @@ from .http_client import HttpClient
 from .index_adapter import LocalIndexAdapter
 from .index_port import IndexPort
 from .ssis import SSISClient
+from .traffic_identity import capture_identity, user_agent
 
 
 class Context:
@@ -26,8 +27,11 @@ class Context:
         embedding_provider: EmbeddingProvider | None = None,
     ) -> None:
         self.settings = settings
-        self.cadsr = cadsr or CaDSRClient(settings)
-        self.ssis = ssis or SSISClient(settings)
+        # Renders the label for the clients built below (A6.2b). On the container path the label
+        # was already checked at start-up, from the same environment and metadata in one process.
+        agent = user_agent(capture_identity())
+        self.cadsr = cadsr or CaDSRClient(settings, user_agent=agent)
+        self.ssis = ssis or SSISClient(settings, user_agent=agent)
         self.evs = evs or EVSClient(
             settings.evs_base_url,
             settings.timeout_seconds,
@@ -35,6 +39,7 @@ class Context:
             retry_backoff_seconds=settings.evs_retry_backoff_seconds,
             max_response_bytes=settings.evs_max_response_bytes,
             license_key=settings.evs_license_key,
+            user_agent=agent,
         )
         self.index: IndexPort = index or LocalIndexAdapter(LocalIndex(settings.data_dir))
         self.fhir = HttpClient(
@@ -48,6 +53,7 @@ class Context:
             credentials={LICENSE_KEY_HEADER: settings.evs_license_key}
             if settings.evs_license_key
             else None,
+            user_agent=agent,
         )
         self.embedding_provider = embedding_provider or create_embedding_provider(
             settings.embedding_provider, settings.embedding_model

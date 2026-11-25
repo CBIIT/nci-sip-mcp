@@ -7,7 +7,8 @@ key or credentials, and becomes a recorded fixture, dated today. A request is a 
 `Accept: application/json` unless its entry gives a `method`, a `body` (JSON, or text sent
 as written) or a `form` (sent form-encoded: a SPARQL query), and the `headers` to send:
 those it gives are sent alone and are part of the fixture, so that the fixture server
-answers only a request that carries them. Each concept under
+answers only a request that carries them. Every request also carries the acceptance
+product User-Agent, which replaces any other and is never recorded. Each concept under
 `record.concepts` is recorded once, at the include it is listed under, in
 `recorded/evs/concepts/`. Each entry under
 `record.derived` becomes a crafted fixture for the request form a requirement prescribes
@@ -45,6 +46,7 @@ import yaml
 
 from nci_sip_acceptance.concepts import ConceptRules, Recording, recording_key
 from nci_sip_acceptance.fixture_server import CONCEPTS, FORM_TYPE, MANIFEST
+from nci_sip_acceptance.traffic_identity import capture_identity, product_user_agent
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -90,7 +92,8 @@ class Planned:
     ignored: dict[str, str] = field(default_factory=dict)
     status: int = HTTPStatus.OK
     method: str = "GET"
-    # The headers sent and recorded; None sends Accept: application/json and records none.
+    # The headers sent and recorded (the User-Agent is added to the request, never recorded);
+    # None sends Accept: application/json and records none.
     headers: dict[str, str] | None = None
     body: Any = None
     # A form-encoded body, each field with its text; in place of `body`.
@@ -396,6 +399,8 @@ def write(root: Path, documents: dict[str, dict[str, Any]]) -> None:
 def live_fetch(bases: dict[str, str]) -> Fetch:
     """A fetch from the live services at the manifest's base URLs."""
 
+    label = product_user_agent(capture_identity())
+
     def fetch(
         surface: str,
         path: str,
@@ -416,6 +421,8 @@ def live_fetch(bases: dict[str, str]) -> Fetch:
             data = urlencode(form).encode()
             sent["Content-Type"] = FORM_TYPE
         request = Request(url, data=data, headers=sent, method=method)  # noqa: S310 - https from the manifest
+        # Replaces a caller's own User-Agent, whatever its case: one header, never recorded.
+        request.add_header("User-Agent", label)
         try:
             with urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
                 return response.status, _parse(response.read())

@@ -16,7 +16,7 @@ from xml.etree import ElementTree
 import pytest
 import yaml
 from coverage import Coverage, CoverageData
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 from test_request_release_selection import response
 
 from nci_sip_acceptance import environments
@@ -158,6 +158,8 @@ def local_policy(tree, receiver):
 def test_native_serial_node_shares_controller_release_and_budget(native_tree, logical_limit):
     tree, python, env = native_tree
     env["NCI_SIP_EVS_LICENSE_KEY"] = "native-synthetic-key"
+    # The controller's own environment holds an installation id; no request may carry it.
+    env["NCI_SIP_INSTALLATION_ID"] = "0" * 32
     (tree / "acceptance/src/native_credentials_probe.py").write_text(
         "import os\n"
         "def pytest_sessionstart(session):\n"
@@ -200,6 +202,10 @@ def test_native_serial_node_shares_controller_release_and_budget(native_tree, lo
             {key.lower(): value for key, value in headers}["x-evsrestapi-license-key"]
             for _method, _path, headers, _body in receiver.requests
         ] == ["native-synthetic-key"] * len(expected)
+        assert [
+            {key.lower(): value for key, value in headers}["user-agent"]
+            for _method, _path, headers, _body in receiver.requests
+        ] == [PRODUCT_USER_AGENT] * len(expected)
     report = json.loads((tree / "acceptance/tmp/native-report.json").read_text())
     assert "synthetic-key" not in json.dumps(report)
     assert report["tests"] == {
@@ -439,6 +445,7 @@ import pytest
 from nci_sip_acceptance.request_native import NativeRun
 from nci_sip_acceptance.request_transport import ControlledHttpPolicy
 from nci_sip_mcp.http_client import HttpClient, RequestPolicyError
+from nci_sip_mcp.traffic_identity import product_user_agent
 
 actual_start = NativeRun.start
 native = None
@@ -456,7 +463,8 @@ def attempt_during_teardown():
     client = HttpClient(native.environment.origins['evs'], label='EVS',
         timeout_seconds=2, max_attempts=1, retry_backoff_seconds=0,
         max_response_bytes=1048576, size_bound='owned-finalizer',
-        request_policy=ControlledHttpPolicy(native.controller.run))
+        request_policy=ControlledHttpPolicy(native.controller.run),
+        user_agent=product_user_agent())
     try:
         client.get_json('/api/v1/metadata/terminologies',
             {'terminology':'ncit','latest':'true','tag':'monthly'})
