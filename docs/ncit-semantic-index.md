@@ -192,9 +192,9 @@ bound to its build/release/embedding identity and changes the active snapshot at
 **Activation retains only the selected build and the former active build.** The other
 completed snapshots are hidden at once (they no longer appear in `index-builds` and cannot be
 activated) and deleted after the activation commits. A failed deletion never undoes the
-activation: the result lists the builds still awaiting removal in `pendingRemoval`, the log
-carries a warning `index_build_removal_pending`, and their disk space stays in use until a later
-activation, for example `index-activate` of the already active build, removes them. A removal
+activation: after a storage failure while deleting, the result lists the builds still awaiting
+removal in `pendingRemoval`, the log carries a warning `index_build_removal_pending`, and their
+disk space stays in use until a later activation, for example `index-activate` of the already active build, removes them. A removal
 frees pages inside the SQLite file for reuse; the file itself does not shrink. Preserve
 needed evidence/backups before activation; do not assume every listed candidate will remain
 available. Verify search/readiness with the same embedding settings

@@ -464,7 +464,10 @@ class LocalIndex:
 
         The other completed builds are hidden in the same transaction and removed after it
         commits, so a failed removal can never undo the activation. The list of builds to
-        remove is read inside that transaction, so nothing after the commit can fail the call.
+        remove is read inside that transaction, so no read after the commit can fail the call.
+        A storage failure while deleting is handled: the builds still present are returned and
+        logged as `index_build_removal_pending`. Any other failure of a removal propagates, after
+        the activation has committed.
         """
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
