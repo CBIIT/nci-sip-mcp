@@ -4,6 +4,7 @@ Every scenario runs the entry points in a sacrificial repository whose remote is
 a local tag can be created, nothing can be published. `gh` is a recording stub.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -11,8 +12,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from typing import NamedTuple
+
+import jinja2
+from scripts import release_notes
 
 ROOT = Path(__file__).parent.parent
 PYPROJECT = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -44,7 +49,9 @@ elif argv[:2] == ["release", "view"]:
         sys.stderr.write("release not found" if state == "absent" else "HTTP 401: Bad credentials")
         sys.exit(1)
 elif argv[:2] == ["release", "create"]:
-    pass
+    if os.environ.get("FAKE_GH_CREATE") == "fail":
+        sys.stderr.write("HTTP 500")
+        sys.exit(1)
 else:
     sys.exit(99)
 """
@@ -374,6 +381,73 @@ class ReleaseNotesFlowTest(unittest.TestCase):
         self.assertEqual(project.git("ls-files", ".release-notes"), "")
 
 
+class FragmentFilesTest(unittest.TestCase):
+    def test_a_branch_the_tool_does_not_release_from_is_reported_not_treated_as_no_release(self):
+        project = Scratch(self)
+        project.history()
+        project.git("switch", "-q", "-c", "feature")
+
+        result = project.notes_tool("prepare")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("printed no candidate version; is this a release branch?", result.stderr)
+
+    def test_only_markdown_files_belong_in_the_fragment_directory(self):
+        project = Scratch(self)
+        project.commit("chore: start", files={"release-notes/draft.txt": "x"})
+
+        result = project.notes_tool("prepare")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "release-notes/draft.txt: only .md files belong in release-notes/", result.stderr
+        )
+
+
+class LiteralEncoderTest(unittest.TestCase):
+    """The encoder's output, read back by Jinja, is exactly the text, byte for byte."""
+
+    def read_back(self, text):
+        literal = release_notes.encode_literal(text)
+        environment = jinja2.Environment(autoescape=False)  # noqa: S701 - plain text, as the tool renders
+        return environment.from_string(f'{{{{ "{literal}" }}}}').render()
+
+    def test_every_awkward_text_round_trips_unchanged(self):
+        for text in (
+            "",
+            "plain words, with: punctuation (and) 'single' quotes.",
+            '"double" quotes and a \\ backslash and \\x41 \\n \\u00e9 \\" sequences',
+            "{{ 7*7 }} {% if x %}a{% endif %} {# c #} {% endraw %} {%- x -%} {{- y -}}",
+            "line one\nline two\r\nline three\ttab\x00nul\x7f",
+            "Ünïcödé ✓ 日本語 \u2028\u2029 😀 \U0001f9ea",
+            "100% # heading-looking {x} } {",
+            "\ud800 lone surrogate",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(self.read_back(text), text)
+
+    def test_no_delimiter_character_appears_in_the_encoded_literal(self):
+        encoded = release_notes.encode_literal('{{ }} {% %} {# #} \\ " \n')
+
+        self.assertEqual([character for character in encoded if character in '{}%#"\n'], [])
+        self.assertEqual(encoded.count("\\"), 15)
+
+
+class PackagedTemplateTest(unittest.TestCase):
+    def test_a_missing_packaged_template_fails_instead_of_rendering_without_it(self):
+        with tempfile.TemporaryDirectory() as directory, contextlib.chdir(directory):
+            fake_package = Path(directory) / "semantic_release" / "__init__.py"
+            with (
+                unittest.mock.patch.object(
+                    release_notes.semantic_release, "__file__", str(fake_package)
+                ),
+                self.assertRaisesRegex(release_notes.ReleaseNotesError, "another layout"),
+            ):
+                release_notes.write_template("## Release summary\n\n")
+
+            self.assertFalse((Path(directory) / ".release-notes").exists())
+
+
 class RecoveryTest(unittest.TestCase):
     def release_and_notes(self, project):
         project.history()
@@ -432,6 +506,28 @@ class RecoveryTest(unittest.TestCase):
         result = self.recover(project, "v0.1.0")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(project.gh_calls()[-1]["notes"], original)
+
+    def test_a_tag_the_history_does_not_yield_is_refused(self):
+        project = Scratch(self)
+        project.history()
+        project.git("tag", "-a", "v0.3.0", "-m", "v0.3.0")
+
+        result = self.recover(project, "v0.3.0")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("the history at v0.3.0 no longer yields that release", result.stderr)
+        self.assertEqual(project.gh_calls()[-1]["argv"][:2], ["release", "view"])
+
+    def test_a_failed_creation_is_reported(self):
+        project = Scratch(self)
+        project.history()
+        project.git("tag", "-a", "v0.2.0", "-m", "v0.2.0")
+        project.env["FAKE_GH_CREATE"] = "fail"
+
+        result = self.recover(project)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("gh release create failed: HTTP 500", result.stderr)
 
     def test_recovery_refuses_without_creating_anything_when_authority_is_unproven(self):
         for name, env, setup, message in (
