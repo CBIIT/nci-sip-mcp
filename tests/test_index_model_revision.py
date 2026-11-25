@@ -262,7 +262,7 @@ class RevisionSourceTest(unittest.TestCase):
             return f"/cache/models--org--model/snapshots/{commit}"
 
         class Model:
-            def __init__(self, name, *, local_files_only=False):
+            def __init__(self, name, *, local_files_only=False, cache_folder=None):
                 loads.append((name, local_files_only))
                 if name == "org/model":
                     cache["cached"] = True
@@ -271,7 +271,7 @@ class RevisionSourceTest(unittest.TestCase):
             def encode(self, texts, **_):
                 return [[1.0, 0.0] for _ in texts]
 
-        def snapshot(name, *, local_files_only=False):
+        def snapshot(name, *, local_files_only=False, cache_dir=None):
             if not local_files_only:
                 raise OSError("a download is not allowed")
             if not cache["cached"]:
@@ -317,7 +317,7 @@ class RevisionSourceTest(unittest.TestCase):
             def encode(self, texts, **_):
                 return [[1.0, 0.0] for _ in texts]
 
-        def snapshot(name, *, local_files_only=False):
+        def snapshot(name, *, local_files_only=False, cache_dir=None):
             if not local_files_only:
                 raise OSError("a download is not allowed")
             return snapshot_path

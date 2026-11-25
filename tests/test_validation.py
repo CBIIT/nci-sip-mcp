@@ -196,7 +196,9 @@ class EmbeddingConfigurationTest(unittest.TestCase):
                 return [(len(text), int(normalize_embeddings), len(self.name)) for text in texts]
 
         library = types.SimpleNamespace(SentenceTransformer=FakeModel)
-        hub = types.SimpleNamespace(snapshot_download=lambda name, *, local_files_only: snapshot)
+        hub = types.SimpleNamespace(
+            snapshot_download=lambda name, *, local_files_only, cache_dir: snapshot
+        )
         with patch.dict(sys.modules, {"sentence_transformers": library, "huggingface_hub": hub}):
             provider = create_embedding_provider("Sentence-Transformers", "a-model")
 
@@ -213,7 +215,7 @@ class EmbeddingConfigurationTest(unittest.TestCase):
         # Each import is forced to fail with the other present: no dependence on the environment.
         present = types.SimpleNamespace(
             SentenceTransformer=lambda *args, **kwargs: None,
-            snapshot_download=lambda name, *, local_files_only: "snapshot",
+            snapshot_download=lambda name, *, local_files_only, cache_dir: "snapshot",
         )
         for missing, other in (
             ("sentence_transformers", "huggingface_hub"),

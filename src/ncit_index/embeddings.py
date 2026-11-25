@@ -102,7 +102,8 @@ def _local_model(model_name: str, local_files_only: bool) -> _ResolvedModel:
     """The one place a model name becomes a path: a directory as given, else the cached snapshot.
 
     A cached snapshot wins; updating a Hub model is an explicit cache refresh. Only when online
-    and nothing is cached does the library's own load by name download it, once.
+    and nothing is cached does the library's own load by name download it, once. Both look in
+    the library's cache: `SENTENCE_TRANSFORMERS_HOME` when set, else the Hub cache.
     """
     path = Path(model_name)
     if path.is_dir():
@@ -113,13 +114,20 @@ def _local_model(model_name: str, local_files_only: bool) -> _ResolvedModel:
         from huggingface_hub import snapshot_download  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise _missing_extra(exc) from exc
+    # A load by name downloads into SENTENCE_TRANSFORMERS_HOME, else the Hub cache (None); the
+    # lookup must name the same folder or it finds another snapshot, or none.
+    cache = os.environ.get("SENTENCE_TRANSFORMERS_HOME")
     try:
-        return _ResolvedModel(snapshot_download(model_name, local_files_only=True), False)
+        return _ResolvedModel(
+            snapshot_download(model_name, local_files_only=True, cache_dir=cache), False
+        )
     except FileNotFoundError:
         if local_files_only:
             raise
-    _sentence_transformer()(model_name)  # downloads into the cache; the object is discarded
-    return _ResolvedModel(snapshot_download(model_name, local_files_only=True), False)
+    _sentence_transformer()(model_name, cache_folder=cache)  # downloads; the object is discarded
+    return _ResolvedModel(
+        snapshot_download(model_name, local_files_only=True, cache_dir=cache), False
+    )
 
 
 def _loaded_revision(model_name: str, resolved: _ResolvedModel) -> str:

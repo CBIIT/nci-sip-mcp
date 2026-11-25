@@ -121,7 +121,7 @@ class ContainerTest(ServerFixture):
                     raise ValueError("Progress output is disabled")
                 return [[len(text), int(normalize_embeddings)] for text in texts]
 
-        def snapshot(name, *, local_files_only=False):
+        def snapshot(name, *, local_files_only=False, cache_dir=None):
             if (name, local_files_only) != ("org/model", True):
                 raise OSError("Network is unavailable")
             return cached
