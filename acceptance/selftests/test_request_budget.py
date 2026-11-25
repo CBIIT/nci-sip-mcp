@@ -442,11 +442,12 @@ def test_snapshot_reads_committed_counters_without_reserving_a_writer(tmp_path):
 
 
 def test_failed_marker_detail_names_the_sqlite_cause(tmp_path):
-    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+    with tiny_run(tmp_path) as (run, grant, _limits, _upstream):
+        assert run.snapshot().state == "open"
         with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
             blocker.execute("BEGIN IMMEDIATE")
-            with pytest.raises(RequestPolicyError) as refused:
-                run.check_wait(0)
+            with pytest.raises(RequestPolicyError) as refused, run.logical(grant):
+                pass
         assert refused.value.reason == "accounting"
         assert (run.directory / "failed").read_text() == "accounting"
         assert json.loads((run.directory / "failed.detail").read_text()) == {
@@ -601,13 +602,14 @@ def test_real_sqlite_contention_closes_admission(tmp_path):
     actor = tmp_path / "blocked.py"
     actor.write_text(HELD_ACTOR)
     with tiny_run(tmp_path) as (run, grant, limits, upstream):
+        assert run.snapshot().state == "open"
         child = launch_actor(actor, tmp_path, 0, {"url": grant.url, "limits": limits}, run)
         try:
             with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
                 blocker.execute("BEGIN IMMEDIATE")
                 started = time.monotonic()
-                with pytest.raises(RequestPolicyError) as refused:
-                    run.check_wait(0)
+                with pytest.raises(RequestPolicyError) as refused, run.logical(grant):
+                    pass
                 # The ledger permits 0.1s contention; allow scheduler headroom in this test.
                 assert time.monotonic() - started < CONTENTION_RESPONSE_SECONDS
                 assert refused.value.reason == "accounting"
@@ -625,6 +627,73 @@ def test_real_sqlite_contention_closes_admission(tmp_path):
             ) == ("failed", 0, 0, 0, "accounting")
         finally:
             stop_actor(child)
+
+
+def seed_owner_check(run, grant, stack):
+    run.enable_supervision()
+    return 0, run.require_supervision_owner, lambda value: value is None
+
+
+def seed_wait(run, grant, stack):
+    return 0, partial(run.check_wait, 0), lambda value: value is None
+
+
+def seed_timeout(run, grant, stack):
+    return 0, partial(run.timeout, 1), lambda value: 0 < value <= 1
+
+
+def seed_participant(pending):
+    def seed(run, grant, stack):
+        run.authorize_participant("w")
+        if pending:
+            attached = ControlledRun.attach(run.descriptor, run.authorization, participant="w")
+            logical = stack.enter_context(attached.logical(grant))
+            stack.enter_context(logical.attempt(response_limit=5))
+        return int(pending), partial(run.participant_pending, "w"), lambda value: value is pending
+
+    return seed
+
+
+def seed_entry(pending):
+    def seed(run, grant, stack):
+        logical = stack.enter_context(run.logical(grant))
+        lease = stack.enter_context(logical.attempt(response_limit=5))
+        if pending:
+            lease._prepare_entry()
+        return 1, lease._pending_entry, lambda value: value is pending
+
+    return seed
+
+
+READ_ONLY_CHECKS = {
+    "owner": (seed_owner_check, False),
+    "wait": (seed_wait, True),
+    "timeout": (seed_timeout, True),
+    "participant-idle": (seed_participant(False), True),
+    "participant-pending": (seed_participant(True), True),
+    "entry-idle": (seed_entry(False), True),
+    "entry-pending": (seed_entry(True), True),
+}
+
+
+@pytest.mark.parametrize("name", READ_ONLY_CHECKS)
+def test_read_only_checks_proceed_while_a_writer_holds_the_reservation(tmp_path, name):
+    seed, opened = READ_ONLY_CHECKS[name]
+    with ExitStack() as stack:
+        run, grant = stack.enter_context(retirement_run(tmp_path, opened=opened))
+        committed, read, expected = seed(run, grant, stack)
+        assert run.snapshot().logical == committed
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as writer:
+            writer.execute("BEGIN IMMEDIATE")
+            writer.execute("UPDATE run SET logical=?", (committed + 1,))
+            try:
+                value = read()
+            finally:
+                writer.commit()
+        assert expected(value), value
+        assert run.directory.joinpath("failed").exists() is False
+        after = run.snapshot()
+        assert (after.logical, after.failure) == (committed + 1, None)
 
 
 def refusal(construct):
