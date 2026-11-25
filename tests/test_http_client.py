@@ -7,6 +7,7 @@ import io
 import json
 import socket
 import ssl
+import sys
 import tempfile
 import threading
 import time
@@ -375,6 +376,8 @@ class ClassificationTest(ServerTestCase):
                 self.assertEqual(len(server.seen), 1)
 
     def test_an_integer_beyond_the_json_digit_limit_is_invalid_json_and_not_retried(self):
+        self.addCleanup(sys.set_int_max_str_digits, sys.get_int_max_str_digits())
+        sys.set_int_max_str_digits(1000)  # below the 5,000-digit payload, whatever the default
         server = self.serve(Reply(body=b"1" * 5000))
         client = self.client(server, max_response_bytes=10_000)
 

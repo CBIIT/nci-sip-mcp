@@ -49,8 +49,8 @@ def _form_absence(public_id: str, payload: bytes, status: int | None) -> None:
     try:
         data = json.loads(payload)
     except ValueError, RecursionError:
-        # ValueError: bad JSON, bad UTF-8 or an integer over 4,300 digits; the common parser
-        # reports malformed JSON and HTML.
+        # ValueError: bad JSON, bad UTF-8 or an integer over the configured digit limit; the
+        # common parser reports malformed JSON and HTML.
         return
     if _empty_error_form(data):
         # recorded/cadsr/form-unknown.json supplies no machine-readable absence code.
