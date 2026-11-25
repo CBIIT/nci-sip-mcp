@@ -433,6 +433,10 @@ class MutationOperatorsTest(unittest.TestCase):
             self.assertEqual(status, 2)
             self.assertIn("Stale", rows[-1]["message"])
 
+    # The synthetic repository and the gate's own git calls must not read the developer's global
+    # or system git configuration (commit.gpgsign, core.hooksPath, init.templateDir); the
+    # environment is inherited by both subprocesses. Same pattern as scope_between (#611).
+    @patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
     def test_an_empty_diff_still_validates_the_allowlist_before_reporting_empty(self):
         # The documented preflight (`mutation-gate --base B --head B`) relies on this order.
         source = "def answer():\n    return True\n"
