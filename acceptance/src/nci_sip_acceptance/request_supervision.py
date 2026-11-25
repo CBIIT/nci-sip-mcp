@@ -6,6 +6,7 @@ import json
 import subprocess
 import threading
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import TracebackType
@@ -283,6 +284,24 @@ class SupervisedRun:
         detail = self.run.failure_detail()
         if detail is not None:
             error.add_note(f"ledger failure detail: {json.dumps(detail)}")
+        try:
+            note = self._refusals_note()
+            if note is not None:
+                error.add_note(note)
+        except Exception:  # noqa: BLE001 - a failing diagnostic note sink leaves the failure as it is.
+            return
+
+    def _refusals_note(self) -> str | None:
+        try:
+            refusals = self.run.immediate_refusals()
+        except Exception:  # noqa: BLE001 - a diagnostic read must not replace the failure.
+            return "immediate ledger refusals: [] dropped=unknown"
+        if not (refusals["records"] or refusals["dropped"]):
+            return None
+        records, dropped = "[]", refusals["dropped"] + len(refusals["records"])
+        with suppress(Exception):  # Serialisation is diagnostic too: its records count as lost.
+            records, dropped = json.dumps(refusals["records"]), refusals["dropped"]
+        return f"immediate ledger refusals: {records} dropped={dropped}"
 
     def _cleanup(self, errors: list[BaseException], *, terminal: bool) -> None:
         # Capture once before closure; mode can become visible atomically with a racing offer.
