@@ -1,0 +1,48 @@
+name: Release notes preview
+
+# Shows, without publishing anything, the release notes a pull request (or a dispatched
+# commit) would produce once merged: the same selection, validation and rendering as the
+# Release workflow, run on a local merge of the candidate onto main in a throwaway checkout.
+# It has a read-only token, no secret, no tag, release, image or installer step.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-notes-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  preview:
+    name: release notes preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0  # the preview reads every tag and the history of main
+          persist-credentials: false
+
+      - name: Set up release tooling
+        uses: $/.github/actions/setup
+        with:
+          release-only: "true"
+
+      - name: Preview the release notes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          base="${BASE_SHA:-$(git rev-parse refs/remotes/origin/main)}"
+          head="$(git rev-parse HEAD)"
+          pdm run python -m scripts.release_notes preview --base "$base" --head "$head" \
+            --repository-url "https://github.com/$REPOSITORY.git" | tee -a "$GITHUB_STEP_SUMMARY"
