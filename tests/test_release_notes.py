@@ -32,6 +32,12 @@ FAKE_GH = """#!PYTHON
 import json, os, subprocess, sys
 KNOWN = "example/scratch"
 argv = sys.argv[1:]
+
+
+def git(*args):
+    return subprocess.check_output(["git", *args], text=True).strip()
+
+
 path = next((a for a in argv if a.startswith("repos/")), "")
 if path:
     repo = "/".join(path.split("/")[1:3])
@@ -59,13 +65,44 @@ elif "/commits/refs/tags/" in path:
     tag = path.rsplit("/", 1)[1]
     local = subprocess.check_output(["git", "rev-parse", f"refs/tags/{tag}^{{commit}}"], text=True)
     print(json.dumps({"sha": os.environ.get("FAKE_GH_TAG_SHA") or local.strip()}))
+elif "/git/ref/tags/" in path:
+    tag = path.rsplit("/", 1)[1]
+    local = git("rev-parse", f"refs/tags/{tag}")
+    if os.environ.get("FAKE_GH_TAG_KIND") == "lightweight":
+        obj = {"type": "commit", "sha": os.environ.get("FAKE_GH_TAG_SHA") or local}
+    else:
+        obj = {"type": "tag", "sha": local}
+    print(json.dumps({"object": obj}))
+elif "/git/tags/" in path:
+    sha = path.rsplit("/", 1)[1]
+    rows = git("for-each-ref", "--format=%(objectname) %(taggerdate:iso-strict)", "refs/tags")
+    date = dict(row.split(" ", 1) for row in rows.splitlines())[sha]
+    commit = os.environ.get("FAKE_GH_TAG_SHA") or git("rev-parse", sha + "^{commit}")
+    print(json.dumps({"tagger": {"date": os.environ.get("FAKE_GH_TAG_DATE") or date},
+                      "object": {"type": "commit", "sha": commit}}))
+elif "/git/commits/" in path:
+    sha = path.rsplit("/", 1)[1]
+    date = git("log", "-1", "--format=%cI", sha)
+    date = os.environ.get("FAKE_GH_TAG_DATE") or date
+    print(json.dumps({"sha": sha, "committer": {"date": date}}))
 elif "/releases/tags/" in path:
     state = os.environ["FAKE_GH_RELEASE"]
+    head = "HTTP/2.0 {}\\r\\nContent-Type: application/json\\r\\n"
     statuses = {"exists": "200 OK", "absent": "404 Not Found", "error": "401 Unauthorized",
                 "server": "500 Internal Server Error"}
     if state in statuses:
-        print("HTTP/2.0 " + statuses[state] + "\\r\\nContent-Type: application/json\\r\\n\\r\\n{}")
+        print(head.format(statuses[state]) + "\\r\\n{}")
+        if state == "absent":
+            sys.stderr.write("gh: Not Found (HTTP 404)")
         sys.exit(0 if state == "exists" else 1)
+    if state == "partial":
+        sys.stdout.write("HTTP/2.0 404 Not Found\\r\\nContent-Ty")
+        sys.stderr.write("unexpected EOF")
+        sys.exit(1)
+    if state == "stale":
+        print(head.format("404 Not Found") + "\\r\\n{}")
+        sys.stderr.write("To get started with GitHub CLI, please run: gh auth login")
+        sys.exit(4)
     sys.stderr.write("release not found" if state == "sentence" else "dial tcp: lookup failed")
     sys.exit(1)
 else:
@@ -590,12 +627,45 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("gh release create failed: HTTP 500", result.stderr)
 
+    def run_arranged(self, project, setup):
+        """Recover after the named change to the scratch project, if any."""
+        if setup == "dated":
+            project.env["GIT_COMMITTER_DATE"] = "2020-03-04T12:00:00+00:00"
+            project.git("tag", "-f", "-a", "v0.2.0", "-m", "v0.2.0")
+            del project.env["GIT_COMMITTER_DATE"]
+        elif setup == "advance":
+            project.commit("docs: later")
+        arguments = {
+            "fork": ("v0.2.0", "other/fork"),
+            "malformed": ("v0.2.0", "a/b?x=1"),
+            "other-tag": ("v0.9.9", "example/scratch"),
+        }.get(setup, ("v0.2.0", "example/scratch"))
+        return project.notes_tool("recover", arguments[0], "--repository", arguments[1])
+
     def test_recovery_refuses_without_creating_anything_when_authority_is_unproven(self):
         for name, env, setup, message in (
             ("release exists", {"FAKE_GH_RELEASE": "exists"}, None, "already has a release"),
             ("lookup fails", {"FAKE_GH_RELEASE": "error"}, None, "could not tell whether"),
             ("lookup server error", {"FAKE_GH_RELEASE": "server"}, None, "could not tell whether"),
             ("lookup transport", {"FAKE_GH_RELEASE": "transport"}, None, "could not tell whether"),
+            (
+                "lookup partial 404 header",
+                {"FAKE_GH_RELEASE": "partial"},
+                None,
+                "could not tell whether",
+            ),
+            (
+                "lookup stale 404 header after a failure",
+                {"FAKE_GH_RELEASE": "stale"},
+                None,
+                "could not tell whether",
+            ),
+            (
+                "remote tag date differs",
+                {"FAKE_GH_TAG_DATE": "2021-01-01T00:00:00Z"},
+                "dated",
+                "tag date",
+            ),
             (
                 "lookup sentence only",
                 {"FAKE_GH_RELEASE": "sentence"},
@@ -618,16 +688,8 @@ class RecoveryTest(unittest.TestCase):
                 project = Scratch(self)
                 project.history()
                 project.git("tag", "-a", "v0.2.0", "-m", "v0.2.0")
-                if setup == "advance":
-                    project.commit("docs: later")
                 project.env.update(env)
-                result = (
-                    project.notes_tool("recover", "v0.2.0", "--repository", "other/fork")
-                    if setup == "fork"
-                    else project.notes_tool("recover", "v0.2.0", "--repository", "a/b?x=1")
-                    if setup == "malformed"
-                    else self.recover(project, "v0.9.9" if setup == "other-tag" else "v0.2.0")
-                )
+                result = self.run_arranged(project, setup)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(message, result.stderr)
                 self.assertNotIn(
