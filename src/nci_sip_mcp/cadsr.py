@@ -215,7 +215,7 @@ def _is_staging(base_url: str) -> bool:
 
 
 class CaDSRClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, user_agent: str) -> None:
         credential = settings.cadsr_credential
         headers = (
             {"Authorization": "Basic " + base64.b64encode(credential.encode()).decode()}
@@ -230,6 +230,7 @@ class CaDSRClient:
             retry_backoff_seconds=CADSR_RETRY_BACKOFF_SECONDS,
             max_response_bytes=CADSR_MAX_RESPONSE_BYTES,
             size_bound="cadsr_response_bytes",
+            user_agent=user_agent,
         )
         self.http = transport(
             settings.cadsr_base_url,

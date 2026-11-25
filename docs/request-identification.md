@@ -1,6 +1,6 @@
 # Stable installation identity
 
-The local identity utilities give an installation a stable, opaque label for future request
+The local identity utilities give an installation a stable, opaque label for request
 traceability. They do not identify a person or a call, grant authority, or act as credentials.
 This value is separate from the per-call correlation ID.
 
@@ -83,7 +83,9 @@ A wheel or container image carries the software, not a real installation ID. Sup
 through runtime configuration; do not bake it into the artifact.
 
 For an isolated CI job that emits this label, provision one job-scoped value per independently
-configured emitting installation, and reuse it for that installation's processes and children.
+configured emitting installation, and reuse it for that installation's own processes. A server
+child launched by the acceptance harness is not given the harness's value: it sends the product
+label alone unless its own configuration sets one.
 Configure server and direct acceptance independently, with a distinct value for each. Give each
 independent job a new value for each installation. This short-lived configuration is distinct from
 a persistent installation's durable value, which remains stable across restarts and upgrades. The
@@ -91,9 +93,20 @@ value is not a credential.
 
 ## Current scope
 
-These commands only generate and inspect local configuration. The server does not yet read this
-identity or include it in HTTP requests. Server and acceptance request emission are separate work; do not
-rely on platform request traces carrying this label until that work is released. The identity
-does not replace the per-call correlation ID or change its behavior. The CI guidance above
-describes the configuration lifecycle for an emitting job; it does not mean emission is available
-in this release.
+The server reads this identity once at start-up and sends it in the `User-Agent` of every platform
+request it makes (convention A6.2b): `nci-sip-mcp/<version> (installation=<id>; +https://github.com/CBIIT/nci-sip-mcp)`.
+With no `NCI_SIP_INSTALLATION_ID` configured it sends the product label alone,
+`nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`; a configured value that is not 32 lowercase hexadecimal characters, or installed metadata that
+cannot form a safe label, stops start-up with an error naming the variable or the installed
+version, before any upstream is contacted. The `generate`
+and `show` commands remain local and send nothing. Governed acceptance requests
+(the exact-request grants of a controlled run, and the release preflight) send the product label
+alone, `nci-sip-mcp/<version> (+https://github.com/CBIIT/nci-sip-mcp)`, whatever
+`NCI_SIP_INSTALLATION_ID` holds, and each grant declares that exact `user-agent`: a request with
+another value, or none, is refused before contact. The acceptance recorder and citation reads
+send the product-only `nci-sip-acceptance/<version> (+https://github.com/CBIIT/nci-sip-mcp)`;
+the Shared SI contracts script and the installer's reachability probe send the core product-only
+label above. Only the server, with a configured id, sends `installation=`; no other emitter
+sends an installation identity. The identity does not replace the per-call correlation ID or
+change its behavior. The CI guidance above describes the configuration lifecycle for an emitting
+job; it applies to the server now and to the acceptance package once that work is released.

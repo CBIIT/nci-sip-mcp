@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Event
 
 import pytest
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 from request_failure_observation import snapshot as observed_snapshot
 
 import nci_sip_acceptance
@@ -30,15 +30,16 @@ from nci_sip_acceptance.request_authorization import Authorization,Limits,Reques
 from nci_sip_acceptance.request_budget import ControlledRun
 from nci_sip_acceptance.request_transport import ControlledHttpPolicy
 from nci_sip_mcp.http_client import HttpClient,RequestPolicyError
+from nci_sip_mcp.traffic_identity import product_user_agent
 if sys.stdin.buffer.read(1)!=b'x':
     sys.exit(2)
 descriptor=RunDescriptor.from_record(json.loads(Path(sys.argv[3]).read_text()))
 origin,participant,destination,concurrent,total=sys.argv[4:]
-grant=RequestGrant('GET',origin+'/owned',(('accept','application/json'),))
+grant=RequestGrant('GET',origin+'/owned',(('accept','application/json'),('user-agent',product_user_agent())))
 auth=Authorization((grant,),Limits(concurrent=int(concurrent),response_bytes=64,total_bytes=int(total)),'a'*64)
 run=ControlledRun.attach(descriptor,auth,participant=participant)
 client=HttpClient(origin,label='owned',timeout_seconds=5,max_attempts=3,retry_backoff_seconds=0,
-    max_response_bytes=64,size_bound='owned',request_policy=ControlledHttpPolicy(run))
+    max_response_bytes=64,size_bound='owned',request_policy=ControlledHttpPolicy(run),user_agent=product_user_agent())
 try:
     client.get_json('/owned')
     reason=None
@@ -71,7 +72,11 @@ def test_registered_children_share_transport_capacity(tmp_path, concurrent, tota
         handler.wfile.write(b"true}")
 
     with WireReceiver([partial]) as receiver, ExitStack() as resources:
-        grant = RequestGrant("GET", receiver.origin + "/owned", (("accept", "application/json"),))
+        grant = RequestGrant(
+            "GET",
+            receiver.origin + "/owned",
+            (("accept", "application/json"), ("user-agent", PRODUCT_USER_AGENT)),
+        )
         auth = Authorization(
             (grant,), Limits(concurrent=concurrent, response_bytes=64, total_bytes=total), "a" * 64
         )

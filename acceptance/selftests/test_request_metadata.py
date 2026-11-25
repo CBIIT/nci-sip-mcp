@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 import yaml
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 
 from nci_sip_acceptance import request_catalogue
 from nci_sip_acceptance.environments import SURFACES, Environment
@@ -33,7 +33,7 @@ def selected(origin):
     )
 
 
-def metadata_request(owner, origin, path, params, headers, body):
+def metadata_request(owner, origin, path, params, headers, body, user_agent=PRODUCT_USER_AGENT):
     with owner:
         client = HttpClient(
             origin,
@@ -45,30 +45,49 @@ def metadata_request(owner, origin, path, params, headers, body):
             size_bound="owned",
             credentials=headers,
             request_policy=ControlledHttpPolicy(owner.run),
+            user_agent=user_agent,
         )
         return client.get_json(path, params) if body is None else client.post_json(path, body)
 
 
 @pytest.mark.parametrize(
-    "path,params,headers,body",
+    "path,params,headers,body,user_agent",
     [
-        ("/api/v1/version", {"extra": "1"}, {}, None),
-        ("/api/v1/version?", None, {}, None),
-        ("/api/v1/version/child", None, {}, None),
-        ("/api/v1/version", None, {"Accept": "text/plain"}, None),
-        ("/api/v1/version", None, {"X-Not-Reviewed": "private-metadata-canary"}, None),
-        ("/api/v1/version", None, {"X-Correlation-ID": ""}, None),
-        ("/api/v1/version", None, {"X-Correlation-ID": "private\nmetadata"}, None),
-        ("/api/v1/version", None, {"Host": "other.invalid"}, None),
-        ("/api/v1/version", None, {}, {"unreviewed": True}),
+        ("/api/v1/version", {"extra": "1"}, {}, None, PRODUCT_USER_AGENT),
+        ("/api/v1/version?", None, {}, None, PRODUCT_USER_AGENT),
+        ("/api/v1/version/child", None, {}, None, PRODUCT_USER_AGENT),
+        ("/api/v1/version", None, {"Accept": "text/plain"}, None, PRODUCT_USER_AGENT),
+        (
+            "/api/v1/version",
+            None,
+            {"X-Not-Reviewed": "private-metadata-canary"},
+            None,
+            PRODUCT_USER_AGENT,
+        ),
+        ("/api/v1/version", None, {"X-Correlation-ID": ""}, None, PRODUCT_USER_AGENT),
+        (
+            "/api/v1/version",
+            None,
+            {"X-Correlation-ID": "private\nmetadata"},
+            None,
+            PRODUCT_USER_AGENT,
+        ),
+        ("/api/v1/version", None, {"Host": "other.invalid"}, None, PRODUCT_USER_AGENT),
+        ("/api/v1/version", None, {}, {"unreviewed": True}, PRODUCT_USER_AGENT),
+        ("/api/v1/version", None, {}, None, "other/1"),
     ],
 )
-def test_metadata_family_refuses_changed_request_fields(tmp_path, path, params, headers, body):
+def test_metadata_family_refuses_changed_request_fields(
+    tmp_path, path, params, headers, body, user_agent
+):
     with WireReceiver() as receiver:
         policy = request_catalogue.compile_policy(selected(receiver.origin))
         owner = SupervisedRun.create(policy.authorization, tmp_path)
         result = call(
-            "owned", lambda: metadata_request(owner, receiver.origin, path, params, headers, body)
+            "owned",
+            lambda: metadata_request(
+                owner, receiver.origin, path, params, headers, body, user_agent
+            ),
         )
         assert result.get("error", {}).get("code") == "upstream_unavailable"
         assert set(result["error"]) == {"code", "message", "correlationId"}
@@ -77,6 +96,21 @@ def test_metadata_family_refuses_changed_request_fields(tmp_path, path, params, 
         snapshot = owner.run.snapshot()
         assert (snapshot.logical, snapshot.attempts, snapshot.transport_entries) == (0, 0, 0)
         assert owner.snapshot()["state"] == "failed"
+
+
+def test_metadata_family_admits_the_exact_product_request(tmp_path):
+    # The control of the refusal rows above: the same policy admits the one request they vary.
+    with WireReceiver() as receiver:
+        policy = request_catalogue.compile_policy(selected(receiver.origin))
+        owner = SupervisedRun.create(policy.authorization, tmp_path)
+        result = call(
+            "owned",
+            lambda: metadata_request(owner, receiver.origin, "/api/v1/version", None, {}, None),
+        )
+        assert result == {"ok": True}
+        assert receiver.contacts == 1
+        sent = {name.lower(): value for name, value in receiver.requests[0][2]}
+        assert sent["user-agent"] == PRODUCT_USER_AGENT
 
 
 def test_metadata_family_refuses_another_origin(tmp_path):
@@ -281,7 +315,7 @@ def test_selected_fixture_rows_preserve_exact_membership_and_query(tmp_path, mon
         row["path"] = "/api/v1/mapset?include="
         document.write_text(yaml.safe_dump(manifest))
         policy = request_catalogue.compile_policy(selected(origin))
-        headers = (("accept", "application/json"),)
+        headers = (("accept", "application/json"), ("user-agent", PRODUCT_USER_AGENT))
         try:
             admitted = policy.authorization.admit("GET", origin + row["path"], headers, None)
         except RequestPolicyError as error:
