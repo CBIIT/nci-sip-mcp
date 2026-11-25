@@ -48,8 +48,10 @@ def _form_absence(public_id: str, payload: bytes, status: int | None) -> None:
         return
     try:
         data = json.loads(payload)
-    except json.JSONDecodeError, UnicodeDecodeError, RecursionError:
-        return  # The common parser reports malformed JSON and HTML.
+    except ValueError, RecursionError:
+        # ValueError: bad JSON, bad UTF-8 or an integer over the configured digit limit; the
+        # common parser reports malformed JSON and HTML.
+        return
     if _empty_error_form(data):
         # recorded/cadsr/form-unknown.json supplies no machine-readable absence code.
         # A genuine platform failure in exactly this shape would also read as not found.

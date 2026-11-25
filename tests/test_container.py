@@ -2,9 +2,11 @@ import io
 import json
 import logging
 import sys
+import tempfile
 import types
-from contextlib import redirect_stderr
+from contextlib import contextmanager, redirect_stderr
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 
 from fakes import concept
@@ -104,7 +106,10 @@ class ContainerTest(ServerFixture):
             SentenceTransformersProvider(absent, local_files_only=True)
 
     def test_cached_model_loads_offline_without_changing_manifest_identity(self):
-        cached = str(self.settings.data_dir)
+        # A Hub cache folder is a commit snapshot; the revision is read from its name.
+        cached = str(self.settings.data_dir / "snapshots" / ("a" * 40))
+        Path(cached).mkdir(parents=True)
+        (Path(cached) / "config.json").write_text("{}")  # a directory model is hashed, not empty
 
         class LocalModel:
             def __init__(self, name, *, local_files_only=False):
@@ -116,7 +121,7 @@ class ContainerTest(ServerFixture):
                     raise ValueError("Progress output is disabled")
                 return [[len(text), int(normalize_embeddings)] for text in texts]
 
-        def snapshot(name, *, local_files_only=False):
+        def snapshot(name, *, local_files_only=False, cache_dir=None):
             if (name, local_files_only) != ("org/model", True):
                 raise OSError("Network is unavailable")
             return cached
@@ -172,7 +177,34 @@ class OfflineModel:
         return [[len(text), 1] for text in texts]
 
 
+@contextmanager
+def fake_sentence_transformers(model):
+    """Replace only the sentence_transformers entry of sys.modules, restoring only that entry.
+
+    `patch.dict(sys.modules, ...)` restores the whole mapping, which evicts any module first
+    imported inside it (NumPy, imported by `embed`); a later import of NumPy then fails.
+    """
+    saved = sys.modules.get("sentence_transformers")
+    sys.modules["sentence_transformers"] = types.SimpleNamespace(SentenceTransformer=model)
+    try:
+        yield
+    finally:
+        if saved is None:
+            del sys.modules["sentence_transformers"]
+        else:
+            sys.modules["sentence_transformers"] = saved
+
+
 class ContainerOfflineTest(ServerFixture):
+    def model_directory(self):
+        """An external model directory of its own: the data directory holds a live database."""
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name)
+        (path / "config.json").write_text("{}")
+        (path / "weights.bin").write_bytes(b"w1")
+        return path
+
     def test_legacy_active_index_fails_startup_until_operator_rebuilds_it(self):
         settings = replace(self.settings, transport="streamable-http", http_require_index=True)
         self.local_index.upsert_concepts(
@@ -200,17 +232,14 @@ class ContainerOfflineTest(ServerFixture):
             transport="streamable-http",
             http_require_index=True,
             embedding_provider="sentence-transformers",
-            embedding_model=str(self.settings.data_dir),
+            embedding_model=str(self.model_directory()),
         )
         served = []
 
         def serve(_settings, context):
             served.append([row.tolist() for row in context.embedding_provider.embed(["abc"])])
 
-        with patch.dict(
-            sys.modules,
-            {"sentence_transformers": types.SimpleNamespace(SentenceTransformer=OfflineModel)},
-        ):
+        with fake_sentence_transformers(OfflineModel):
             provider = SentenceTransformersProvider(settings.embedding_model, local_files_only=True)
             self.local_index.upsert_concepts(normalized([concept("C1")]), None, provider)
             before = self.context.index.get_active_manifest()
@@ -221,3 +250,46 @@ class ContainerOfflineTest(ServerFixture):
                 self.assertEqual(container_entry.main(), 0)
         self.assertEqual(served, [[[3.0, 1.0]]])
         self.assertEqual(self.context.index.get_active_manifest(), before)
+
+    def test_startup_refuses_a_model_directory_that_changed_since_the_index_was_built(self):
+        model = self.model_directory()
+        settings = replace(
+            self.settings,
+            transport="streamable-http",
+            http_require_index=True,
+            embedding_provider="sentence-transformers",
+            embedding_model=str(model),
+        )
+        logging.disable(logging.NOTSET)
+        with fake_sentence_transformers(OfflineModel):
+            provider = SentenceTransformersProvider(str(model), local_files_only=True)
+        self.local_index.upsert_concepts(normalized([concept("C1")]), None, provider)
+        served = []
+        with (
+            fake_sentence_transformers(OfflineModel),
+            patch.object(container_entry.Settings, "from_env", return_value=settings),
+            patch.object(container_entry, "configure_logging"),
+            patch.object(container_entry, "run_http", lambda *_: served.append("served")),
+        ):
+            self.assertEqual((container_entry.main(), served), (0, ["served"]))
+            (model / "weights.bin").write_bytes(b"w2")
+            with (
+                self.assertLogs("nci_sip_mcp.index", level="INFO") as logs,
+                self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as startup,
+            ):
+                code = container_entry.main()
+        mismatch = [
+            r.structured for r in logs.records if r.structured["event"].endswith("_mismatch")
+        ]
+        self.assertEqual((code, served), (1, ["served"]))
+        self.assertEqual(
+            [
+                (r.structured["event"], r.structured["asset"], r.structured["errorType"])
+                for r in startup.records
+            ],
+            [("container_startup_failed", "index", "IndexModelRevisionError")],
+        )
+        self.assertEqual(len(mismatch), 1)
+        stored, runtime = mismatch[0]["stored_revision"], mismatch[0]["runtime_revision"]
+        self.assertTrue(stored.startswith("sha256:") and runtime.startswith("sha256:"))
+        self.assertNotEqual(stored, runtime)

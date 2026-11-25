@@ -1,9 +1,14 @@
+import io
 import json
+import sqlite3
+import sys
 import unittest
+from contextlib import closing, redirect_stdout
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-from fakes import concept, release, terminology_row
+from fakes import captured, concept, records, release, terminology_row
+from nci_sip_mcp.cli import main
 from nci_sip_mcp.errors import correlated
 from nci_sip_mcp.evaluation import evaluate_build
 from nci_sip_mcp.evaluation_sets import parse_set
@@ -13,8 +18,9 @@ from nci_sip_mcp.indexing import full_build
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.release import ReleaseContext
 from nci_sip_mcp.traffic_identity import product_user_agent
-from ncit_index.errors import IndexBuildError, IndexCompatibilityError
-from test_audit import captured, records
+from ncit_index import index as index_module
+from ncit_index.errors import IndexBuildError, IndexCompatibilityError, IndexStorageError
+from ncit_index.index import LocalIndex
 from test_evaluation_sets import sample_set_payload
 from test_evs_client import FakeResponse
 from test_index import normalized
@@ -230,7 +236,12 @@ class IndexOperatorResultTest(ServerFixture):
         active = self.context.index.get_active_manifest()
         with correlated(result["manifest"]["provenance"]["correlationId"]):
             self.assertEqual(
-                result, {"buildId": candidate.build_id, "manifest": active.to_result()}
+                result,
+                {
+                    "buildId": candidate.build_id,
+                    "manifest": active.to_result(),
+                    "pendingRemoval": [],
+                },
             )
         self.assertEqual(active.build_id, candidate.build_id)
 
@@ -246,6 +257,256 @@ class IndexOperatorResultTest(ServerFixture):
                 {"buildId": rebuilt.build_id, "manifest": manifest_record(rebuilt).to_result()},
             )
         self.assertIsNone(rebuilt.evaluation_version)
+
+
+class SupersededBuildRemovalTest(ServerFixture):
+    """Activation commits first; the builds it superseded are removed afterwards (#552)."""
+
+    def setUp(self):
+        super().setUp()
+        self.active = self.candidate()
+        self.local_index.activate(self.active.build_id)
+        self.stale = sorted(self.candidate().build_id for _ in range(2))
+        self.replacement = self.candidate()
+
+    def candidate(self):
+        return self.local_index.build(
+            normalized([concept("C1", "One", active=True)]), None, self.context.embedding_provider
+        )
+
+    def listed(self):
+        return {item["build_id"] for item in invoke(self.context, "index_builds")["builds"]}
+
+    def rows(self, build_id):
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM manifests WHERE build_id = ?", (build_id,)
+            ).fetchone()[0]
+
+    def fail_removals_after(self, deleted):
+        """After `deleted` successful removals, the next superseded build cannot be deleted."""
+
+        real = index_module.delete_build
+        removed = []
+
+        def flaky(conn, build_id):
+            removed.append(build_id)
+            if len(removed) > deleted:
+                busy = sqlite3.OperationalError("database is locked")
+                busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
+                raise busy
+            real(conn, build_id)
+
+        return patch.object(index_module, "delete_build", flaky)
+
+    def test_a_superseded_build_is_unknown_to_rebuild_and_evaluate(self):
+        # No build can be removed, so the two builds the activation superseded stay in the file.
+        with captured(), self.fail_removals_after(0):
+            invoke(self.context, "index_activate", self.replacement.build_id)
+        unknown = "Inspect `index-builds` and "
+        for argv, message in (
+            (
+                ["index-rebuild", self.stale[0]],
+                "Unknown build; list available builds with index-builds. "
+                + unknown
+                + "retry against an available completed build.",
+            ),
+            (
+                ["evaluate", "--build-id", self.stale[0]],
+                "Evaluation build is unavailable; list completed builds. "
+                + unknown
+                + "resolve the reported evaluation problem before retrying.",
+            ),
+        ):
+            with self.subTest(argv[0]):
+                stdout = io.StringIO()
+                with (
+                    patch("nci_sip_mcp.cli.configure_logging"),
+                    patch("nci_sip_mcp.cli.Context", return_value=self.context),
+                    patch.object(sys, "argv", ["nci-sip-mcp", *argv]),
+                    redirect_stdout(stdout),
+                ):
+                    code = main()
+                error = json.loads(stdout.getvalue()).get("error", {})
+                self.assertEqual(
+                    (code, error.get("code"), error.get("message")), (1, "internal_error", message)
+                )
+                self.assertEqual(self.rows(self.stale[0]), 1)  # present, but not offered
+
+    def test_a_failed_removal_is_reported_and_leaves_the_activation_and_the_rollback_target(self):
+        with captured() as stream, self.fail_removals_after(1):
+            result = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        active = self.context.index.get_active_manifest()
+        with correlated(result.get("manifest", {}).get("provenance", {}).get("correlationId")):
+            self.assertEqual(
+                result,
+                {
+                    "buildId": self.replacement.build_id,
+                    "manifest": active.to_result(),
+                    "pendingRemoval": [self.stale[1]],
+                },
+            )
+        self.assertEqual(active.build_id, self.replacement.build_id)
+        self.assertEqual(self.listed(), {self.active.build_id, self.replacement.build_id})
+        self.assertEqual(self.rows(self.stale[0]), 0)
+        pending = records(stream, "index_build_removal_pending")
+        self.assertEqual(
+            [(item["level"], item["build_ids"]) for item in pending],
+            [("WARNING", [self.stale[1]])],
+        )
+
+    def test_removal_stops_at_the_first_storage_failure_and_names_every_build_left(self):
+        with captured() as stream, self.fail_removals_after(0):
+            result = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(result["pendingRemoval"], self.stale)
+        self.assertEqual([self.rows(build_id) for build_id in self.stale], [1, 1])
+        self.assertEqual(
+            [item["build_ids"] for item in records(stream, "index_build_removal_pending")],
+            [self.stale],
+        )
+
+    def failing_activation_commit(self):
+        """Make the commit of an activation fail: a deferred constraint broken by the switch."""
+
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn, conn:
+            conn.executescript(
+                "CREATE TABLE IF NOT EXISTS parent (id INTEGER PRIMARY KEY);"
+                "CREATE TABLE IF NOT EXISTS child (parent_id INTEGER REFERENCES parent(id) "
+                "DEFERRABLE INITIALLY DEFERRED);"
+                "CREATE TRIGGER IF NOT EXISTS break_on_switch AFTER UPDATE OF active ON manifests "
+                "WHEN NEW.active = 1 BEGIN INSERT INTO child VALUES (999); END;"
+            )
+        connect = sqlite3.connect
+
+        class Enforcing(sqlite3.Connection):
+            def __init__(self, *arguments, **options):
+                super().__init__(*arguments, **options)
+                self.execute("PRAGMA foreign_keys = ON")
+
+        return patch(
+            "ncit_index.index.sqlite3.connect",
+            lambda path, **options: connect(path, factory=Enforcing, **options),
+        )
+
+    def test_a_failed_activation_commit_announces_nothing_and_keeps_the_old_build(self):
+        provider = self.context.embedding_provider
+        operations = {
+            "index-activate": lambda index: index.activate(self.replacement.build_id),
+            "sample": lambda index: index.upsert_concepts(
+                normalized([concept("C2", "Two")]), None, provider
+            ),
+        }
+        for label, operation in operations.items():
+            with self.subTest(label):
+                events = []
+                index = LocalIndex(
+                    self.local_index.data_dir,
+                    on_event=lambda name, _d, sink=events: sink.append(name),
+                )
+                with self.failing_activation_commit(), self.assertRaises(sqlite3.IntegrityError):
+                    operation(index)
+                self.assertEqual([name for name in events if name == "index_activated"], [])
+                self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
+
+    def listing_fault(self, *, fail_after):
+        """Make the listing of superseded builds fail once `fail_after` listings have run.
+
+        Returns the patch and the list of listings seen, so a test can prove the fault matched.
+        """
+
+        connect = sqlite3.connect
+        listings = []
+
+        class Listing(sqlite3.Connection):
+            def execute(self, statement, *parameters):
+                if "'superseded'" in statement and statement.lstrip().upper().startswith("SELECT"):
+                    listings.append(statement)
+                    if len(listings) > fail_after:
+                        full = sqlite3.OperationalError("database or disk is full")
+                        full.sqlite_errorcode = sqlite3.SQLITE_FULL
+                        raise full
+                return super().execute(statement, *parameters)
+
+        return (
+            patch(
+                "ncit_index.index.sqlite3.connect",
+                lambda path, **options: connect(path, factory=Listing, **options),
+            ),
+            listings,
+        )
+
+    def test_activating_the_already_active_build_announces_nothing(self):
+        """A no-op activation is not a switch: no `index_activated` record, nothing switched."""
+
+        events = []
+        index = LocalIndex(
+            self.local_index.data_dir, on_event=lambda name, _d, sink=events: sink.append(name)
+        )
+        activation = index.activate_and_report(self.active.build_id)
+
+        self.assertEqual([name for name in events if name == "index_activated"], [])
+        self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
+        self.assertEqual(activation[0].build_id, self.active.build_id)
+
+    def test_the_superseded_listing_is_read_inside_the_activation_transaction(self):
+        """If the first listing fails the activation fails: it cannot be a read after the commit."""
+
+        events = []
+        index = LocalIndex(
+            self.local_index.data_dir, on_event=lambda name, _d, sink=events: sink.append(name)
+        )
+        fault, listings = self.listing_fault(fail_after=0)
+        with fault, self.assertRaises(IndexStorageError):
+            index.activate_and_report(self.replacement.build_id)
+
+        self.assertEqual(len(listings), 1)
+        self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
+        self.assertEqual([name for name in events if name == "index_activated"], [])
+
+    def test_the_activation_result_needs_no_read_after_the_commit(self):
+        """One listing, inside the transaction; a later listing would fail and must not be made."""
+
+        fault, listings = self.listing_fault(fail_after=1)
+        with fault:
+            result = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(len(listings), 1)
+        self.assertEqual(result.get("buildId"), self.replacement.build_id)
+        self.assertEqual(result.get("pendingRemoval"), [])
+        self.assertEqual([self.rows(build_id) for build_id in self.stale], [0, 0])
+
+    def test_the_next_activation_removes_what_is_left_and_the_rollback_target_survives(self):
+        with self.fail_removals_after(1):
+            invoke(self.context, "index_activate", self.replacement.build_id)
+
+        hidden = invoke(self.context, "index_activate", self.stale[1])
+        again = invoke(self.context, "index_activate", self.replacement.build_id)
+        rollback = invoke(self.context, "index_activate", self.active.build_id)
+        forward = invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(hidden.get("error", {}).get("code"), "internal_error")
+        self.assertEqual(again.get("pendingRemoval"), [])
+        self.assertEqual(self.rows(self.stale[1]), 0)
+        self.assertEqual(rollback.get("buildId"), self.active.build_id)
+        self.assertEqual(forward.get("buildId"), self.replacement.build_id)
+        self.assertEqual(self.listed(), {self.active.build_id, self.replacement.build_id})
+
+    def test_a_removal_failure_that_is_not_a_storage_failure_propagates_after_activation(self):
+        with closing(sqlite3.connect(self.local_index.db_path)) as conn, conn:
+            conn.execute(
+                "CREATE TRIGGER refuse_delete BEFORE DELETE ON manifests "
+                "BEGIN SELECT RAISE(ABORT, 'refused'); END"
+            )
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            invoke(self.context, "index_activate", self.replacement.build_id)
+
+        self.assertEqual(
+            self.context.index.get_active_manifest().build_id, self.replacement.build_id
+        )
+        self.assertEqual(self.listed(), {self.active.build_id, self.replacement.build_id})
 
 
 class FullBuildInputValidationTest(ServerFixture):

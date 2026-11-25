@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from fakes import concept
+from fakes import concept, schema_five
 from nci_sip_mcp.evs import normalize_concept
 from nci_sip_mcp.models import IndexManifest
 from ncit_index.embeddings import HashingEmbeddingProvider, SentenceTransformersProvider
@@ -23,24 +23,6 @@ from ncit_index.storage import (
     vector_bytes,
 )
 from test_index import IndexTestCase, normalized
-
-
-def schema_five(conn):
-    statements = (
-        "CREATE TABLE manifests (build_id TEXT PRIMARY KEY, payload TEXT NOT NULL, "
-        "active INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'complete')",
-        "CREATE UNIQUE INDEX manifests_single_active ON manifests(active) WHERE active = 1",
-        "CREATE TABLE concepts (build_id TEXT, code TEXT, payload TEXT, name_key TEXT, "
-        "PRIMARY KEY (build_id, code))",
-        "CREATE INDEX concepts_name ON concepts(build_id, name_key)",
-        "CREATE TABLE fields (id INTEGER PRIMARY KEY, build_id TEXT, code TEXT, "
-        "kind TEXT, text TEXT, vector TEXT)",
-        "CREATE INDEX fields_concept ON fields(build_id, code)",
-        "CREATE TABLE vector_lsh (field_id INTEGER, table_id INTEGER, bucket INTEGER)",
-        "PRAGMA user_version = 5",
-    )
-    for statement in statements:
-        conn.execute(statement)
 
 
 class Float32MigrationTest(IndexTestCase):

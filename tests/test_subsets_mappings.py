@@ -3,11 +3,10 @@ from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
 
-from fakes import concept
+from fakes import captured, concept, records
 from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.traffic_identity import product_user_agent
-from test_audit import captured, records
 from test_evs_client import FakeResponse, http_error
 from test_server import ServerFixture
 

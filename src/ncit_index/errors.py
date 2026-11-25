@@ -7,6 +7,10 @@ class IndexCompatibilityError(RuntimeError):
     """A schema, release or embedding space is incompatible."""
 
 
+class IndexModelRevisionError(IndexCompatibilityError):
+    """The serving model is not the revision the build was embedded with."""
+
+
 class IndexBuildError(RuntimeError):
     """Invalid build input: a caller bug, not a recoverable storage failure."""
 

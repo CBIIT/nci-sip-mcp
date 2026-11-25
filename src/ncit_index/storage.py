@@ -103,10 +103,16 @@ def create_schema(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def holds_index(conn: sqlite3.Connection) -> bool:
+    """Whether the file already held an index of any schema, as opposed to being new and empty."""
+    return (
+        conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'manifests'").fetchone() is not None
+    )
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     """Retain every legacy raw concept and manifest, without relabelling its vectors."""
-    exists = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'manifests'").fetchone()
-    if not exists:
+    if not holds_index(conn):
         create_schema(conn)
         return
     columns = {row[1] for row in conn.execute("PRAGMA table_info(manifests)")}
