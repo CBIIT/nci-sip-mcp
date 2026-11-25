@@ -9,6 +9,7 @@ Functions work in the current directory, which is the repository checkout.
 
 import argparse
 import contextlib
+import importlib
 import json
 import os
 import re
@@ -18,13 +19,17 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import unittest.mock
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import semantic_release
 from git import Commit, Repo
 from scripts import release_ci
 from semantic_release.changelog.release_history import ReleaseHistory
+from semantic_release.cli.commands.main import main as tool_main
 from semantic_release.commit_parser import CommitParser, ParseError, ParserOptions
 from semantic_release.commit_parser.token import ParseResult
 from semantic_release.version.algorithm import tags_and_versions
@@ -244,14 +249,31 @@ def prepare(repository_url: str | None = None) -> Plan:
     return Plan(candidate, plan.tag, True)
 
 
-def tool_notes() -> str:
-    """The complete body the tool renders for the next release, without any side effect."""
+def run_tool_as_of(moment: str, arguments: list[str]) -> None:
+    """Run the release tool with its clock at `moment`; the tool dates a new release by `now`."""
+    clock = SimpleNamespace(now=lambda zone=None: datetime.fromisoformat(moment).astimezone(zone))
+    version_command = importlib.import_module("semantic_release.cli.commands.version")
+    with unittest.mock.patch.object(version_command, "datetime", clock):
+        tool_main(arguments, prog_name="semantic-release")
+
+
+def tool_notes(tagged_at: str | None = None) -> str:
+    """The complete body the tool renders for the next release, without any side effect.
+
+    `tagged_at` (an ISO date-time) dates the release, as the existing tag of a recovery does.
+    """
+    launcher = (
+        [sys.executable, "-m", "scripts.release_notes", "tool-as-of", tagged_at, "--"]
+        if tagged_at
+        else [sys.executable, "-m", "semantic_release"]
+    )
+    root = str(Path(__file__).resolve().parents[1])
     with tempfile.TemporaryDirectory() as directory:
         output = Path(directory) / "output"
         result = run(
-            sys.executable, "-m", "semantic_release", "--noop", "-c", CONFIG, "version",
+            *launcher, "--noop", "-c", CONFIG, "version",
             "--no-commit", "--no-tag", "--no-push", "--no-changelog", "--skip-build",
-            env={**os.environ, "GITHUB_OUTPUT": str(output)},
+            env={**os.environ, "GITHUB_OUTPUT": str(output), "PYTHONPATH": root},
         )  # fmt: skip
         text = output.read_text(encoding="utf-8") if output.exists() else ""
     match = _OUTPUT_NOTES.search(text)
@@ -309,15 +331,16 @@ def release_exists(repository: str, tag: str) -> bool:
 
 
 def frozen_notes(tag: str, commit: str, repository: str) -> str:
-    """Re-render the original body from the history as it was at `tag`."""
+    """Re-render the original body from the history and the date of `tag`."""
     source = Path.cwd()
+    tagged_at = git("for-each-ref", "--format=%(creatordate:iso-strict)", f"refs/tags/{tag}")
     merged = git("tag", "--merged", commit).split()
     with tempfile.TemporaryDirectory() as directory, contextlib.chdir(directory):
         isolated_checkout(source, [commit], [name for name in merged if name != tag])
         plan = prepare(f"https://github.com/{repository}.git")
         if not plan.due or plan.tag != tag:
             raise ReleaseNotesError(f"the history at {tag} no longer yields that release")
-        return tool_notes()
+        return tool_notes(tagged_at)
 
 
 def verified_commit(tag: str, repository: str) -> str:
@@ -368,6 +391,9 @@ def main(argv: list[str]) -> int:
     show = commands.add_parser("preview")
     for name in ("--base", "--head", "--repository-url"):
         show.add_argument(name, required=True)
+    clock = commands.add_parser("tool-as-of")  # internal: the tool with a historical clock
+    clock.add_argument("moment")
+    clock.add_argument("arguments", nargs=argparse.REMAINDER)
     fix = commands.add_parser("recover")
     fix.add_argument("tag")
     fix.add_argument("--repository", required=True)
@@ -375,6 +401,8 @@ def main(argv: list[str]) -> int:
     try:
         if arguments.command == "prepare":
             prepare()
+        elif arguments.command == "tool-as-of":
+            run_tool_as_of(arguments.moment, arguments.arguments[1:])
         elif arguments.command == "preview":
             sys.stdout.write(preview(arguments.base, arguments.head, arguments.repository_url))
         else:
