@@ -153,6 +153,7 @@ last two and the suite's CI; each family below is operational, and what depends 
 | Gates | `validation/check_complexity.py`, `validation/check_test_quality.py`, `dependency_age.py`, `dependency_lock.py` | pre-commit hooks; the `audit` job; `pdm run lock` | every commit, the CI `quality` job; every committed dependency lock; reviewed dependency refreshes |
 | Acceptance in CI | `acceptance_http.py`, `permissions_fixture.py`, `upstream_requirements.py`, `ssis_contracts.py` | `pdm run acceptance-http`; the `acceptance` job's environment; a pre-commit hook; `pdm run python -m scripts.ssis_contracts` | the `acceptance` and `acceptance-http` jobs, weekly `Acceptance (live)` Shared SI contracts, `docs/upstream/` |
 | Server container | `container_lock.py`, `container_smoke.py`, `image_scan.py`, `image_publish.py`, `Dockerfile` | the CI `image` job, the Release workflow | the published image |
+| Release notes | `release_notes.py`, `release_ci.py` | the `release.yml` prepare step; `release-notes-preview.yml`; the manual `recover` command | every release body and the recovery of a missing GitHub release |
 | Documentation site | `docs_site.py`, `docs_links.py`, `docs_stories.py`, `site_assets.py`, `static_server.py`, `companion_context.py`, `companion_lock.py`, `container/Docs.Dockerfile` | `pdm run docs-build`; the `documentation` and `companions` jobs | the hosted site |
 | Validation companion | `portal*.py`, `operator_*.py`, `evidence_*.py`, `companion_entry.py`, `companion_relay.py`, `companion_smoke.py`, `container/Admin.Dockerfile`, `container/compose.local.yaml` | `pdm run portal`, `pdm run operator-worker`; the `companions` job | `docs/local-validation.md`, `docs/companion-containers.md` |
 | Benchmarks and evaluation | `benchmark*.py`, `http_measurement.py`, `assisted_evaluation.py`, `assisted_scoring.py` | `pdm run benchmark-http`; the companion's workers | `docs/benchmark.md`, `docs/assisted-evaluation.md` |
@@ -202,6 +203,10 @@ No verification runs only after merge: provide a pull-request twin or an explici
   when the body is blank. The highest eligible bump wins: `feat` bumps the minor version,
   `fix` and `perf` the patch, `!` the minor while below 1.0; other types release nothing.
   Tags are `vX.Y.Z`. Nothing is written back to `main`.
+- Every pull request that can release (`feat`, `fix`, `perf`, `!`) needs a release-note fragment,
+  `release-notes/<slug>.md`, with the headings in CONTRIBUTING.md's "Release notes". The Release
+  workflow fails before the tag when a valid pending fragment is missing. The reviewer checks that
+  the fragments cover the client-impacting changes of the release range.
 - The accepted types are `allowed_tags` in `[tool.semantic_release.commit_parser_options]` and the
   regex in `.github/workflows/pr-title.yml`; a test keeps them equal. semantic-release reads no
   other list (`other_allowed_tags` alone leaves a type unparseable).
