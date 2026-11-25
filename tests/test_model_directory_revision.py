@@ -82,6 +82,12 @@ class ModelDirectoryRevisionTest(unittest.TestCase):
                 self.assertEqual(self.revision(other), expected_revision(files))
                 self.assertNotEqual(expected_revision(files), expected_revision(FILES))
 
+    def test_a_directory_holding_only_subdirectories_is_hashed_not_refused_as_empty(self):
+        nested = {"nested/config.json": FILES["config.json"], "nested/deep/vocab.txt": b"[PAD]\n"}
+        shutil.rmtree(self.model)
+        write_tree(self.model, nested)
+        self.assertEqual(self.revision(), expected_revision(nested))
+
     def test_a_file_link_is_hashed_as_its_target_under_the_links_own_path(self):
         # A Hub snapshot folder holds links into blobs/; it must hash like a copy of the files.
         hub = self.root / "hub"
