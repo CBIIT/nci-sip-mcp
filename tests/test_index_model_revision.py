@@ -262,7 +262,7 @@ class RevisionSourceTest(unittest.TestCase):
             return f"/cache/models--org--model/snapshots/{commit}"
 
         class Model:
-            def __init__(self, name, *, local_files_only=False, cache_folder=None):
+            def __init__(self, name, *, local_files_only=False):
                 loads.append((name, local_files_only))
                 if name == "org/model":
                     cache["cached"] = True
@@ -367,10 +367,10 @@ class ModelCacheLocationTest(unittest.TestCase):
         loads, fill = self.loads, self.fill
 
         class Model:
-            def __init__(self, name, *, local_files_only=False, cache_folder=None):
+            def __init__(self, name, *, local_files_only=False):
                 loads.append(name)
                 if not Path(name).is_dir():  # a load by name is the download
-                    target = cache_folder or os.environ.get("SENTENCE_TRANSFORMERS_HOME")
+                    target = os.environ.get("SENTENCE_TRANSFORMERS_HOME")
                     fill(target or hub_default, FETCHED_COMMIT)
 
         def snapshot(name, *, local_files_only=False, cache_dir=None):

@@ -115,7 +115,8 @@ def _local_model(model_name: str, local_files_only: bool) -> _ResolvedModel:
     except ImportError as exc:
         raise _missing_extra(exc) from exc
     # A load by name downloads into SENTENCE_TRANSFORMERS_HOME, else the Hub cache (None); the
-    # lookup must name the same folder or it finds another snapshot, or none.
+    # lookup must name the same folder or it finds another snapshot, or none. The library reads
+    # that variable itself, so the load needs no argument.
     cache = os.environ.get("SENTENCE_TRANSFORMERS_HOME")
     try:
         return _ResolvedModel(
@@ -124,7 +125,7 @@ def _local_model(model_name: str, local_files_only: bool) -> _ResolvedModel:
     except FileNotFoundError:
         if local_files_only:
             raise
-    _sentence_transformer()(model_name, cache_folder=cache)  # downloads; the object is discarded
+    _sentence_transformer()(model_name)  # downloads; the object is discarded
     return _ResolvedModel(
         snapshot_download(model_name, local_files_only=True, cache_dir=cache), False
     )
