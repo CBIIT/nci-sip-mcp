@@ -48,6 +48,7 @@ _HEADING = re.compile(r"^#{1,6}(?:\s|$)")
 _HEADINGS = re.compile(r"# \S[^\n]*" + "".join(f"\n## {name}" for name in SECTIONS))
 _REQUIRED_HEADINGS = ", ".join(["'# <title>'", *(f"'## {name}'" for name in SECTIONS)])
 _HTTP_STATUS = re.compile(r"HTTP/\S+ (\d{3})")
+_HEADERS_END = re.compile(r"\r?\n\r?\n")
 _REPOSITORY = re.compile(r"[\w.-]+/[\w.-]+")
 _OUTPUT_NOTES = re.compile(r"release_notes<<EOF\n(.*)EOF\n", re.DOTALL)
 _PREVIEW_IDENTITY = ("-c", "user.name=release-notes-preview", "-c", "user.email=preview@invalid")
@@ -69,6 +70,12 @@ class Fragment:
     path: str
     title: str
     sections: tuple[str, str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteTag:
+    commit: str
+    tagged_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,19 +318,48 @@ def preview(base: str, head: str, repository_url: str) -> str:
         return report + (f"\n{tool_notes()}" if plan.due else "")
 
 
-def remote_tag_commit(repository: str, tag: str) -> str:
-    result = run("gh", "api", f"repos/{repository}/commits/refs/tags/{tag}")
-    sha = json.loads(result.stdout).get("sha") if result.returncode == 0 else None
-    if not isinstance(sha, str):
-        raise ReleaseNotesError(f"could not read the remote tag {tag} in {repository}")
-    return sha
+def _gh_object(repository: str, route: str) -> dict[str, object]:
+    result = run("gh", "api", f"repos/{repository}/{route}")
+    try:
+        value = json.loads(result.stdout) if result.returncode == 0 else None
+    except ValueError:
+        value = None
+    if not isinstance(value, dict):
+        raise ReleaseNotesError(f"could not read {route} of {repository}")
+    return {str(key): item for key, item in value.items()}
+
+
+def _text(record: dict[str, object], *keys: str) -> str:
+    value: object = record
+    for key in keys:
+        value = value.get(key) if isinstance(value, dict) else None
+    if not isinstance(value, str):
+        raise ReleaseNotesError(f"the repository's answer lacks {'.'.join(keys)}")
+    return value
+
+
+def remote_tag(repository: str, tag: str) -> RemoteTag:
+    """The commit and date of a tag as the selected repository records them."""
+    reference = _gh_object(repository, f"git/ref/tags/{tag}")
+    kind, sha = _text(reference, "object", "type"), _text(reference, "object", "sha")
+    if kind == "tag":
+        annotated = _gh_object(repository, f"git/tags/{sha}")
+        return RemoteTag(_text(annotated, "object", "sha"), _text(annotated, "tagger", "date"))
+    commit = _gh_object(repository, f"git/commits/{sha}")
+    return RemoteTag(sha, _text(commit, "committer", "date"))
 
 
 def release_exists(repository: str, tag: str) -> bool:
-    """The structured HTTP status of the release lookup: 200 exists, 404 absent, else refuse."""
+    """Whether the release exists, from a complete lookup that ended as its status says.
+
+    gh exits 0 on 200 and 1 on 404, and prints its own diagnostic on stderr for the 404, so
+    stderr is not read; a failed or cut-off invocation carrying a header refuses.
+    """
     result = run("gh", "api", "-i", f"repos/{repository}/releases/tags/{tag}")
     status = _HTTP_STATUS.match(result.stdout)
-    if status and status[1] in {"200", "404"}:
+    complete = _HEADERS_END.search(result.stdout) is not None
+    outcome = {"200": 0, "404": 1}  # status -> the exit code gh ends with
+    if status and complete and outcome.get(status[1]) == result.returncode:
         return status[1] == "200"
     raise ReleaseNotesError(
         f"could not tell whether {tag} has a release in {repository}; nothing was created"
@@ -357,10 +393,16 @@ def verified_commit(tag: str, repository: str) -> str:
         release_ci.verify_ci(repository, commit)
     except ValueError as error:
         raise ReleaseNotesError(str(error)) from error
-    remote = remote_tag_commit(repository, tag)
-    if remote != commit:
+    remote = remote_tag(repository, tag)
+    if remote.commit != commit:
         raise ReleaseNotesError(
-            f"the remote tag {tag} in {repository} is {remote}, not the verified {commit}"
+            f"the remote tag {tag} in {repository} is {remote.commit}, not the verified {commit}"
+        )
+    local_date = git("for-each-ref", "--format=%(creatordate:iso-strict)", f"refs/tags/{tag}")
+    if datetime.fromisoformat(remote.tagged_at) != datetime.fromisoformat(local_date):
+        raise ReleaseNotesError(
+            f"the tag date of {tag} in {repository} is {remote.tagged_at}, "
+            f"the local tag's is {local_date}; fetch the tag from that repository"
         )
     return commit
 
