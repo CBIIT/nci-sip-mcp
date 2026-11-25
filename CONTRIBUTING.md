@@ -776,8 +776,9 @@ when no valid fragment is pending. The `Release notes preview` workflow shows th
 request would produce, with read-only permissions. If the tag exists but its GitHub release does
 not, check the tag out in a clean clone and run
 `pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>`: it verifies the
-tag, the commit and the successful main CI run, refuses when a release exists or the lookup
-fails, and creates only the missing release with the original body. The image retry still
+tag, the commit, the remote tag of the named repository and its successful main CI run, refuses
+when a release exists or the lookup is anything but a clear HTTP 404, and creates only the missing
+release, in that repository, with the original body and the tag's own date. The image retry still
 requires the tag to be main's tip.
 
 Review the exact PDM (including its bootstrap hishel, unearth and virtualenv constraints), Ruff,
