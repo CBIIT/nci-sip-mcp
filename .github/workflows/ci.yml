@@ -307,7 +307,12 @@ jobs:
     name: test (3.14, ${{ matrix.shard }})
     runs-on: ubuntu-24.04
     # Serial partitions preserve child/phase ownership; the complete suite exceeded 10 minutes.
-    timeout-minutes: 10
+    # This is a hang guard, not a speed target. On 2026-11-25 one shard needed about 580 s of
+    # tests plus about 40 s of setup (PR #624, run 45519973640, shard 2/4, cancelled at 10:00
+    # after "748 passed"), and main's shard 3 took 9:37. 518f8ac set 10 minutes when the shards
+    # were introduced; stride sharding reshuffles them whenever tests are added. Re-measure the
+    # slowest shard's pytest time and revisit the balancing when any shard passes 12 minutes.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

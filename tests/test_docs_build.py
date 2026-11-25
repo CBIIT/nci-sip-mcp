@@ -1,8 +1,11 @@
 """Exercise a complete static build, including search and excluded-file canaries."""
 
 import json
+import os
 import re
 import shutil
+import subprocess
+import sys
 import tomllib
 import unittest
 from pathlib import Path
@@ -19,6 +22,37 @@ from scripts.docs_site import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# A test-owned stand-in for the `zensical` package, placed first on PYTHONPATH of the generator
+# subprocess. It runs the real generator unchanged, then removes the global 404 page from the
+# site the generator wrote (the `-f` configuration's sibling `site/`): the shape of a generator
+# run that exits 0 with an incomplete site (#433).
+GENERATOR_WITHOUT_404 = """
+import runpy, sys
+from pathlib import Path
+
+shim = Path(__file__).resolve().parent.parent
+sys.path[:] = [entry for entry in sys.path if Path(entry or ".").resolve() != shim]
+del sys.modules["zensical"]
+configuration = Path(sys.argv[sys.argv.index("-f") + 1])
+try:
+    runpy.run_module("zensical", run_name="__main__", alter_sys=True)
+finally:
+    # The generator may already have omitted the page (#433); the shim must not replace its exit
+    # status with a FileNotFoundError of its own.
+    (configuration.parent / "site/404.html").unlink(missing_ok=True)
+"""
+
+
+# A generator stand-in that exits 0 having written no 404 page: the #433 flake itself.
+GENERATOR_FLAKE = """
+import sys
+from pathlib import Path
+
+configuration = Path(sys.argv[sys.argv.index("-f") + 1])
+(configuration.parent / "site").mkdir()
+(configuration.parent / "site/index.html").write_text("incomplete")
+"""
 
 
 class DocumentationBuildTest(unittest.TestCase):
@@ -110,10 +144,46 @@ custom_dir = "overrides"
         files = [path for path in self.output.rglob("*") if path.is_file()]
         self.assertTrue(any("search" in str(path) for path in files))
         self.assertTrue((self.output / "docs/story.html").is_file())
+        self.assertFalse((self.output / "404.html").exists())
         for path in files:
             with self.subTest(path=path.relative_to(self.output)):
                 self.assertNotIn(b"PRIVATE-STORY-CANARY", path.read_bytes())
                 self.assertNotIn(b"PRIVATE-RESULT-CANARY", path.read_bytes())
+
+    def test_generator_success_without_404_publishes_nothing_and_cleans_staging(self):
+        shim = self.root / "generator-shim/zensical"
+        shim.mkdir(parents=True)
+        (shim / "__init__.py").write_text("")
+        (shim / "__main__.py").write_text(GENERATOR_WITHOUT_404)
+        with (
+            patch.dict(os.environ, {"PYTHONPATH": str(shim.parent)}),
+            self.assertRaises(FileNotFoundError) as raised,
+        ):
+            self.build()
+        # Other FileNotFoundError raisers precede the generator; only this path proves the guard.
+        self.assertTrue(Path(raised.exception.filename).match("*/site/404.html"))
+        self.assertFalse(self.output.exists())
+        self.assertEqual(list((self.root / "tmp").iterdir()), [])
+
+    def test_the_shim_exits_with_the_generators_status_when_the_generator_wrote_no_404(self):
+        shim = self.root / "generator-shim/zensical"
+        flake = self.root / "generator-flake/zensical"
+        for package, source in ((shim, GENERATOR_WITHOUT_404), (flake, GENERATOR_FLAKE)):
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("")
+            (package / "__main__.py").write_text(source)
+        run = self.root / "shim-run"
+        run.mkdir()
+        search_path = os.pathsep.join([str(shim.parent), str(flake.parent)])
+        result = subprocess.run(  # noqa: S603 - this interpreter, test-owned shim, no network
+            [sys.executable, "-m", "zensical", "-f", str(run / "zensical.toml")],
+            cwd=run,
+            env={**os.environ, "PYTHONPATH": search_path},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_site_ships_the_shared_stylesheet_and_links_it_before_the_overrides(self):
         self.build()
