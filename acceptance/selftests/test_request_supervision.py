@@ -2094,8 +2094,7 @@ def test_unrelated_body_group_keeps_observed_child_failure(tmp_path):
     assert owner.snapshot()["state"] == "failed"
 
 
-def test_heartbeat_refusal_reaches_the_final_failure_note(tmp_path, monkeypatch):
-    owner = supervisor(tmp_path)
+def final_errors_after_refused_heartbeat(owner, monkeypatch):
     locked = threading.Event()
     pulsed = threading.Event()
     heartbeat = owner.run.heartbeat
@@ -2123,10 +2122,14 @@ def test_heartbeat_refusal_reaches_the_final_failure_note(tmp_path, monkeypatch)
                 assert pulsed.wait(10), "The observer never pulsed under the held lock"
             finally:
                 locked.set()
-    except (RequestPolicyError, BaseExceptionGroup) as error:
+    except (RequestPolicyError, MemoryError, BaseExceptionGroup) as error:
         failure = error
     assert failure is not None
-    errors = failure.exceptions if isinstance(failure, BaseExceptionGroup) else (failure,)
+    return failure.exceptions if isinstance(failure, BaseExceptionGroup) else (failure,)
+
+
+def test_heartbeat_refusal_reaches_the_final_failure_note(tmp_path, monkeypatch):
+    errors = final_errors_after_refused_heartbeat(supervisor(tmp_path), monkeypatch)
     notes = [note for error in errors for note in getattr(error, "__notes__", ())]
     prefix = "immediate ledger refusals: "
     refusals = [note for note in notes if note.startswith(prefix)]
@@ -2140,3 +2143,21 @@ def test_heartbeat_refusal_reaches_the_final_failure_note(tmp_path, monkeypatch)
         {"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_BUSY"},
         "0",
     )
+
+
+def test_note_serialisation_failure_never_replaces_the_refusal(tmp_path, monkeypatch):
+    real_json = request_supervision.json
+
+    def dumps(value, *args, **kwargs):
+        if isinstance(value, list):
+            raise MemoryError("note allocation")
+        return real_json.dumps(value, *args, **kwargs)
+
+    monkeypatch.setattr(request_supervision, "json", SimpleNamespace(dumps=dumps))
+    errors = final_errors_after_refused_heartbeat(supervisor(tmp_path), monkeypatch)
+    refusals = [error for error in errors if isinstance(error, RequestPolicyError)]
+    assert [error.reason for error in refusals] == ["accounting"]
+    assert not any(isinstance(error, MemoryError) for error in errors)
+    notes = [note for error in refusals for note in error.__notes__]
+    (note,) = [note for note in notes if note.startswith("immediate ledger refusals: ")]
+    assert note.rpartition(" dropped=")[2] == "1", note

@@ -2747,6 +2747,24 @@ def test_failed_diagnostic_observes_the_latch_and_never_replaces_the_refusal(tmp
         assert immediate(run) == {"records": [], "dropped": 1}
 
 
+def test_failed_refusal_storage_never_replaces_the_refusal_and_is_counted(tmp_path, monkeypatch):
+    class FullList(list):
+        def append(self, item):
+            raise MemoryError("record storage")
+
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        monkeypatch.setattr(run, "_refusals", FullList())
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+            blocker.execute("BEGIN IMMEDIATE")
+            with pytest.raises(RequestPolicyError) as refused:
+                run.authorize_participant("late")
+        error = refused.value
+        assert error.reason == "accounting"
+        assert isinstance(error.__context__, sqlite3.OperationalError)
+        assert (run.directory / "failed").read_text() == "accounting"
+        assert immediate(run) == {"records": [], "dropped": 1}
+
+
 def test_immediate_refusals_are_bounded_and_overflow_is_counted(tmp_path):
     with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
         with ledger_moved_away(run):
