@@ -775,14 +775,36 @@ class ProgramOwnershipTest(unittest.TestCase):
         self.assertEqual(status, -signal.SIGUSR1)
 
     def test_real_zombie_snapshot_and_kernel_signal_outcome(self):
-        child = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+        report = "import os; print(os.nice(0), flush=True)"
+        cases = {
+            "inherited priority": report,
+            "lowered priority": "import os; os.nice(5); " + report[len("import os; ") :],
+        }
+        for name, code in cases.items():
+            with self.subTest(name):
+                self._assert_zombie_snapshot(code, lowered=name == "lowered priority")
+
+    def _assert_zombie_snapshot(self, code, lowered):
+        child = subprocess.Popen(  # noqa: S603 - fixed interpreter and authored child code
+            [sys.executable, "-c", code], stdout=subprocess.PIPE, start_new_session=True
+        )
         try:
+            niceness = int(child.stdout.readline())
+            if lowered:
+                self.assertGreater(niceness, 0)
             self.assertEqual(runner._wait_exit(child.pid, runner.monotonic() + 5), 0)
             owner = runner._Owner(child.pid, os.geteuid(), os.getuid())
             rows = runner._group_snapshot(owner, runner.monotonic() + 5)
             self.assertEqual(len(rows), 1)
             self.assertEqual(
-                (rows[0].pid, rows[0].ppid, rows[0].pgid, rows[0].uid, rows[0].ruid, rows[0].state),
+                (
+                    rows[0].pid,
+                    rows[0].ppid,
+                    rows[0].pgid,
+                    rows[0].uid,
+                    rows[0].ruid,
+                    rows[0].state[:1],
+                ),
                 (child.pid, os.getpid(), child.pid, os.geteuid(), os.getuid(), "Z"),
             )
             if sys.platform == "darwin":
@@ -794,6 +816,7 @@ class ProgramOwnershipTest(unittest.TestCase):
             self.assertEqual(child.wait(timeout=5), 0)
         finally:
             child.wait(timeout=5)
+            child.stdout.close()
 
     def test_early_leader_exit_allows_worker_cleanup_without_group_departure(self):
         with TemporaryDirectory() as directory:
