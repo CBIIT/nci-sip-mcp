@@ -234,6 +234,7 @@ ignore_names = [
     # Diagnostic TypedDict wire keys are consumed through exact JSON validation/serialization.
     "bodyBytes", "transportEntries", "peakActive", "schemaVersion", "runId", "policySha256",
     "reservations", "denials", "observationComplete", "sqlite_errorcode", "sqlite_errorname",
+    "timeout_s", "elapsed_with_closure_s", "raised_in",
     # Uvicorn reads this externally assigned shutdown flag in its server loop.
     "should_exit",
     # Principal equality binds the tenant too; dataclasses reads this field implicitly.

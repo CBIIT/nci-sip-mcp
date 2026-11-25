@@ -283,6 +283,10 @@ class SupervisedRun:
         detail = self.run.failure_detail()
         if detail is not None:
             error.add_note(f"ledger failure detail: {json.dumps(detail)}")
+        refusals = self.run.immediate_refusals()
+        if refusals["records"] or refusals["dropped"]:
+            records, dropped = json.dumps(refusals["records"]), refusals["dropped"]
+            error.add_note(f"immediate ledger refusals: {records} dropped={dropped}")
 
     def _cleanup(self, errors: list[BaseException], *, terminal: bool) -> None:
         # Capture once before closure; mode can become visible atomically with a racing offer.
