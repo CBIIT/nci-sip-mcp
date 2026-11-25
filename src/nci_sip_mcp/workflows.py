@@ -256,6 +256,10 @@ def harmonize_data_dictionary(
     """Match the columns of a data dictionary to caDSR data elements, aligning their sample values,
     in one call.
 
+    Its CDE matching calls require a caDSR credential accepted by the configured endpoint; the
+    credential issued to this project is for caDSR staging and must be paired with the staging
+    address and the NIH VPN.
+
     registryRelease is left unset today (C-1); every match names the same registry state.
     Each column name, description and sample value is bounded by its inputSchema maxLength;
     longer input is refused with invalid_request before any upstream work, never shortened.

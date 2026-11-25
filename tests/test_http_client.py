@@ -1250,6 +1250,7 @@ class BufferedPolicyTest(ServerTestCase):
                     marker,
                     str(caught.exception) + repr(caught.exception.details),
                 )
+                self.assertNotIn("VPN", str(caught.exception))
 
     def test_certificate_after_http_retry_keeps_last_status_and_stops(self):
         """Given a 503 then cert failure, when retried, then status survives; no third send."""

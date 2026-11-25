@@ -233,7 +233,7 @@ class CompiledPolicy:
     _origin: str = field(repr=False)
     _license_key: str | None = field(repr=False)
     _target: ReleaseTarget
-    _user_agent: str = field(repr=False)
+    _user_agent: str
 
     def select_release(self, run: ControlledRun, *, channel: ReleaseChannel) -> ReleaseContext:
         """Discover and bind only a declared channel through this controller's policy."""

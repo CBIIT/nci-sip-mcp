@@ -340,7 +340,9 @@ def test_exact_live_table_with_scenario_and_credential_precedence(monkeypatch):
         "Report SHA-256: `" + metadata["sha256"] + "`; artifact 456.\n\n"
         "| Tool | Live passed / failed / skipped | Skip reason / context |\n|---|---|---|\n"
         "| `match_data_elements` | 1 / 0 / 3 | 1 crafted scenario (fixture-only); "
-        "1 credentials not issued ([cadsr-access](docs/upstream/cadsr.md#cadsr-access)); "
+        "1 credential issued for staging; protected access unverified "
+        "([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383)) "
+        "([cadsr-access](docs/upstream/cadsr.md#cadsr-access)); "
         "1 unrecorded |\n"
         "| `list_classification_schemes` | 0 / 0 / 2 | 1 upstream capability gap "
         "([cadsr-discovery](docs/upstream/cadsr.md#cadsr-discovery)); "
@@ -474,6 +476,7 @@ def test_historical_foreign_ids_do_not_acquire_current_reasons():
     text = status.render_live(report, provenance(b"old"), status.skip_contexts())
     assert "| `match_data_elements` | 1 / 0 / 3 | 3 unrecorded |" in text
     assert "credentials not issued" not in text
+    assert "credential issued for staging" not in text
     assert "upstream capability gap" not in text
 
 
@@ -501,7 +504,8 @@ def test_catalogue_and_specification_changes_drive_context_instead_of_tool_lists
         },
     ):
         assert status.skip_contexts() == {
-            "resolve_release": "credentials not issued "
+            "resolve_release": "credential issued for staging; protected access unverified "
+            "([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383)) "
             "([cadsr-access](docs/upstream/cadsr.md#cadsr-access))",
             "get_form": "upstream capability gap ([new-gap](docs/upstream/evs.md#new-gap))",
         }

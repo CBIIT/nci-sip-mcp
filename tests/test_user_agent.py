@@ -321,6 +321,19 @@ class CliTest(ReceiverCase):
         self.assertEqual(error.get("details", {}).get("parameter"), "nci-sip-mcp installed version")
         self.assertEqual(server.seen, [])
 
+    def test_undecodable_installed_metadata_is_refused_before_any_contact_without_echoing_it(self):
+        server = self.serve()
+        undecodable = UnicodeDecodeError("utf-8", b"private-\xff", 8, 9, "invalid start byte")
+
+        with patch.object(traffic_identity, "version", side_effect=undecodable):
+            code, result, stderr = run_main("release-info", **self.environment(server))
+
+        error = result.get("error", {})
+        self.assertEqual((code, error.get("code")), (1, "invalid_request"))
+        self.assertEqual(error.get("details", {}).get("parameter"), "nci-sip-mcp installed version")
+        self.assertEqual(server.seen, [])
+        self.assertNotIn("private-", json.dumps(result) + stderr)
+
     def test_serve_reports_a_malformed_id_on_stderr_and_does_not_start(self):
         server = self.serve()
 
@@ -391,6 +404,30 @@ class ContainerEntryTest(ReceiverCase):
             [(r["asset"], r["code"], r["parameter"]) for r in records],
             [("identity", "invalid_request", "nci-sip-mcp installed version")],
         )
+
+    def test_undecodable_installed_metadata_stops_startup_naming_the_version(self):
+        logging.disable(logging.NOTSET)
+        settings = Settings(data_dir=self.path, transport="streamable-http")
+        index = LocalIndexAdapter(LocalIndex(self.path))
+        undecodable = UnicodeDecodeError("utf-8", b"private-\xff", 8, 9, "invalid start byte")
+        with (
+            patch.object(container_entry.Settings, "from_env", return_value=settings),
+            patch.object(container_entry, "configure_logging"),
+            patch.object(container_entry, "prepared_index", return_value=index),
+            patch.object(container_entry, "run_http") as serve,
+            patch.object(traffic_identity, "version", side_effect=undecodable),
+            self.assertLogs("nci_sip_mcp.container_entry", level="ERROR") as logs,
+        ):
+            code = container_entry.main()
+
+        records = [json.loads(JsonFormatter().format(record)) for record in logs.records]
+        self.assertEqual(code, 1)
+        serve.assert_not_called()
+        self.assertEqual(
+            [(r["asset"], r.get("code"), r.get("parameter")) for r in records],
+            [("identity", "invalid_request", "nci-sip-mcp installed version")],
+        )
+        self.assertNotIn("private-", json.dumps(records))
 
 
 class EveryClientRequiresALabelTest(unittest.TestCase):
