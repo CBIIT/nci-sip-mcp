@@ -778,7 +778,8 @@ class ProgramOwnershipTest(unittest.TestCase):
         report = "import os; print(os.nice(0), flush=True)"
         cases = {
             "inherited priority": report,
-            "lowered priority": "import os; os.nice(5); " + report[len("import os; ") :],
+            "lowered priority": "import os; os.nice(max(1, 1 - os.nice(0))); "
+            + report[len("import os; ") :],
         }
         for name, code in cases.items():
             with self.subTest(name):
@@ -789,10 +790,10 @@ class ProgramOwnershipTest(unittest.TestCase):
             [sys.executable, "-c", code], stdout=subprocess.PIPE, start_new_session=True
         )
         try:
+            self.assertEqual(runner._wait_exit(child.pid, runner.monotonic() + 5), 0)
             niceness = int(child.stdout.readline())
             if lowered:
                 self.assertGreater(niceness, 0)
-            self.assertEqual(runner._wait_exit(child.pid, runner.monotonic() + 5), 0)
             owner = runner._Owner(child.pid, os.geteuid(), os.getuid())
             rows = runner._group_snapshot(owner, runner.monotonic() + 5)
             self.assertEqual(len(rows), 1)
