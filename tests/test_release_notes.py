@@ -28,33 +28,49 @@ CONFIG = ".release-notes/semantic-release.json"
 UNREACHABLE = "file:///nonexistent/nci-sip-mcp-scratch-remote.git"
 REPOSITORY_URL = "https://github.com/example/scratch.git"
 GENERATED = "<details>\n<summary>Generated change list</summary>\n\n"
-FAKE_GH = f"""#!{sys.executable}
-import json, os, sys
+FAKE_GH = """#!PYTHON
+import json, os, subprocess, sys
+KNOWN = "example/scratch"
 argv = sys.argv[1:]
-record = {{"argv": argv}}
+path = next((a for a in argv if a.startswith("repos/")), "")
+if path:
+    repo = "/".join(path.split("/")[1:3])
+elif "--repo" in argv:
+    repo = argv[argv.index("--repo") + 1]
+else:
+    repo = os.environ.get("GH_REPO", KNOWN)
+record = {"argv": argv, "repo": repo}
 if argv[:2] == ["release", "create"]:
     record["notes"] = open(argv[argv.index("--notes-file") + 1], encoding="utf-8").read()
 with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps(record) + "\\n")
-if argv[0] == "api":
-    sha = [p for p in argv[1].split("?")[1].split("&") if p.startswith("head_sha=")][0][9:]
-    run = {{"id": 7, "head_sha": sha, "head_branch": "main", "event": "push",
-           "path": ".github/workflows/ci.yml", "conclusion": os.environ["FAKE_GH_CI"]}}
-    print(json.dumps({{"workflow_runs": [run]}}))
-elif argv[:2] == ["release", "view"]:
-    state = os.environ["FAKE_GH_RELEASE"]
-    if state == "exists":
-        print('{{"url": "https://example.test/release"}}')
-    else:
-        sys.stderr.write("release not found" if state == "absent" else "HTTP 401: Bad credentials")
-        sys.exit(1)
-elif argv[:2] == ["release", "create"]:
-    if os.environ.get("FAKE_GH_CREATE") == "fail":
+if argv[0] != "api" and argv[:2] != ["release", "create"]:
+    sys.exit(99)
+if argv[:2] == ["release", "create"]:
+    if repo != KNOWN or os.environ.get("FAKE_GH_CREATE") == "fail":
         sys.stderr.write("HTTP 500")
         sys.exit(1)
+elif "/actions/workflows/" in path:
+    sha = [p for p in path.split("?")[1].split("&") if p.startswith("head_sha=")][0][9:]
+    run = {"id": 7, "head_sha": sha, "head_branch": "main", "event": "push",
+           "path": ".github/workflows/ci.yml", "conclusion": os.environ["FAKE_GH_CI"]}
+    print(json.dumps({"workflow_runs": [run] if repo == KNOWN else []}))
+elif "/commits/refs/tags/" in path:
+    tag = path.rsplit("/", 1)[1]
+    local = subprocess.check_output(["git", "rev-parse", f"refs/tags/{tag}^{{commit}}"], text=True)
+    print(json.dumps({"sha": os.environ.get("FAKE_GH_TAG_SHA") or local.strip()}))
+elif "/releases/tags/" in path:
+    state = os.environ["FAKE_GH_RELEASE"]
+    statuses = {"exists": "200 OK", "absent": "404 Not Found", "error": "401 Unauthorized",
+                "server": "500 Internal Server Error"}
+    if state in statuses:
+        print("HTTP/2.0 " + statuses[state] + "\\r\\nContent-Type: application/json\\r\\n\\r\\n{}")
+        sys.exit(0 if state == "exists" else 1)
+    sys.stderr.write("release not found" if state == "sentence" else "dial tcp: lookup failed")
+    sys.exit(1)
 else:
-    sys.exit(99)
-"""
+    sys.exit(98)
+""".replace("PYTHON", sys.executable)
 
 
 def fragment(
@@ -371,6 +387,21 @@ class ReleaseNotesFlowTest(unittest.TestCase):
             project.notes().startswith("## Release summary\n\n" + section("Odd", changes=prose))
         )
 
+    def test_a_failing_render_of_the_generated_body_leaves_no_local_tag(self):
+        project = Scratch(self)
+        project.history()
+        self.assertEqual(project.notes_tool("prepare").returncode, 0)
+        generated = project.root / ".release-notes/template/.generated_notes.md.j2"
+        generated.write_text('{% include "missing.md.j2" %}', encoding="utf-8")
+
+        released = project.run(
+            sys.executable, "-m", "semantic_release", "-c", CONFIG, "version",
+            "--no-commit", "--tag", "--no-push", "--no-changelog", "--skip-build",
+        )  # fmt: skip
+
+        self.assertNotEqual(released.returncode, 0)
+        self.assertEqual(project.tags(), ["v0.1.0"])
+
     def test_the_generated_template_tree_is_not_tracked_or_staged(self):
         project = Scratch(self)
         project.history()
@@ -474,17 +505,35 @@ class RecoveryTest(unittest.TestCase):
             f"?head_sha={head}&branch=main&event=push&per_page=100"
         )
         self.assertEqual(
-            [call["argv"][:2] for call in calls],
-            [["api", route], ["release", "view"], ["release", "create"]],
+            [call["argv"][:-1] if call["argv"][0] == "release" else call["argv"] for call in calls],
+            [
+                ["api", route],
+                ["api", "repos/example/scratch/commits/refs/tags/v0.2.0"],
+                ["api", "-i", "repos/example/scratch/releases/tags/v0.2.0"],
+                [
+                    "release",
+                    "create",
+                    "v0.2.0",
+                    "--repo",
+                    "example/scratch",
+                    "--verify-tag",
+                    "--notes-file",
+                ],
+            ],
         )
-        self.assertEqual(calls[1]["argv"], ["release", "view", "v0.2.0", "--json", "url"])
-        create = calls[2]
-        self.assertEqual(
-            create["argv"][:5], ["release", "create", "v0.2.0", "--verify-tag", "--notes-file"]
-        )
-        self.assertEqual(len(create["argv"]), 6)
-        self.assertEqual(create["notes"], original)
+        self.assertEqual(calls[3]["notes"], original)
         self.assertEqual(project.tags(), ["v0.1.0", "v0.2.0"])
+
+    def test_the_selected_repository_wins_over_the_environment_and_the_checkout(self):
+        project = Scratch(self)
+        project.history()
+        project.git("tag", "-a", "v0.2.0", "-m", "v0.2.0")
+        project.env["GH_REPO"] = "other/fork"
+
+        result = self.recover(project)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual({call["repo"] for call in project.gh_calls()}, {"example/scratch"})
 
     def test_the_range_is_frozen_at_the_target_with_an_unrelated_newer_tag(self):
         project = Scratch(self)
@@ -516,7 +565,7 @@ class RecoveryTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("the history at v0.3.0 no longer yields that release", result.stderr)
-        self.assertEqual(project.gh_calls()[-1]["argv"][:2], ["release", "view"])
+        self.assertNotIn("create", [call["argv"][1] for call in project.gh_calls()])
 
     def test_a_failed_creation_is_reported(self):
         project = Scratch(self)
@@ -533,6 +582,21 @@ class RecoveryTest(unittest.TestCase):
         for name, env, setup, message in (
             ("release exists", {"FAKE_GH_RELEASE": "exists"}, None, "already has a release"),
             ("lookup fails", {"FAKE_GH_RELEASE": "error"}, None, "could not tell whether"),
+            ("lookup server error", {"FAKE_GH_RELEASE": "server"}, None, "could not tell whether"),
+            ("lookup transport", {"FAKE_GH_RELEASE": "transport"}, None, "could not tell whether"),
+            (
+                "lookup sentence only",
+                {"FAKE_GH_RELEASE": "sentence"},
+                None,
+                "could not tell whether",
+            ),
+            (
+                "remote tag differs",
+                {"FAKE_GH_TAG_SHA": "0" * 40},
+                None,
+                "the remote tag v0.2.0 in example/scratch is",
+            ),
+            ("other repository", {}, "fork", "No CI run for the main commit"),
             ("ci not green", {"FAKE_GH_CI": "failure"}, None, "Newest CI run has not completed"),
             ("tag is not head", {}, "advance", "is not the checked-out commit"),
             ("no such tag", {}, "other-tag", "no tag v0.9.9"),
@@ -544,7 +608,11 @@ class RecoveryTest(unittest.TestCase):
                 if setup == "advance":
                     project.commit("docs: later")
                 project.env.update(env)
-                result = self.recover(project, "v0.9.9" if setup == "other-tag" else "v0.2.0")
+                result = (
+                    project.notes_tool("recover", "v0.2.0", "--repository", "other/fork")
+                    if setup == "fork"
+                    else self.recover(project, "v0.9.9" if setup == "other-tag" else "v0.2.0")
+                )
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(message, result.stderr)
                 self.assertNotIn(
