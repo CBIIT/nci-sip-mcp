@@ -3,6 +3,7 @@
 import io
 import json
 import logging
+import os
 import sqlite3
 import sys
 import tempfile
@@ -325,3 +326,88 @@ class RevisionSourceTest(unittest.TestCase):
             "sentence_transformers": types.SimpleNamespace(SentenceTransformer=Model),
             "huggingface_hub": types.SimpleNamespace(snapshot_download=snapshot),
         }
+
+
+SENTENCE_TRANSFORMERS_COMMIT, HUB_COMMIT, FETCHED_COMMIT = "1" * 40, "2" * 40, "3" * 40
+
+
+class ModelCacheLocationTest(unittest.TestCase):
+    """A Hub model name is looked up in the cache that loading it by name downloads to."""
+
+    def setUp(self):
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.st_cache, self.hub_cache = Path(root.name, "st"), Path(root.name, "hub")
+        environment = patch.dict(
+            os.environ,
+            {
+                "SENTENCE_TRANSFORMERS_HOME": str(self.st_cache),
+                "HF_HUB_CACHE": str(self.hub_cache),
+            },
+        )
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.loads = []
+
+    @staticmethod
+    def fill(cache, commit):
+        """A Hub cache folder holding one snapshot of org/model, `main` pointing at it."""
+        repo = Path(cache, "models--org--model")
+        snapshot = repo / "snapshots" / commit
+        snapshot.mkdir(parents=True)
+        (snapshot / "config.json").write_text("{}")
+        (repo / "refs").mkdir(exist_ok=True)
+        (repo / "refs" / "main").write_text(commit)
+        return str(snapshot)
+
+    def modules(self):
+        """The two libraries' cache rules: sentence-transformers downloads into its folder, else
+        its environment variable, else the Hub cache; the Hub lookup defaults to the Hub cache."""
+        hub_default = os.environ["HF_HUB_CACHE"]  # huggingface_hub binds it at import, as here
+        loads, fill = self.loads, self.fill
+
+        class Model:
+            def __init__(self, name, *, local_files_only=False, cache_folder=None):
+                loads.append(name)
+                if not Path(name).is_dir():  # a load by name is the download
+                    target = cache_folder or os.environ.get("SENTENCE_TRANSFORMERS_HOME")
+                    fill(target or hub_default, FETCHED_COMMIT)
+
+        def snapshot(name, *, local_files_only=False, cache_dir=None):
+            if not local_files_only:
+                raise OSError("a download is not allowed")
+            repo = Path(cache_dir or hub_default, "models--" + name.replace("/", "--"))
+            if not (repo / "refs" / "main").is_file():
+                raise FileNotFoundError("no cached snapshot")
+            return str(repo / "snapshots" / (repo / "refs" / "main").read_text())
+
+        return {
+            "sentence_transformers": types.SimpleNamespace(SentenceTransformer=Model),
+            "huggingface_hub": types.SimpleNamespace(snapshot_download=snapshot),
+        }
+
+    def load(self, **options):
+        """The revision recorded and the names loaded, or the refusal, for org/model."""
+        try:
+            with patch.dict(sys.modules, self.modules()):
+                provider = SentenceTransformersProvider("org/model", **options)
+        except FileNotFoundError as missing:
+            return f"not cached: {missing}", self.loads
+        return provider.revision, self.loads
+
+    def test_the_sentence_transformers_cache_is_looked_up_and_loaded(self):
+        configured = self.fill(self.st_cache, SENTENCE_TRANSFORMERS_COMMIT)
+        self.fill(self.hub_cache, HUB_COMMIT)
+        for options in ({"local_files_only": True}, {}):
+            with self.subTest(**options):
+                self.loads.clear()
+                self.assertEqual(self.load(**options), (SENTENCE_TRANSFORMERS_COMMIT, [configured]))
+
+    def test_a_cold_cache_download_is_found_where_it_landed(self):
+        landed = str(self.st_cache / "models--org--model" / "snapshots" / FETCHED_COMMIT)
+        self.assertEqual(self.load(), (FETCHED_COMMIT, ["org/model", landed]))
+
+    def test_without_sentence_transformers_home_the_hub_cache_is_used(self):
+        os.environ.pop("SENTENCE_TRANSFORMERS_HOME")  # the container's setup
+        cached = self.fill(self.hub_cache, HUB_COMMIT)
+        self.assertEqual(self.load(local_files_only=True), (HUB_COMMIT, [cached]))
