@@ -437,6 +437,19 @@ class SupersededBuildRemovalTest(ServerFixture):
             listings,
         )
 
+    def test_activating_the_already_active_build_announces_nothing(self):
+        """A no-op activation is not a switch: no `index_activated` record, nothing switched."""
+
+        events = []
+        index = LocalIndex(
+            self.local_index.data_dir, on_event=lambda name, _d, sink=events: sink.append(name)
+        )
+        activation = index.activate_and_report(self.active.build_id)
+
+        self.assertEqual([name for name in events if name == "index_activated"], [])
+        self.assertEqual(index.get_active_manifest().build_id, self.active.build_id)
+        self.assertEqual(activation[0].build_id, self.active.build_id)
+
     def test_the_superseded_listing_is_read_inside_the_activation_transaction(self):
         """If the first listing fails the activation fails: it cannot be a read after the commit."""
 
