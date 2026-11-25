@@ -341,6 +341,8 @@ class HttpClient:
     that the caller can set the request-log hook and a test can replace the clock and the
     random source. A hook that raises is logged by its exception type and otherwise ignored:
     it never changes the result of a call, nor the error of a failing one.
+    `user_agent` is required and is sent on every request of this client (A6.2b): no request
+    goes out under urllib's own.
     """
 
     def __init__(
@@ -348,6 +350,7 @@ class HttpClient:
         base_url: str,
         *,
         label: str,
+        user_agent: str,
         timeout_seconds: float,
         max_attempts: int,
         retry_backoff_seconds: float,
@@ -371,6 +374,7 @@ class HttpClient:
         self.size_bound = size_bound
         self.credentials = dict(credentials or {})
         self.redact_values = redact_values
+        self.user_agent = user_agent
         self.on_request: Callable[[RequestRecord], None] | None = None
         self.sleep: Callable[[float], None] = time.sleep
         self.jitter: Callable[[float, float], float] = random.uniform
@@ -404,6 +408,7 @@ class HttpClient:
         data: bytes | None = None,
     ) -> Request:
         headers = {"Accept": "application/json", **(headers or {}), **self.credentials}
+        headers["User-Agent"] = self.user_agent
         if correlation_id := current_correlation_id():
             headers[CORRELATION_HEADER] = correlation_id
         # The base URL comes from Settings, which accepts only http and https.

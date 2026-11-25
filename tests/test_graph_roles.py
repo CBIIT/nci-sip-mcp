@@ -7,6 +7,7 @@ from urllib.parse import parse_qs
 
 from nci_sip_mcp.config import Settings
 from nci_sip_mcp.ssis import SSISClient
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_http_client import Reply, ServerTestCase
 from test_server import ServerFixture
 from test_ssis_client import recording
@@ -23,7 +24,7 @@ class GraphRoleProtocolTest(ServerFixture):
         row.update(terms)
         source["results"]["bindings"] = [row]
         identities = recording("ssis-sparql/graph-identities.json")["response"]["body"]
-        self.context.ssis = SSISClient(self.settings)
+        self.context.ssis = SSISClient(self.settings, user_agent=product_user_agent())
 
         async def call(client):
             return await client.call_tool(
@@ -81,7 +82,7 @@ class GraphRoleProtocolTest(ServerFixture):
         """Given merged DE2672191, finding it retains both independent status sets."""
         source = recording("ssis-sparql/data-elements-statuses-c48179.json")
         identities = recording("ssis-sparql/graph-identities.json")["response"]["body"]
-        self.context.ssis = SSISClient(self.settings)
+        self.context.ssis = SSISClient(self.settings, user_agent=product_user_agent())
 
         async def call(client):
             return await client.call_tool(
@@ -107,7 +108,7 @@ class GraphRoleProtocolTest(ServerFixture):
         """When finding C49508, its graph-main use in 2178439 retains order one."""
         source = recording("ssis-sparql/data-elements-roles-c49508.json")
         identities = recording("ssis-sparql/graph-identities.json")["response"]["body"]
-        self.context.ssis = SSISClient(self.settings)
+        self.context.ssis = SSISClient(self.settings, user_agent=product_user_agent())
 
         async def call(client):
             return await client.call_tool(
@@ -141,7 +142,9 @@ class GraphRoleWireTest(ServerTestCase):
                     (FIXTURES / f"data-elements-statuses-c25332{suffix}.json").read_text()
                 )
                 server = self.serve(Reply(body=b'{"results":{"bindings":[]}}'))
-                client = SSISClient(Settings(ssis_sparql_url=server.url))
+                client = SSISClient(
+                    Settings(ssis_sparql_url=server.url), user_agent=product_user_agent()
+                )
                 self.assertEqual(client.find_data_elements("C25332", expand_descendants=expand), [])
                 self.assertEqual(
                     parse_qs(server.bodies[0].decode())["query"][0],

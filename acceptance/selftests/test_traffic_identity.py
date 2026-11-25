@@ -8,6 +8,7 @@ from unittest.mock import patch
 from nci_sip_acceptance import traffic_identity
 from nci_sip_acceptance.traffic_identity import (
     INSTALLATION_ID_ENV,
+    VERSION_ERROR,
     IdentitySnapshot,
     capture_identity,
     installation_label,
@@ -76,3 +77,22 @@ class AcceptanceIdentitySnapshotTest(unittest.TestCase):
         self.assertIn(f"(installation={first_id}; ", first_label)
         self.assertIn(f"(installation={rotated_id}; ", rotated_label)
         self.assertNotEqual(first_label, rotated_label)
+
+
+class AcceptanceProductUserAgentTest(unittest.TestCase):
+    PRODUCT = "nci-sip-acceptance/1.2.3 (+https://github.com/CBIIT/nci-sip-mcp)"
+
+    def test_the_label_names_the_product_and_never_an_installation(self):
+        for raw_id in (None, "b" * 32):
+            with self.subTest(configured=raw_id is not None):
+                snapshot = IdentitySnapshot(raw_id, "1.2.3")
+
+                self.assertEqual(traffic_identity.product_user_agent(snapshot), self.PRODUCT)
+
+    def test_an_unsafe_or_over_long_version_is_refused(self):
+        for unsafe in (None, "not a version", "1." + "0" * 300):
+            with self.subTest(version=str(unsafe)[:20]):
+                with self.assertRaises(ValueError) as raised:
+                    traffic_identity.product_user_agent(IdentitySnapshot(None, unsafe))
+
+                self.assertEqual(str(raised.exception), VERSION_ERROR)

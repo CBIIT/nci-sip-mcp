@@ -26,6 +26,7 @@ from nci_sip_acceptance.request_authorization import RunDescriptor
 from nci_sip_acceptance.request_budget import ControlledRun
 from nci_sip_acceptance.request_transport import ControlledHttpPolicy
 from nci_sip_mcp.http_client import HttpClient,RequestPolicyError
+from nci_sip_mcp.traffic_identity import product_user_agent
 if sys.stdin.buffer.read(1)!=b'x': sys.exit(2)
 descriptor,origin,mode=sys.argv[3:]
 environment=Environment('evs-only',{s:origin if s=='evs' else None for s in SURFACES},{},'e'*64)
@@ -37,7 +38,7 @@ try:
     else:
         client=HttpClient(origin,label='owned',timeout_seconds=1,max_attempts=1,
             retry_backoff_seconds=0,max_response_bytes=1024,size_bound='owned',
-            request_policy=ControlledHttpPolicy(run))
+            request_policy=ControlledHttpPolicy(run),user_agent=product_user_agent())
         result=client.get_json('/api/v1/concept/ncit_26.09e',{'list':'C4817','include':'summary'})
 except RequestPolicyError as error: result={'reason':error.reason}
 print(json.dumps(dict(result=result,imports=[nci_sip_acceptance.__file__,nci_sip_mcp.__file__,

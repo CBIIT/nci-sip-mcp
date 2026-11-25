@@ -3,7 +3,7 @@
 from dataclasses import FrozenInstanceError, replace
 
 import pytest
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 
 from nci_sip_acceptance.environments import SURFACES, Environment
 from nci_sip_acceptance.request_catalogue import compile_policy
@@ -47,6 +47,7 @@ def correlated_responses(owner, origin, identifiers):
             max_response_bytes=64,
             size_bound="owned",
             request_policy=ControlledHttpPolicy(owner.run),
+            user_agent=PRODUCT_USER_AGENT,
         )
         results = []
         for identifier in identifiers:
@@ -88,6 +89,7 @@ def test_correlation_is_preserved_without_broadening_headers(tmp_path):
             assert sorted((key.lower(), value) for key, value in headers) == sorted(
                 [
                     ("accept", "application/json"),
+                    ("user-agent", PRODUCT_USER_AGENT),
                     ("x-correlation-id", identifier),
                     ("host", receiver.origin.removeprefix("http://")),
                     ("accept-encoding", "identity"),

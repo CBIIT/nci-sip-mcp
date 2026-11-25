@@ -35,6 +35,7 @@ from nci_sip_mcp.http_client import MAX_RETRY_DELAY_SECONDS
 from nci_sip_mcp.models import IndexManifest
 from nci_sip_mcp.registry import SPECS
 from nci_sip_mcp.server import create_mcp
+from nci_sip_mcp.traffic_identity import IdentitySnapshot, installation_label, user_agent
 from nci_sip_mcp.transport import GRACEFUL_SHUTDOWN_SECONDS, create_http_app
 from nci_sip_mcp.validation import (
     MAX_DICTIONARY_TEXT,
@@ -1085,10 +1086,13 @@ class DocumentationTest(unittest.TestCase):
             '"$ACCEPTANCE_VENV/bin/python" -m nci_sip_acceptance.traffic_identity show',
             guide_text,
         )
-        self.assertIn(
-            "The server does not yet read this identity or include it in HTTP requests",
-            guide_text,
-        )
+        # The guide's server examples are the labels the code renders, with placeholders.
+        configured = IdentitySnapshot("0" * 32, "1.2.3")
+        unconfigured = IdentitySnapshot(None, "1.2.3")
+        for label in (installation_label(configured), user_agent(unconfigured)):
+            with self.subTest(label=label):
+                example = label.replace("1.2.3", "<version>").replace("0" * 32, "<id>")
+                self.assertIn(f"`{example}`", guide_text)
         self.assertNotIn("pdm run --working-dir acceptance", guide_text)
         self.assertIn(
             "pdm run python -m nci_sip_acceptance.traffic_identity show",

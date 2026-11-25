@@ -10,6 +10,7 @@ from fakes import FakeEVS, FakeSSIS, concept, primary_element
 from nci_sip_mcp.evs import EVSClient
 from nci_sip_mcp.http_client import UpstreamUnavailableError
 from nci_sip_mcp.registry import invoke
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse
 from test_server import ServerFixture
 
@@ -46,7 +47,7 @@ class PrimaryAPIProtocolTest(ServerFixture):
 
     def test_invalid_version_refuses_before_any_upstream_request(self, _):
         terminologies = self.context.evs.get_terminologies()
-        self.context.evs = EVSClient(self.settings.evs_base_url)
+        self.context.evs = EVSClient(self.settings.evs_base_url, user_agent=product_user_agent())
         with patch(
             "nci_sip_mcp.http_client._open",
             return_value=FakeResponse(json.dumps(terminologies).encode()),

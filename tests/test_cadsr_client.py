@@ -29,6 +29,7 @@ from nci_sip_mcp.http_client import (
 from nci_sip_mcp.invocation import error_record
 from nci_sip_mcp.release import RegistryMetadataError
 from nci_sip_mcp.request_policy import Exchange, using_request_policy
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import http_error
 from test_http_client import Reply, ScriptedPolicy, ServerTestCase
 
@@ -81,7 +82,7 @@ class ExportListingTest(unittest.TestCase):
 class CaDSRClientTest(ServerTestCase):
     def cadsr(self, api, export=None, **options):
         settings = Settings(cadsr_base_url=api.url, cadsr_ftp_url=(export or api).url, **options)
-        client = CaDSRClient(settings)
+        client = CaDSRClient(settings, user_agent=product_user_agent())
         client.http.sleep = lambda _: None
         client.match_http.sleep = lambda _: None
         return client
@@ -373,7 +374,8 @@ class ClientBoundaryTest(ServerTestCase):
 
     def cadsr(self, server, **options):
         client = CaDSRClient(
-            Settings(cadsr_base_url=server.url, cadsr_ftp_url=server.url, **options)
+            Settings(cadsr_base_url=server.url, cadsr_ftp_url=server.url, **options),
+            user_agent=product_user_agent(),
         )
         for http in (client.http, client.match_http, client.export_http):
             http.sleep = lambda _: None
@@ -561,7 +563,8 @@ class StagingHintTest(unittest.TestCase):
         policy = AnyTargetPolicy("", outcomes)
         with using_request_policy(policy):
             client = CaDSRClient(
-                Settings(cadsr_base_url=base + "/rad", cadsr_ftp_url=base + "/ftp", **options)
+                Settings(cadsr_base_url=base + "/rad", cadsr_ftp_url=base + "/ftp", **options),
+                user_agent=product_user_agent(),
             )
         for http in (client.http, client.match_http, client.export_http):
             http.sleep = lambda _: None

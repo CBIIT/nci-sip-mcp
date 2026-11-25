@@ -125,7 +125,8 @@ UAT/PROD administration. UAT has not run.
   Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 - **Operators configuring stable identity**: the
   [request identification guide](docs/request-identification.md) covers local provisioning and
-  lifecycle; the current utilities do not label requests.
+  lifecycle; the server labels its platform requests with it; acceptance traffic sends the product label
+  without an installation identity.
 
 ## License
 

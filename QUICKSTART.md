@@ -14,7 +14,8 @@ configuration proposals, including startup-settings snapshots
 (`nci-sip-mcp serve --configuration-snapshot PATH`,
 [configuration evidence](docs/local-validation.md#configuration-evidence-and-proposals)). The
 [request identification guide](docs/request-identification.md) covers local identity provisioning;
-the utilities do not label requests yet.
+the server labels its platform requests with it; acceptance traffic sends the product label
+without an installation identity.
 
 ## Upstream access and SSIS transition
 
@@ -248,10 +249,15 @@ A leading `~` is expanded, and an empty value is rejected. The other settings:
 | `NCI_SIP_HTTP_ALLOWED_ORIGINS` | `http://127.0.0.1:*,http://localhost:*,http://[::1]:*` | Permitted Origin authorities, exact or wildcard port; requests without Origin are allowed |
 | `NCI_SIP_HTTP_REQUIRE_INDEX` | `0` | Boolean switch, read as `0` or `1` only (anything else is a configuration error). Set to 1 when deployment supplies an index: readiness requires an active build compatible with the configured embedding model. With 0 an absent index permits live tools; an existing active build is still verified |
 
-`NCI_SIP_INSTALLATION_ID` is read only by the local identity utility, not by server settings or
-request emission. For a persistent installation, generate one value, replace the placeholder
-below with that saved value, and retain it in durable deployment configuration across restarts and
-upgrades. This `export` lasts only in the current shell; do not generate a fresh value on every
+`NCI_SIP_INSTALLATION_ID` is not a server setting of the table above: the server captures it
+once at start-up and sends it in the `User-Agent` of every platform request
+(`nci-sip-mcp/<version> (installation=<id>; +https://github.com/CBIIT/nci-sip-mcp)`). Unset, the
+server sends the product label without `installation=`; a value that is not exactly 32
+lowercase hexadecimal characters, or installed metadata that cannot form a safe label, stops
+start-up with an `invalid_request` error naming the variable or the installed version, before
+any upstream is contacted. For a persistent installation, generate one value,
+replace the placeholder below with that saved value, and retain it in durable deployment
+configuration across restarts and upgrades. This `export` lasts only in the current shell; do not generate a fresh value on every
 startup. The [request identification guide](docs/request-identification.md) covers artifact and
 ephemeral-job configuration.
 

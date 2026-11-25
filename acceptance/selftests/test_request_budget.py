@@ -58,6 +58,7 @@ http_client._OPENER = build_opener(ProxyHandler({}), http_client._SameOriginRedi
 settings = json.loads(Path(sys.argv[1]).read_text())
 sys.stdin.readline()  # The parent authorizes the participant before releasing its child.
 import nci_sip_acceptance.request_budget as module
+from nci_sip_mcp.traffic_identity import product_user_agent
 
 class ActorPolicy:
     def __init__(self, run, grant):
@@ -115,6 +116,7 @@ client = HttpClient(
     settings["base"], label="EVS", timeout_seconds=2, max_attempts=settings.get("max_attempts", 1),
     retry_backoff_seconds=0, max_response_bytes=1024, size_bound="local-test",
     request_policy=policy,
+    user_agent=product_user_agent(),
 )
 accepted, refused = 0, []
 for round_number in range(settings.get("rounds", 2)):

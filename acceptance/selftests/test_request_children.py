@@ -13,7 +13,7 @@ from http.client import HTTPResponse
 from types import SimpleNamespace
 
 import pytest
-from http_receiver import WireReceiver
+from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 from test_request_supervision import (
     CLEANUP_WORKER,
     STALL_BEFORE_READY,
@@ -1015,7 +1015,11 @@ def test_settled_resources_do_not_hide_an_outstanding_http_lease(tmp_path, monke
     resource = calls(lambda: b"owned producer finished")
     results, errors, produced, read_seen, failure = [], [], None, False, None
     with WireReceiver([reply]) as receiver:
-        grant = RequestGrant("GET", receiver.origin + "/lease", (("accept", "application/json"),))
+        grant = RequestGrant(
+            "GET",
+            receiver.origin + "/lease",
+            (("accept", "application/json"), ("user-agent", PRODUCT_USER_AGENT)),
+        )
         auth = Authorization((grant,), Limits(response_bytes=8192, total_bytes=16384), "a" * 64)
         owner = SupervisedRun.create(auth, tmp_path / "run")
         client = HttpClient(
@@ -1027,6 +1031,7 @@ def test_settled_resources_do_not_hide_an_outstanding_http_lease(tmp_path, monke
             max_response_bytes=32,
             size_bound="owned-lease-observation",
             request_policy=ControlledHttpPolicy(owner.run),
+            user_agent=PRODUCT_USER_AGENT,
         )
 
         def fetch():

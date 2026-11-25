@@ -10,6 +10,7 @@ from nci_sip_mcp.evs import EVSClient, EVSNotFoundError, EVSReleaseNotFoundError
 from nci_sip_mcp.invocation import call
 from nci_sip_mcp.registry import invoke
 from nci_sip_mcp.release import registry_state, resolve_evs_release, served_evs_release
+from nci_sip_mcp.traffic_identity import product_user_agent
 from test_evs_client import FakeResponse
 from test_handlers import NEOPLASM, HandlerTestCase
 
@@ -146,7 +147,11 @@ class ResolveEvsReleaseTest(unittest.TestCase):
             patch("nci_sip_mcp.http_client._open", return_value=FakeResponse(b"[]")) as opened,
             self.assertRaises(PlatformError) as raised,
         ):
-            resolve_evs_release(EVSClient("https://example.invalid"), "ncit", "weekly")
+            resolve_evs_release(
+                EVSClient("https://example.invalid", user_agent=product_user_agent()),
+                "ncit",
+                "weekly",
+            )
 
         # An answer without a row is no release, whatever the query was.
         self.assertEqual(raised.exception.code, "release_not_available")
@@ -159,7 +164,9 @@ class ResolveEvsReleaseTest(unittest.TestCase):
     def test_the_unfiltered_listing_sends_no_filter(self):
         response = FakeResponse(json.dumps([MONTHLY]).encode())
         with patch("nci_sip_mcp.http_client._open", return_value=response) as opened:
-            rows = EVSClient("https://example.invalid").get_terminologies()
+            rows = EVSClient(
+                "https://example.invalid", user_agent=product_user_agent()
+            ).get_terminologies()
 
         self.assertEqual(rows, [MONTHLY])
         self.assertEqual(
@@ -179,9 +186,9 @@ class UnknownReleaseTest(HandlerTestCase):
             self.answer_404("Terminology not found = ncit_99.99z"),
             self.assertRaises(EVSReleaseNotFoundError) as raised,
         ):
-            EVSClient("https://example.invalid", max_attempts=1).get_concept(
-                "C4817", release=release("99.99z")
-            )
+            EVSClient(
+                "https://example.invalid", max_attempts=1, user_agent=product_user_agent()
+            ).get_concept("C4817", release=release("99.99z"))
 
         self.assertEqual(raised.exception.details, {"requested": "ncit_99.99z", "source": "evs"})
 
@@ -190,12 +197,14 @@ class UnknownReleaseTest(HandlerTestCase):
             self.answer_404("C4817 not found"),
             self.assertRaises(EVSNotFoundError),
         ):
-            EVSClient("https://example.invalid", max_attempts=1).get_concept(
-                "C4817", release=release()
-            )
+            EVSClient(
+                "https://example.invalid", max_attempts=1, user_agent=product_user_agent()
+            ).get_concept("C4817", release=release())
 
     def test_a_pinned_release_no_longer_served_tells_the_caller_why_to_retry(self):
-        self.context.evs = EVSClient("https://example.invalid", max_attempts=1)
+        self.context.evs = EVSClient(
+            "https://example.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
         with (
             patch.object(self.context.evs, "get_terminologies", return_value=[MONTHLY]),
             self.answer_404("Terminology not found = ncit_26.09d"),
@@ -213,7 +222,9 @@ class UnknownReleaseTest(HandlerTestCase):
     def test_prose_before_the_unknown_terminology_still_classifies_a_release_failure(self):
         # Given a prefixed EVS message, when a concept is read, then the release
         # failure names the upstream requested terminology rather than a missing concept.
-        client = EVSClient("https://example.invalid", max_attempts=1)
+        client = EVSClient(
+            "https://example.invalid", max_attempts=1, user_agent=product_user_agent()
+        )
         with self.answer_404("Error: Terminology not found = ncit_x"):
             result = call("get_concept", lambda: client.get_concept("C4817", release=release()))
 
@@ -372,7 +383,11 @@ class SelectionMetadataTest(unittest.TestCase):
                 self.subTest(change=change),
                 self.assertRaises(PlatformError) as raised,
             ):
-                resolve_evs_release(EVSClient("https://example.invalid"), "ncit", "monthly")
+                resolve_evs_release(
+                    EVSClient("https://example.invalid", user_agent=product_user_agent()),
+                    "ncit",
+                    "monthly",
+                )
             self.assertEqual(raised.exception.code, "release_not_available")
 
 
