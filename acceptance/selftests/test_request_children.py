@@ -64,14 +64,12 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
     resource = calls(lambda: b"owned completion finished")
     close_failure = RequestPolicyError("accounting")
     lock = sqlite3.connect(owner.run.directory / "ledger.sqlite")
-    summary = owner.run.directory / "summary.json"
-    actual_close, actual_finish, actual_snapshot, actual_check_wait = (
+    summary, facts = owner.run.directory / "summary.json", {}
+    actual_close, actual_finish, actual_snapshot = (
         owner.run.close,
         resource.finish,
         owner.run.snapshot,
-        owner.run.check_wait,
     )
-    facts = {}
 
     def close():
         actual_close()
@@ -81,7 +79,8 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
         # The terminal read is refused by a real writer-versus-writer SQLITE_BUSY while the
         # writer lock is held; the lock is then released and later reads recover.
         try:
-            return actual_check_wait(0)
+            with owner.run.logical(owner.run.authorization.grants[0]):
+                return None
         except RequestPolicyError as error:
             facts["storage_refusal"] = error
             lock.rollback()
