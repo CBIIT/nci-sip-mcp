@@ -160,8 +160,9 @@ export NCI_SIP_EMBEDDING_PROVIDER=sentence-transformers
 export NCI_SIP_EMBEDDING_MODEL=cambridgeltl/SapBERT-from-PubMedBERT-fulltext
 ```
 
-A Hub model name loads the snapshot already in the local Hugging Face cache and is downloaded only
-when the cache holds none; a refresh that brings a newer commit changes the model revision, which an index built
+A Hub model name loads the snapshot already in the model cache (`SENTENCE_TRANSFORMERS_HOME` when
+set, else the Hugging Face hub cache, `HF_HUB_CACHE`) and is downloaded, into that cache, only
+when it holds none; a refresh that brings a newer commit changes the model revision, which an index built
 before the refresh refuses (see [model revision](docs/ncit-semantic-index.md#model-rationale-and-reproducibility-limits)).
 
 ## Connect a client

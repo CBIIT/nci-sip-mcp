@@ -26,7 +26,9 @@ the model at that same path, with content identical to the build's: the director
 start-up and a difference refuses start-up (the
 [hash definition](ncit-semantic-index.md#model-rationale-and-reproducibility-limits)).
 A Hub model name loads the snapshot found in `/model-cache` as it is; the container never
-refreshes it. The snapshot's commit must equal the revision stored in the index: a refreshed
+refreshes it. The image sets `HF_HOME=/model-cache`, so snapshots sit under
+`/model-cache/hub/`; leave `SENTENCE_TRANSFORMERS_HOME` unset, because setting it moves the
+cache the model is looked up in. The snapshot's commit must equal the revision stored in the index: a refreshed
 cache holding a newer commit refuses start-up, like a changed model directory (the container
 exits with `container_startup_failed` for the `index` asset), so mount the snapshot the index
 was built with. The image sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`;

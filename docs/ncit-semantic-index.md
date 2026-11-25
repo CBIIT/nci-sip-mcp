@@ -65,8 +65,9 @@ Definitions provide additional indexed fields, but the model card's entity-name 
 by itself establish quality for arbitrary long definitions or downstream workflows.
 
 The actual [provider](../src/ncit_index/embeddings.py) loads a
-`SentenceTransformer` from the model directory or the cached Hub snapshot (a cached snapshot is
-used as it is; refresh the cache to update the model, since only an empty cache downloads) and calls `encode` with `normalize_embeddings=True` and
+`SentenceTransformer` from the model directory or the cached Hub snapshot, found in the cache sentence-transformers
+downloads to (`SENTENCE_TRANSFORMERS_HOME` when set, else the Hugging Face hub cache; a cached
+snapshot is used as it is; refresh the cache to update the model, since only an empty cache downloads) and calls `encode` with `normalize_embeddings=True` and
 `show_progress_bar=False`, then converts the result to float32. Pooling, tokenization, truncation
 and inference batching are delegated to the loaded model/library; this wrapper specifies no
 CLS pooling or model-card example length. Do not copy those example settings into a description
@@ -74,7 +75,7 @@ of the historical calibration without evidence that they were used.
 
 Runtime compatibility checks **provider, model name and dimensions**, and the model **revision**
 of every build that stores one: it is refused unless the serving revision is known and equal. A build records the commit of the model files that embedded it, read
-from the local Hugging Face cache (a Hub model's `snapshots/<commit>` folder; no download or Hub
+from the same cache (a Hub model's `snapshots/<commit>` folder; no download or Hub
 call is added for it). The cases:
 
 - Stored and runtime revisions known and equal: served.
