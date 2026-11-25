@@ -2212,3 +2212,29 @@ def test_failing_note_sink_never_replaces_the_refusal(tmp_path, monkeypatch, sna
     errors = final_errors_after_refused_heartbeat(owner, monkeypatch)
     assert [type(error) for error in errors] == [RequestPolicyError]
     assert errors[0].reason == "accounting"
+
+
+def test_dropped_only_loss_reaches_the_final_failure_note(tmp_path, monkeypatch):
+    class FullList(list):
+        def append(self, item):
+            raise MemoryError("record storage")
+
+    owner = supervisor(tmp_path)
+    monkeypatch.setattr(owner.run, "_refusals", FullList())
+    errors = final_errors_after_refused_heartbeat(owner, monkeypatch)
+    notes = [note for error in errors for note in getattr(error, "__notes__", ())]
+    assert "immediate ledger refusals: [] dropped=1" in notes
+
+
+class PrefixingError(RuntimeError):
+    def add_note(self, note):
+        super().add_note(f"caller: {note}")
+
+
+def test_caller_exception_gets_no_note_when_nothing_was_refused(tmp_path):
+    original = PrefixingError("caller failure")
+    original.add_note("existing")
+    with pytest.raises(PrefixingError) as failure, supervisor(tmp_path):
+        raise original
+    assert failure.value is original
+    assert failure.value.__notes__ == ["caller: existing"]

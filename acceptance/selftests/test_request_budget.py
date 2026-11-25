@@ -2665,6 +2665,30 @@ def test_body_error_with_a_context_member_is_unattributed(tmp_path, context, sta
         )
 
 
+def test_begin_refusal_while_handling_another_exception_keeps_its_stage(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
+            blocker.execute("BEGIN IMMEDIATE")
+            try:
+                raise KeyError("caller is already handling this")
+            except KeyError:
+                with pytest.raises(RequestPolicyError):
+                    run.authorize_participant("late")
+        (record,) = immediate(run)["records"]
+        assert (record["stage"], record["context"]) == ("begin", {"category": "other"})
+
+
+def test_body_value_error_with_a_context_stays_the_body_stage(tmp_path):
+    with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
+        with pytest.raises(RequestPolicyError), run._connection():
+            try:
+                raise KeyError("earlier")
+            except KeyError:
+                raise ValueError("private") from None
+        (record,) = immediate(run)["records"]
+        assert (record["stage"], record["context"]) == ("body", {"category": "other"})
+
+
 @pytest.mark.parametrize("remaining", [100, 0.04, 0, -5])
 def test_effective_timeout_and_elapsed_come_from_the_run_clock(tmp_path, monkeypatch, remaining):
     with tiny_run(tmp_path) as (run, _grant, _limits, _upstream):
