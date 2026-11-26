@@ -194,9 +194,9 @@ Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/4
 
 **Expected.** Restore or verify authorized access for this project's staging credential, or provide a documented public tier, with a stable access policy.
 
-**Impact.** Matching, registry-context enumeration and dictionary harmonization lack live success evidence.
+**Impact.** The earlier credential and contexts or lists-of-values access remain unverified. Matching and dictionary harmonization have limited live evidence, the three 25 November CDE Match observations, but no general success evidence.
 
-**Workaround.** Test the published contracts against crafted fixtures; preserve live errors and label content evidence fixture-only, without fabricating a formal acceptance exception.
+**Workaround.** Automated fixture answers stay crafted and labelled fixture-only, tested against the published contracts. The three 25 November CDE Match observations are labelled separately as limited live collaborator evidence. Preserve live errors, without fabricating a formal acceptance exception.
 
 **Acceptance criteria.** Authorized requests return real identities, scores/rules and contexts that pass the same assertions; unauthorized requests fail explicitly and credentials reach only the intended origin.
 
