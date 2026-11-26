@@ -149,6 +149,10 @@ github-setup = "python -m scripts.github_setup"
 testpaths = ["tests"]
 # The gate scripts are imported by their tests.
 pythonpath = ["tests", "scripts/validation"]
+# A failing test's captured stderr (the launch evidence of tests/fakes.py) stays in the JUnit
+# report that the unit job retains; passing tests add nothing.
+junit_logging = "system-err"
+junit_log_passing_tests = false
 
 [tool.coverage.run]
 # PDM supplies an absolute root, including for children started from another directory.
