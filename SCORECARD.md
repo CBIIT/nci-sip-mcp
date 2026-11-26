@@ -5,8 +5,39 @@ result is, what keeps it below 10, and what is done about it. Scorecard measures
 security practices, not the server's behaviour or its acceptance outcomes. This file is updated in
 the change that moves a check.
 
-**Latest result: 6.0 of 10**, for commit `bf7df79` on 30 Oct 2026, from
-[`.github/workflows/scorecard.yml`](.github/workflows/scorecard.yml).
+## Current records
+
+Two public records, each with its own date. Neither is recalculated here.
+
+| Record | Read | Its own date | Value |
+|---|---|---|---|
+| [Scorecard API](https://api.scorecard.dev/projects/github.com/CBIIT/nci-sip-mcp) | 26 Nov 2026, 22:46Z | run of 26 Nov 2026, 18:37Z, commit `c1fc045` | 7.1 of 10. CII-Best-Practices 5 ("badge detected: Passing"); Vulnerabilities 10; Security-Policy 10. Code-Review 0, Signed-Releases 0, Fuzzing 0, Branch-Protection 3, Contributors 3 and Pinned-Dependencies 9 remain below 10. |
+| [Best Practices badge 17093](https://www.bestpractices.dev/en/projects/17093) | 26 Nov 2026, 22:59Z | passing achieved 26 Nov 2026, 17:23Z | Passing. |
+
+The badge answers are the maintainer's self-certification. They were not each independently
+audited, and this file does not change them. Two of them:
+
+- **release_notes = Met.** The badge's justification links the
+  [`release-notes/`](https://github.com/CBIIT/nci-sip-mcp/tree/main/release-notes) directory.
+  Separately, the published release [v0.43.1](https://github.com/CBIIT/nci-sip-mcp/releases/tag/v0.43.1)
+  was independently reviewed as release-notes evidence. The badge does not cite that release.
+- **sites_https = Met** is the maintainer's attestation. It is not independently verified: no
+  public documentation site exists yet, and no host was probed. Publishing the site and its HTTPS
+  evidence belong to [#646](https://github.com/CBIIT/nci-sip-mcp/issues/646); the owner disposition
+  stays open until then.
+
+Code scanning alert 20 (CII-Best-Practices) was dismissed on 26 Nov 2026 as a stale InProgress
+observation, because the badge reached passing after the 15:52Z Scorecard run that raised it
+([#645](https://github.com/CBIIT/nci-sip-mcp/issues/645#issuecomment-7200705164)). The dismissal
+is not a Scorecard rescan and not evidence of the silver or gold level.
+
+## Historical record: 30 October 2026
+
+Everything from here to "Updating this file" is the analysis of the **6.0 of 10** result for
+commit `bf7df79` on 30 Oct 2026, from
+[`.github/workflows/scorecard.yml`](.github/workflows/scorecard.yml). It is kept as history, not
+current guidance: its statuses and planned dates are those of 30 October, and several checks have
+moved since (see the current records above).
 
 ## How the score is computed
 
@@ -50,6 +81,7 @@ from three organisations. It is not a target.
 
 ## Updating this file
 
-When a change moves a check, update its row, the costs and the latest result line in that change.
+Record a new public result in "Current records" with the date it was read and its own date, in
+the change that cites it. Leave the 30 October record as history.
 The public result is at `https://api.scorecard.dev/projects/github.com/CBIIT/nci-sip-mcp`, and the
 workflow keeps its SARIF output as the `scorecard-sarif` artifact for five days.
