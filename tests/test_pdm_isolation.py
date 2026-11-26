@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -183,7 +184,10 @@ class OwnedCleanupTest(unittest.TestCase):
                 "print('ready', flush=True); time.sleep(120)"
             )
             try:
+                started = time.monotonic()
                 error, text = launch_with_evidence("python", "-c", code, cwd=work, timeout=10)
+                # The grandchild would end by itself after 120 s; the launch must not wait for it.
+                self.assertLess(time.monotonic() - started, 60, text)
                 self.assertIsInstance(error, TimeoutExpired, text)
                 pid = int(pid_file.read_text())
 
