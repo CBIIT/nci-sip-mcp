@@ -202,11 +202,19 @@ class EvidenceCollectionTest(unittest.TestCase):
     def test_a_missing_pdm_fails_clearly_without_naming_the_path(self):
         with tempfile.TemporaryDirectory() as directory:
             empty = Path(directory).resolve()
-            outcome, _text = launch_with_evidence(
-                "python", "-c", "pass", timeout=5, environment={"PATH": str(empty)}
+            work = create_project(empty / "work", pyproject=SUBJECT)
+            outcome, text = launch_with_evidence(
+                "python", "-c", "pass", cwd=work, timeout=5, environment={"PATH": str(empty)}
             )
         self.assertIsInstance(outcome, FileNotFoundError)
-        self.assertEqual(str(outcome), "pdm executable not found on the launch PATH")
+        message = "pdm executable not found on the launch PATH"
+        self.assertEqual(str(outcome), message)
+        fields = evidence_fields(text)
+        self.assertEqual(fields.get("outcome"), f"FileNotFoundError: {message}", text)
+        self.assertEqual(fields.get("argv", [""])[0], "unavailable", text)
+        self.assertEqual(fields.get("cwd"), str(work), text)
+        self.assertIn("project", fields, text)
+        self.assertNotIn(str(empty), text.replace(str(work), ""))
 
     def test_child_sees_only_the_coverage_keys_a_nested_baseline_needs(self):
         probe = (
@@ -256,6 +264,21 @@ def alive(pid):
         check=False,
     ).stdout.strip()
     return bool(state) and not state.startswith("Z")
+
+
+class ProcessQueryTest(unittest.TestCase):
+    def query(self, returncode, stdout="", stderr=""):
+        done = subprocess.CompletedProcess(["ps"], returncode, stdout, stderr)
+        with patch.object(subprocess, "run", return_value=done):
+            return alive(4242)
+
+    def test_dead_is_no_such_pid_or_zombie_and_a_failed_query_is_not_death(self):
+        self.assertTrue(self.query(0, "S+\n"))
+        self.assertFalse(self.query(1))
+        self.assertFalse(self.query(0, "Z+\n"))
+        for failure in ((2, "", "ps: illegal option"), (1, "", "ps: boom"), (0, "", "")):
+            with self.subTest(failure=failure), self.assertRaises(AssertionError):
+                self.query(*failure)
 
 
 class OwnedCleanupTest(unittest.TestCase):
