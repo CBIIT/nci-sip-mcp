@@ -33,7 +33,7 @@ from scripts.validation.mutation_source import (
     scope,
 )
 
-from test_pdm_launch import pdm_run
+from fakes import pdm_run
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORDED_WAIT_SOURCE = """class StdioOwner:
@@ -1791,7 +1791,7 @@ class MutationExecutionTest(unittest.TestCase):
                 .read_text()
                 .split("class MutationOperatorsTest")[0]
             )
-            shutil.copy(ROOT / "tests/test_pdm_launch.py", root / "tests/test_pdm_launch.py")
+            shutil.copy(ROOT / "tests/fakes.py", root / "tests/fakes.py")
             shutil.copytree(ROOT / "scripts", root / "scripts")
             # This tiny independent project owns no reviewed production equivalents.
             (root / "allow.yaml").write_text("[]\n")

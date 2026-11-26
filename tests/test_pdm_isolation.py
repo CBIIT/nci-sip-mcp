@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 from scripts.processes import wait_until
 
-from test_pdm_launch import create_project, pdm_run
+from fakes import create_project, pdm_run
 
 SUBJECT = '[project]\nname = "isolation-subject"\nversion = "0"\nrequires-python = ">=3.14"\n'
 SHOW = "import os, sys; print(os.environ['PDM_PROJECT_ROOT'], sys.prefix)"

@@ -384,7 +384,7 @@ tests exercise real worker termination. See the
 [assurance record](docs/government-site-assurance.md#automated-browser-regression-journeys)
 for setup commands, manual checks and limitations.
 
-A test that needs a real `pdm run` launches it through `pdm_run` in `tests/test_pdm_launch.py`,
+A test that needs a real `pdm run` launches it through `pdm_run` in `tests/fakes.py`,
 never with a bare `subprocess.run`: the launch selects an owned project (a copy of the
 checkout's `pyproject.toml` whose `.pdm-python` names the running interpreter, read-only), an
 allowlisted environment and owned PDM configuration and cache, so an inherited `PDM_PROJECT`,

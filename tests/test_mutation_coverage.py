@@ -16,8 +16,8 @@ from scripts.validation.mutation_gate import schedule
 from scripts.validation.mutation_run import baseline, environment, run_domain, selection
 from scripts.validation.mutation_source import candidates
 
+from fakes import create_project, pdm_run
 from test_mutation_gate import ROOT, cli, project
-from test_pdm_launch import create_project, pdm_run
 
 
 def repository(root):
