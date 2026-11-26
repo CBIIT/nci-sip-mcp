@@ -1439,3 +1439,12 @@
   original: "b2bbc444950f9b0b0b967dc529eb889a7cf0d4003be033124fc090f4e1571b48"
   mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
   reason: "Equivalent: the only consumer of main's value is sys.exit(main(...)); sys.exit(True) exits 1, sys.exit(False) and sys.exit(None) exit 0, so the process status is identical and the preceding output is unchanged. Neither tests nor workflows call main in-process. Reassess if main is imported and its return compared or forwarded, or a console-script entry point is added."
+# Approved: PR #641 reviewer 7184889549 (Q1; disposition 7184069496 key #22); source-reviewed equivalent SURVIVED at c6a0bdb, run 45762721261 attempt 1.
+- file: "scripts/release_notes.py"
+  qualname: "tool_notes"
+  operator: "string:key-mode-setting"
+  site: "/body/3/body/1/value/0/keywords/0/value/0/keys/2"
+  context: "8013be088df4522709c53e7117cfdbe0da7c2cb50b69c2bf6475ab1fb267cd5b"
+  original: "39579403151748377d45dbf4ef1e977b5ce8aabfec4cccda3a40d9c51e9b8a4e"
+  mutated: "7f6751bafd5e7e795fa03563ddb45803d0dbce3177281385b223cc9c430bb6cd"
+  reason: "Equivalent for the supported recovery: the child runs via -m in a complete tagged checkout that contains the helper and its dependencies, and imports its own helper from that checkout (probe r8-60-q1-probe.log shows both helper modules loaded from the tagged temporary checkout); the extra PYTHONPATH entry does not supply that module, and recovery without an inherited PYTHONPATH recovers the identical body. Reassess if checkout contents, the child cwd, the module layout or the interpreter or import-mode semantics change. It is not a promise for arbitrary missing-package or isolated-import environments."
