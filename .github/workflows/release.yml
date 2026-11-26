@@ -3,7 +3,9 @@ name: Release
 # Tags and releases the commit on main that CI has just validated. The version
 # comes from eligible non-merge commit messages, including bodies, since the last
 # tag (the rules are in [tool.semantic_release] in pyproject.toml). The workflow
-# adds a tag and a GitHub release; it never pushes a commit to main.
+# adds a tag and a GitHub release; it never pushes a commit to main. The release
+# body is the reviewed `release-notes/*.md` fragments added since the last tag, then
+# the tool's generated list; an invalid or missing note fails before any tag exists.
 #
 # Why `workflow_run` and not `push` or `pull_request: [closed]`:
 #   - `push` would release code whose CI has not finished, or has failed.
@@ -88,12 +90,16 @@ jobs:
         with:
           release-only: "true"
 
+      - name: Prepare release notes
+        if: steps.guard.outputs.skip == 'false'
+        run: pdm run python -m scripts.release_notes prepare
+
       - name: Semantic release
         id: release
         if: steps.guard.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pdm run semantic-release -v version --no-commit --tag --push --no-changelog --vcs-release --skip-build
+        run: pdm run semantic-release -c .release-notes/semantic-release.json -v version --no-commit --tag --push --no-changelog --vcs-release --skip-build
 
       - name: Summary
         if: ${{ !cancelled() }}
@@ -111,8 +117,9 @@ jobs:
               echo "Skipped: main has moved past the validated commit. The CI run of the newer commit releases it."
             elif [ "$OUTCOME" != "success" ]; then
               echo "The release step did not succeed; read the log. If the tag was not pushed, start"
-              echo "the workflow by hand. If it was, the GitHub release is missing: create it with"
-              echo "\`gh release create <tag> --verify-tag --generate-notes\`."
+              echo "the workflow by hand. If it was pushed,"
+              echo "the GitHub release is missing: check the tag out in a clean clone and run"
+              echo "\`pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>\`."
             elif [ "$RELEASED" = "true" ]; then
               echo "Released **$TAG**: $LINK"
             else

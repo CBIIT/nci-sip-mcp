@@ -33,3 +33,6 @@ tmp/
 # Installed documentation-only browser assets; the npm lock remains tracked.
 /docs/site-assets/node_modules/
 /.nci-si-portal/
+
+# Generated release-notes template and configuration (scripts/release_notes.py), never committed
+/.release-notes/

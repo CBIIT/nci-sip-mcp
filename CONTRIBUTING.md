@@ -748,6 +748,46 @@ care, and make the PR title reflect their client impact. Mark a breaking change 
 the relevant commit subject and PR title. Do not edit the selected title or add a body in the
 merge dialog.
 
+### Release notes
+
+Every pull request that can release (`feat`, `fix`, `perf` or a breaking `!` commit) adds one
+fragment, `release-notes/<slug>.md`, in plain prose and with exactly these headings, each
+non-empty (no HTML comments; the container-image marker belongs to the image job):
+
+```markdown
+# One-line title
+
+## Changes for users
+## Upgrade
+## Security
+```
+
+A fragment may contain only those heading lines: a line that begins with one to six `#` followed
+by whitespace or the end of the line counts as a heading, **also inside a fenced code example**,
+and the fragment is rejected. A `#` later in a line (`100% # not a heading`) is not a heading. Put
+shell comments and Markdown samples in prose, or indent the line.
+
+`## Upgrade` gives the actions a client must take, or "No action required."; `## Security`
+says "No security fixes in this release." or names the advisory or CVE identifiers. The release
+body is the fragments added since the last release tag, in path order, then semantic-release's
+generated change list collapsed in a `<details>` block. A fragment is identified by its
+committed path; edit it in place, and rename it freely before release (a rename of an already
+released fragment is never pending again). Check that the fragments cover every
+client-impacting change of the release range: that review is human, and no check proves it.
+
+`scripts/release_notes.py prepare` runs in the Release workflow before the tool: it checks every
+fragment in the tree, asks the tool whether a release is due, and, if one is, fails before any tag
+when no valid fragment is pending. The `Release notes preview` workflow shows the body a pull
+request would produce, with read-only permissions. If the tag exists but its GitHub release does
+not, check the tag out in a clean clone and run
+`pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>`: it verifies the
+tag, the commit, the remote tag of the named repository and its successful main CI run, refuses
+when a release exists or the lookup is anything but a clear HTTP 404, and creates only the missing
+release, in that repository, with the original body and the tag's own date (rendered by running semantic-release 10.7.0 with its
+clock at that date, a version-specific dependency that the `test_the_original_tag_date_is_kept_in_the_recovered_body`
+test guards and that a semantic-release upgrade must re-verify). The image retry still
+requires the tag to be main's tip.
+
 Review the exact PDM (including its bootstrap hishel, unearth and virtualenv constraints), Ruff,
 basedpyright, Zensical and python-semantic-release tool pins monthly,
 using a separate reviewed dependency refresh and the release-age/security gates above.
