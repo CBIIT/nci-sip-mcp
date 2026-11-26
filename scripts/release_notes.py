@@ -80,7 +80,6 @@ class RemoteTag:
 
 @dataclass(frozen=True, slots=True)
 class Plan:
-    candidate: str
     tag: str
     due: bool
 
@@ -243,7 +242,7 @@ def prepare(repository_url: str | None = None) -> Plan:
     write_config(repository_url)
     fragments = {fragment.path: fragment for fragment in tree_fragments()}
     candidate = candidate_version()
-    plan = Plan(candidate, tag_format().format(version=candidate), False)
+    plan = Plan(tag_format().format(version=candidate), False)
     if candidate in existing_versions():
         return plan
     pending = [fragments[path] for path in pending_paths(last_release_tag()) if path in fragments]
@@ -253,7 +252,7 @@ def prepare(repository_url: str | None = None) -> Plan:
             f"with the sections {', '.join(SECTIONS)}"
         )
     write_template(render_human_section(pending))
-    return Plan(candidate, plan.tag, True)
+    return Plan(plan.tag, True)
 
 
 def run_tool_as_of(moment: str, arguments: list[str]) -> None:
@@ -316,7 +315,10 @@ def preview(base: str, head: str, repository_url: str) -> str:
         isolated_checkout(source, [base, head], tags)
         merged = run("git", *_PREVIEW_IDENTITY, "merge", "--no-ff", "--no-edit", head)
         if merged.returncode:
-            raise ReleaseNotesError(f"merge conflict between {base} and {head}")
+            diagnostic = (merged.stderr + merged.stdout).strip()
+            raise ReleaseNotesError(
+                f"merge failed between {base} and {head} (exit {merged.returncode}): {diagnostic}"
+            )
         plan = prepare(repository_url)
         due = f"yes (`{plan.tag}`)" if plan.due else "no"
         report = (
