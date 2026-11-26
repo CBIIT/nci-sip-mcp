@@ -778,7 +778,9 @@ not, check the tag out in a clean clone and run
 `pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>`: it verifies the
 tag, the commit, the remote tag of the named repository and its successful main CI run, refuses
 when a release exists or the lookup is anything but a clear HTTP 404, and creates only the missing
-release, in that repository, with the original body and the tag's own date. The image retry still
+release, in that repository, with the original body and the tag's own date (rendered by running semantic-release 10.7.0 with its
+clock at that date, a version-specific dependency that the `test_the_original_tag_date_is_kept_in_the_recovered_body`
+test guards and that a semantic-release upgrade must re-verify). The image retry still
 requires the tag to be main's tip.
 
 Review the exact PDM (including its bootstrap hishel, unearth and virtualenv constraints), Ruff,

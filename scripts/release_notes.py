@@ -257,7 +257,15 @@ def prepare(repository_url: str | None = None) -> Plan:
 
 
 def run_tool_as_of(moment: str, arguments: list[str]) -> None:
-    """Run the release tool with its clock at `moment`; the tool dates a new release by `now`."""
+    """Run the release tool with its clock at `moment`, for recovery's historical date only.
+
+    python-semantic-release 10.7.0 compatibility dependency: its `version.py` takes the date of
+    the release it renders from `datetime.now` in that module (`commit_date`, which the
+    templates print as `release.tagged_date`), and this replaces that name for one run. It is
+    neither a public historical-render API nor a general clock facility. The regression test
+    `tests/test_release_notes.py::RecoveryTest::test_the_original_tag_date_is_kept_in_the_recovered_body`
+    guards it; re-verify it on every semantic-release upgrade.
+    """
     clock = SimpleNamespace(now=lambda zone=None: datetime.fromisoformat(moment).astimezone(zone))
     version_command = importlib.import_module("semantic_release.cli.commands.version")
     with unittest.mock.patch.object(version_command, "datetime", clock):
@@ -433,7 +441,8 @@ def main(argv: list[str]) -> int:
     show = commands.add_parser("preview")
     for name in ("--base", "--head", "--repository-url"):
         show.add_argument(name, required=True)
-    clock = commands.add_parser("tool-as-of")  # internal: the tool with a historical clock
+    # Internal to `recover`; see `run_tool_as_of` (a semantic-release 10.7.0 dependency).
+    clock = commands.add_parser("tool-as-of")
     clock.add_argument("moment")
     clock.add_argument("arguments", nargs=argparse.REMAINDER)
     fix = commands.add_parser("recover")
