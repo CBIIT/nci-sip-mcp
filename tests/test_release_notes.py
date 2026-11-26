@@ -582,10 +582,13 @@ class ToolBoundaryTest(unittest.TestCase):
 
     def test_a_successful_run_without_a_block_is_refused(self):
         for name, output in (("no file", None), ("no block", "released=true\n")):
-            with self.subTest(name), self.assertRaises(release_notes.ReleaseNotesError) as raised:
-                self.render(0, output)
+            with self.subTest(name):
+                with self.assertRaises(release_notes.ReleaseNotesError) as raised:
+                    self.render(0, output)
 
-            self.assertEqual(str(raised.exception), "semantic-release rendered no release notes: ")
+                self.assertEqual(
+                    str(raised.exception), "semantic-release rendered no release notes: "
+                )
 
     def test_the_candidate_is_the_last_word_of_a_successful_print(self):
         self.assertEqual(self.candidate(0, "noise\n0.2.0\n"), "0.2.0")
@@ -751,23 +754,13 @@ class RecoveryTest(unittest.TestCase):
         project = Scratch(self)
         for name in ("release_notes.py", "release_ci.py"):
             project.write(f"scripts/{name}", (ROOT / "scripts" / name).read_text("utf-8"))
-        project.history()
-        project.git("tag", "-a", "v0.2.0", "-m", "v0.2.0")
         del project.env["PYTHONPATH"]
-        cache = Path(project.directory.name) / "pycache"
-        project.env["PYTHONPYCACHEPREFIX"] = str(cache)
+        original = self.release_and_notes(project)
 
         result = self.recover(project)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("## Release summary", project.gh_calls()[-1]["notes"])
-        # The parent runs the helper from the checkout, the child from the tagged copy.
-        imported = sorted(
-            "/" + str(p.parent.relative_to(cache)) for p in cache.rglob("release_notes.*.pyc")
-        )
-        root = str(project.root.resolve())
-        self.assertEqual(len(imported), 2, imported)
-        self.assertEqual(len([d for d in imported if d.startswith(root)]), 1, imported)
+        self.assertEqual(project.gh_calls()[-1]["notes"], original)
 
     def test_the_selected_repository_wins_over_the_environment_and_the_checkout(self):
         project = Scratch(self)
