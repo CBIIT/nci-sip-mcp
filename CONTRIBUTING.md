@@ -762,6 +762,11 @@ non-empty (no HTML comments; the container-image marker belongs to the image job
 ## Security
 ```
 
+A fragment may contain only those heading lines: a line that begins with one to six `#` followed
+by whitespace or the end of the line counts as a heading, **also inside a fenced code example**,
+and the fragment is rejected. A `#` later in a line (`100% # not a heading`) is not a heading. Put
+shell comments and Markdown samples in prose, or indent the line.
+
 `## Upgrade` gives the actions a client must take, or "No action required."; `## Security`
 says "No security fixes in this release." or names the advisory or CVE identifiers. The release
 body is the fragments added since the last release tag, in path order, then semantic-release's

@@ -205,7 +205,8 @@ No verification runs only after merge: provide a pull-request twin or an explici
   Tags are `vX.Y.Z`. Nothing is written back to `main`.
 - Every pull request that can release (`feat`, `fix`, `perf`, `!`) needs a release-note fragment,
   `release-notes/<slug>.md`, with the headings in CONTRIBUTING.md's "Release notes". The Release
-  workflow fails before the tag when a valid pending fragment is missing. The reviewer checks that
+  workflow fails before the tag when a release is due and no valid fragment is pending; an invalid
+  fragment anywhere in the tree fails it whether or not a release is due. The reviewer checks that
   the fragments cover the client-impacting changes of the release range.
 - The accepted types are `allowed_tags` in `[tool.semantic_release.commit_parser_options]` and the
   regex in `.github/workflows/pr-title.yml`; a test keeps them equal. semantic-release reads no
