@@ -27,7 +27,7 @@ audited, and this file does not change them. Two of them:
   stays open until then.
 
 Code scanning alert 20 (CII-Best-Practices) was dismissed on 26 Nov 2026 as a stale InProgress
-observation, because the badge reached passing after the 15:52Z Scorecard run that raised it
+observation, because the badge reached passing after the earlier 15:52Z Scorecard observation
 ([#645](https://github.com/CBIIT/nci-sip-mcp/issues/645#issuecomment-7200705164)). The dismissal
 is not a Scorecard rescan and not evidence of the silver or gold level.
 
