@@ -55,7 +55,7 @@ credential is refused with 401, which says nothing about whether the feature exi
 tools stay listed, and the server never falls back from staging to production. **Protected
 access with the staging credential: last recorded 401 on 2026-11-24
 ([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516), direct HTTP, not an MCP acceptance run); the cause is not inferred, and
-restored access is not yet verified.** This status changes only from verification results.
+restored access is not yet verified.** This status changes only from verification results. On 25 November 2026 a collaborator's MCP run (unified stdio client; [#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7176019142)) recorded returned staging CDE Match matches for three observations, `MAP-07.match`, `MAP-07.dictionary` and `BASE-04.program-b`; that is not proof that every matching operation succeeds. Whether that run held a credential, and which, is unknown, so it does not show that the earlier credential was restored, explain the 401s, or establish lists-of-values, contexts or AI Engine access. The unrelated-input CDE Match case still returns a malformed-match error (#639). The credential stays staging-only; this changes no access permission.
 
 Use [offline fixture validation](CONTRIBUTING.md#complete-fixture-ratchet) for automated runs.
 The [local guide](docs/local-guide.md#server) describes the installer lifecycle; its default
