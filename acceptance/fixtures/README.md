@@ -70,7 +70,7 @@ caDSR's own behaviour is in the ordinary fixtures, with no scenario of its own:
   crafted from the published contracts, recorded under `recorded/cadsr-contracts/`. Current status: the project now has a staging
   credential, but protected access remains unverified after the 24 November 401s
   ([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516); direct HTTP, not an MCP acceptance run; earlier 23 November 401s: [#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)), so those
-  fixtures remain crafted pending verification. The data
+  fixtures remain crafted pending verification. On 25 November 2026 a collaborator's MCP run (unified stdio client; [#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7176019142)) recorded returned staging CDE Match matches for three observations, `MAP-07.match`, `MAP-07.dictionary` and `BASE-04.program-b`; that is not proof that every matching operation succeeds. Whether that run held a credential, and which, is unknown, so it does not show that the earlier credential was restored, explain the 401s, or establish lists-of-values, contexts or AI Engine access. The unrelated-input CDE Match case still returns a malformed-match error (#639). The fixtures stay crafted. The data
   elements and contexts in them are the recorded content's; what no recording can give (CDE
   Match's scores, its rule, marked "Crafted") is invented. A self-test holds each answer to its
   contract: its operation and base path, its answer's definition with no field the definition

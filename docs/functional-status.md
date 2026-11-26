@@ -18,7 +18,7 @@ Cartesian products. Acceptance(live) stays disabled until a reviewed run plan ex
 **24 November recheck** ([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516))
 again recorded 401 for protected staging attempts (cause not inferred); it used direct HTTP,
 not an MCP acceptance run, and access is unverified. The earlier 23 November recheck
-([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)) recorded the same. This page records evidence and grants no permission; the policy is owned by the
+([#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7114203427)) recorded the same. On 25 November 2026 a collaborator's MCP run (unified stdio client; [#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7176019142)) recorded returned staging CDE Match matches for three observations, `MAP-07.match`, `MAP-07.dictionary` and `BASE-04.program-b`; that is not proof that every matching operation succeeds. Whether that run held a credential, and which, is unknown, so it does not show that the earlier credential was restored, explain the 401s, or establish lists-of-values, contexts or AI Engine access. The unrelated-input CDE Match case still returns a malformed-match error (#639). This page records evidence and grants no permission; the policy is owned by the
 [access guidance](../QUICKSTART.md#upstream-access-and-ssis-transition).
 
 ## What the evidence covers

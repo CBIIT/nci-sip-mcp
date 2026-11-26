@@ -188,15 +188,15 @@ Platform requirement/operation: **C-6; OP-M01; OP-C13**.
 Specification requirements: `match_data_elements-1`, `list_contexts-1`, `harmonize_data_dictionary-1`.
 Source discussion: [issue evidence](https://github.com/CBIIT/nci-si-mcp/issues/42#issuecomment-5966334217).
 
-**Observation.** Anonymous calls are recorded 401. A credential has been issued for caDSR staging only; protected staging attempts were last recorded as 401 on 24 November 2026 (https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516; direct HTTP, not an MCP acceptance run), cause not inferred, and access is unverified. Credentialed fixture answers follow published contracts and are crafted. Live matching and harmonization measurements returned upstream errors. The [CDE AI Engine evaluation dated 25 October 2026](cadsr-ai-engine.md) found no Engine contract or documented anonymous Stage endpoint in the reviewed sources; its access policy is unknown, not inferred from Match 2.0.
+**Observation.** Anonymous calls are recorded 401. A credential has been issued for caDSR staging only; protected staging attempts were last recorded as 401 on 24 November 2026 (https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7139797516; direct HTTP, not an MCP acceptance run), cause not inferred, and access is unverified. On 25 November 2026 a collaborator's MCP run (unified stdio client; [#383](https://github.com/CBIIT/nci-sip-mcp/issues/383#issuecomment-7176019142)) recorded returned staging CDE Match matches for three observations, `MAP-07.match`, `MAP-07.dictionary` and `BASE-04.program-b`; that is not proof that every matching operation succeeds. Whether that run held a credential, and which, is unknown, so it does not show that the earlier credential was restored, explain the 401s, or establish lists-of-values, contexts or AI Engine access. The unrelated-input CDE Match case still returns a malformed-match error (#639). Credentialed fixture answers follow published contracts and are crafted. Live matching and harmonization measurements returned upstream errors. The [CDE AI Engine evaluation dated 25 October 2026](cadsr-ai-engine.md) found no Engine contract or documented anonymous Stage endpoint in the reviewed sources; its access policy is unknown, not inferred from Match 2.0.
 
 **Reproduction.** Repeat the recorded anonymous requests; after access is provided, re-record with an environment-supplied credential and never write its value to evidence.
 
 **Expected.** Restore or verify authorized access for this project's staging credential, or provide a documented public tier, with a stable access policy.
 
-**Impact.** Matching, registry-context enumeration and dictionary harmonization lack live success evidence.
+**Impact.** The earlier credential and contexts or lists-of-values access remain unverified. Matching and dictionary harmonization have limited live evidence, the three 25 November CDE Match observations, but no general success evidence.
 
-**Workaround.** Test the published contracts against crafted fixtures; preserve live errors and label content evidence fixture-only, without fabricating a formal acceptance exception.
+**Workaround.** Automated fixture answers stay crafted and labelled fixture-only, tested against the published contracts. The three 25 November CDE Match observations are labelled separately as limited live collaborator evidence. Preserve live errors, without fabricating a formal acceptance exception.
 
 **Acceptance criteria.** Authorized requests return real identities, scores/rules and contexts that pass the same assertions; unauthorized requests fail explicitly and credentials reach only the intended origin.
 
