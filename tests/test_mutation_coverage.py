@@ -17,6 +17,7 @@ from scripts.validation.mutation_run import baseline, environment, run_domain, s
 from scripts.validation.mutation_source import candidates
 
 from test_mutation_gate import ROOT, cli, project
+from test_pdm_launch import create_project, pdm_run
 
 
 def repository(root):
@@ -115,15 +116,19 @@ CHILD_TEST = (
 )
 
 
-def coverage_cli(*arguments):
-    return subprocess.run(  # noqa: S603 - fixed CLI, owned argument paths
-        ["pdm", "run", "python", "-m", "scripts.validation.mutation_coverage", *arguments],  # noqa: S607
+def coverage_command(*arguments, timeout=30):
+    return pdm_run(
+        "python",
+        "-m",
+        "scripts.validation.mutation_coverage",
+        *arguments,
         cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
+        timeout=timeout,
     )
+
+
+def coverage_cli(*arguments):
+    return coverage_command(*arguments, timeout=60)
 
 
 def produce(root, config, *tests):
@@ -159,11 +164,10 @@ def produce(root, config, *tests):
 
 def ordinary_coverage_project(root):
     project(root, CHILD_SOURCE)
-    (root / "pyproject.toml").write_bytes((ROOT / "pyproject.toml").read_bytes())
+    create_project(root)
     (root / "acceptance/pyproject.toml").write_bytes(
         (ROOT / "acceptance/pyproject.toml").read_bytes()
     )
-    (root / ".pdm-python").write_text(sys.executable)
     elsewhere = root / "elsewhere"
     elsewhere.mkdir()
     for name in ("tests/test_example.py", "acceptance/selftests/test_harness.py"):
@@ -180,22 +184,15 @@ def ordinary_coverage_run(root, command, destination=None):
     env = environment(root, root / "tmp")
     if destination is not None:
         env["COVERAGE_FILE"] = str(destination)
-    return subprocess.run(  # noqa: S603 - ordinary PDM alias, owned synthetic project
-        [  # noqa: S607 - fixed PDM alias and synthetic coverage source
-            "pdm",
-            "run",
-            command,
-            "--cov-reset",
-            "--cov=example",
-            "--cov-fail-under=0",
-            "--cov-report=",
-        ],
-        cwd=root,
-        env=env,
-        capture_output=True,
-        text=True,
+    return pdm_run(
+        command,
+        "--cov-reset",
+        "--cov=example",
+        "--cov-fail-under=0",
+        "--cov-report=",
         timeout=60,
-        check=False,
+        project=root,
+        environment=env,
     )
 
 
@@ -305,19 +302,8 @@ class SharedCoverageTest(unittest.TestCase):
                     "--output": str(root / "out"),
                 }
                 arguments.pop(missing)
-                command = [
-                    "pdm",
-                    "run",
-                    "python",
-                    "-m",
-                    "scripts.validation.mutation_coverage",
-                    "export",
-                    "unit",
-                ]
-                command += [part for pair in arguments.items() for part in pair]
-                result = subprocess.run(  # noqa: S603 - fixed CLI, owned argument paths
-                    command, cwd=ROOT, capture_output=True, text=True, timeout=30, check=False
-                )
+                command = ["export", "unit", *[part for pair in arguments.items() for part in pair]]
+                result = coverage_command(*command)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 if missing == "--output":
                     self.assertIn("--output", result.stderr)
@@ -333,32 +319,13 @@ class SharedCoverageTest(unittest.TestCase):
     def test_configure_writes_the_shared_child_context_contract(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "nested/config"
-            result = subprocess.run(  # noqa: S603 - fixed CLI and owned output
-                [  # noqa: S607
-                    "pdm",
-                    "run",
-                    "python",
-                    "-m",
-                    "scripts.validation.mutation_coverage",
-                    "configure",
-                    "unit",
-                    "--output",
-                    str(output),
-                ],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
+            result = coverage_command("configure", "unit", "--output", str(output))
             self.assertTrue((output / ".coveragerc").is_file(), result.stdout + result.stderr)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn(
                 "context = ${MUTATION_COVERAGE_CONTEXT-}", (output / ".coveragerc").read_text()
             )
-            repeated = subprocess.run(  # noqa: S603 - identical fixed configure invocation
-                result.args, cwd=ROOT, capture_output=True, text=True, timeout=30, check=False
-            )
+            repeated = coverage_command("configure", "unit", "--output", str(output))
             self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
 
     def test_each_producer_configuration_names_its_own_absolute_data_file(self):
@@ -421,24 +388,7 @@ class SharedCoverageTest(unittest.TestCase):
 
     def test_check_reports_missing_producer_data_as_structured_infrastructure(self):
         with tempfile.TemporaryDirectory() as directory:
-            result = subprocess.run(  # noqa: S603 - fixed CLI and owned path
-                [  # noqa: S607
-                    "pdm",
-                    "run",
-                    "python",
-                    "-m",
-                    "scripts.validation.mutation_coverage",
-                    "check",
-                    "unit",
-                    "--output",
-                    str(Path(directory) / "absent"),
-                ],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
+            result = coverage_command("check", "unit", "--output", str(Path(directory) / "absent"))
             self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
             self.assertTrue(result.stdout.strip(), "Missing structured INFRA result")
             record = json.loads(result.stdout)
@@ -515,29 +465,17 @@ class SharedCoverageTest(unittest.TestCase):
             fragments(root, root / "coverage")
             mapping = load(root, root / "coverage")
             cli_output = root / "exported.json"
-            exported = subprocess.run(  # noqa: S603 - fixed export interface and owned paths
-                [  # noqa: S607
-                    "pdm",
-                    "run",
-                    "python",
-                    "-m",
-                    "scripts.validation.mutation_coverage",
-                    "export",
-                    "unit",
-                    "--root",
-                    str(root),
-                    "--data",
-                    str(root / ".coverage-unit-1"),
-                    "--shard",
-                    "1/4",
-                    "--output",
-                    str(cli_output),
-                ],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
+            exported = coverage_command(
+                "export",
+                "unit",
+                "--root",
+                str(root),
+                "--data",
+                str(root / ".coverage-unit-1"),
+                "--shard",
+                "1/4",
+                "--output",
+                str(cli_output),
             )
             self.assertTrue(cli_output.is_file(), exported.stdout + exported.stderr)
             self.assertEqual(exported.returncode, 0, exported.stdout + exported.stderr)
@@ -639,29 +577,17 @@ class SharedCoverageTest(unittest.TestCase):
     def test_coverage_command_missing_database_cannot_export_success(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            result = subprocess.run(  # noqa: S603 - fixed CLI and owned test paths
-                [  # noqa: S607 - project PDM environment
-                    "pdm",
-                    "run",
-                    "python",
-                    "-m",
-                    "scripts.validation.mutation_coverage",
-                    "export",
-                    "unit",
-                    "--root",
-                    str(root),
-                    "--data",
-                    str(root / "absent"),
-                    "--shard",
-                    "1/4",
-                    "--output",
-                    str(root / "piece.json"),
-                ],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
+            result = coverage_command(
+                "export",
+                "unit",
+                "--root",
+                str(root),
+                "--data",
+                str(root / "absent"),
+                "--shard",
+                "1/4",
+                "--output",
+                str(root / "piece.json"),
             )
             self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
             self.assertEqual(json.loads(result.stdout)["outcome"], "INFRA")

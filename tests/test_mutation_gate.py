@@ -33,6 +33,8 @@ from scripts.validation.mutation_source import (
     scope,
 )
 
+from test_pdm_launch import pdm_run
+
 ROOT = Path(__file__).resolve().parents[1]
 RECORDED_WAIT_SOURCE = """class StdioOwner:
     async def _wait(self, seconds: float, deadline: CleanupDeadline) -> bool:
@@ -141,14 +143,7 @@ def json_lines(path):
 
 
 def cli(root, *args):
-    return subprocess.run(  # noqa: S603 - fixed PDM command, owned paths
-        ["pdm", "run", "mutation-gate", "--root", str(root), *args],  # noqa: S607
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
+    return pdm_run("mutation-gate", "--root", str(root), *args, cwd=ROOT, timeout=180)
 
 
 class MutationOperatorsTest(unittest.TestCase):
@@ -1796,6 +1791,7 @@ class MutationExecutionTest(unittest.TestCase):
                 .read_text()
                 .split("class MutationOperatorsTest")[0]
             )
+            shutil.copy(ROOT / "tests/test_pdm_launch.py", root / "tests/test_pdm_launch.py")
             shutil.copytree(ROOT / "scripts", root / "scripts")
             # This tiny independent project owns no reviewed production equivalents.
             (root / "allow.yaml").write_text("[]\n")
@@ -2169,13 +2165,14 @@ class MutationCommandTest(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(text)
             before = (root / "src/example.py").read_bytes()
-            result = subprocess.run(  # noqa: S603 - fixed project command, owned fixture path
-                ["pdm", "run", "mutation-gate", "--root", str(root), "--paths", "src/example.py"],  # noqa: S607
+            result = pdm_run(
+                "mutation-gate",
+                "--root",
+                str(root),
+                "--paths",
+                "src/example.py",
                 cwd=ROOT,
-                capture_output=True,
-                text=True,
                 timeout=120,
-                check=False,
             )
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             report = [json.loads(line) for line in result.stdout.splitlines()]

@@ -142,7 +142,19 @@ class FailureEvidenceTest(unittest.TestCase):
             self.assertEqual(fields.get("stderr"), result.stderr, text)
             project = fields.get("project")
             self.assertEqual(
-                fields.get("argv"), ["pdm", "run", "--project", project, "python", "-c", code], text
+                fields.get("argv"),
+                [
+                    "pdm",
+                    "run",
+                    "--project",
+                    project,
+                    "--working-dir",
+                    str(work),
+                    "python",
+                    "-c",
+                    code,
+                ],
+                text,
             )
             start, end = (datetime.fromisoformat(fields[name]) for name in ("started", "ended"))
             self.assertLessEqual(start, end)
