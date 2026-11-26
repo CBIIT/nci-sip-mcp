@@ -762,6 +762,21 @@ class PreviewTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn(f"merge conflict between {base} and {head}", result.stderr)
 
+    def test_a_merge_that_fails_without_a_conflict_is_reported_as_failed_with_git_diagnostic(self):
+        project = Scratch(self, origin=False)
+        project.commit("chore: start")
+        project.git("tag", "v0.1.0")
+        base = project.git("rev-parse", "HEAD")
+        project.git("switch", "-q", "--orphan", "unrelated")
+        head = project.commit("feat: unrelated history", files={"other.txt": "x"})
+
+        result = self.preview(project, base, head)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"merge failed between {base} and {head} (exit 128)", result.stderr)
+        self.assertIn("refusing to merge unrelated histories", result.stderr)
+        self.assertNotIn("conflict", result.stderr.lower())
+
     def test_an_invalid_note_fails_the_preview(self):
         project = Scratch(self, origin=False)
         project.commit("chore: start")
