@@ -257,13 +257,18 @@ while not release.exists():
 
 
 def alive(pid):
-    state = subprocess.run(  # noqa: S603 - fixed ps query of a pid this test learned
+    query = subprocess.run(  # noqa: S603 - fixed ps query of a pid this test learned
         ["ps", "-o", "stat=", "-p", str(pid)],  # noqa: S607
         capture_output=True,
         text=True,
         check=False,
-    ).stdout.strip()
-    return bool(state) and not state.startswith("Z")
+    )
+    state = query.stdout.strip()
+    if query.returncode == 1 and not state and not query.stderr:
+        return False  # ps exits 1 with no output for a pid that does not exist
+    if query.returncode != 0 or query.stderr or not state:
+        raise AssertionError(f"the process query failed: {query.returncode} {query.stderr!r}")
+    return not state.startswith("Z")
 
 
 class ProcessQueryTest(unittest.TestCase):

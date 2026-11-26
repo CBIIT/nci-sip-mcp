@@ -445,6 +445,9 @@ INHERITED = (
 )
 
 
+UNAVAILABLE = "unavailable"
+
+
 def create_project(
     project: Path, *, interpreter: Path | str = sys.executable, pyproject: str | None = None
 ) -> Path:
@@ -492,10 +495,7 @@ def pdm_run(
             argv += ["--working-dir", str(cwd)]
         source = os.environ if environment is None else environment
         env = child_environment(base / "home", source)
-        executable = shutil.which("pdm", path=env.get("PATH", ""))
-        if executable is None:
-            raise FileNotFoundError("pdm executable not found on the launch PATH")
-        argv[0] = executable
+        argv[0] = shutil.which("pdm", path=env.get("PATH", "")) or UNAVAILABLE
         return _launch([*argv, *command], cwd or selected, env, timeout, selected)
 
 
@@ -537,6 +537,8 @@ def _launch(
 def _run(
     argv: Sequence[str], cwd: Path, env: dict[str, str], timeout: int
 ) -> subprocess.CompletedProcess[str]:
+    if argv[0] == UNAVAILABLE:
+        raise FileNotFoundError("pdm executable not found on the launch PATH")
     with subprocess.Popen(  # noqa: S603 - fixed PDM command, owned project and paths
         argv,
         cwd=cwd,
@@ -560,9 +562,10 @@ def _run(
 
 
 def _kill_group(process: subprocess.Popen[str]) -> None:
-    """End the session this Popen created (`start_new_session`), addressed by its pid only.
+    """Kill the process group this Popen created (`start_new_session`), by its pid only.
 
-    Descendants that start a session of their own are out of reach; nothing else is signalled.
+    A descendant that leaves the group (another session, or `setpgid`) is not reached; nothing
+    else is signalled.
     """
     with contextlib.suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)

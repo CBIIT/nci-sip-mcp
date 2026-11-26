@@ -392,9 +392,9 @@ interpreter, which the launch does not manage), an allowlisted environment (the 
 nested baseline needs are listed in `INHERITED`) and owned PDM configuration and cache, so an
 inherited `PDM_PROJECT`, `PDM_PYTHON`, `VIRTUAL_ENV` or configuration cannot redirect it to the
 suite's own project. It runs the absolute `pdm` found on the child's PATH, and on a timeout ends
-the session it created, addressed by that process only: a descendant that starts a session of its
-own is not reached. For each launch it writes the argv, directory, project, interpreter
-identity, UTC times, outcome and captured output, never the environment, to stderr. With
+the process group it created, addressed by that process only: a descendant that leaves the group
+(a new session or `setpgid`) is not reached. For each launch it writes the argv, directory,
+project, interpreter identity, UTC times, outcome and captured output, never the environment, to stderr. With
 `junit_logging = "system-err"` in `pyproject.toml`, the unit suite's JUnit XML keeps that text
 for a failing test (`tests/test_pdm_isolation.py` runs the project's own pytest flags to show
 it); the acceptance harness's own configuration is unchanged.
