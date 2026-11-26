@@ -484,29 +484,32 @@
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Source CIRun consumers construct records and read their two fields; none uses __dict__, dynamic attributes, weak references or layout introspection. Removing slots changes storage layout only, preserving the release CLI contract. Recorded row 93 survived all 6 selected release-security tests."
 # Evidence: tool_18b78263e0011QZt786m82W870 JSONL row 136, SURVIVED (5 tests passed).
+# PR #641 reviewer 7182849803: re-keyed after the verify_ci extraction; reassess if a production caller consumes main's return as data
 - file: "scripts/release_ci.py"
   qualname: "main"
   operator: "return:True"
-  site: "/body/3/handlers/0/body/2"
-  context: "0fd26bb30512219f77dd179ff8787dae75943f81a96a3f0738b9b79a1e4d5e45"
+  site: "/body/1/handlers/0/body/1"
+  context: "ce2ba238d3c7e31457998022f69c9aaa9409e6da0afbbf626fb2bf3a6dac672c"
   original: "4d9e3bd49f1ca0e5c82918a80328eaa190b6c6419b7b4aa57c05de813ded1b78"
   mutated: "4d40361fc85c2c1588359b7bbefb67ffbd5ed15730fe3cec6085464279212055"
   reason: "Source sends main's return only to sys.exit; True and 1 both exit 1 after the identical controlled Release refused diagnostic. API execution and validation are unchanged. Recorded row 136 survived all 5 selected release-security tests."
 # Evidence: tool_18b78263e0011QZt786m82W870 JSONL row 137, SURVIVED (1 test passed).
+# PR #641 reviewer 7182849803: re-keyed after the verify_ci extraction; reassess if a production caller consumes main's return as data
 - file: "scripts/release_ci.py"
   qualname: "main"
   operator: "return:False"
-  site: "/body/4"
-  context: "0fd26bb30512219f77dd179ff8787dae75943f81a96a3f0738b9b79a1e4d5e45"
+  site: "/body/2"
+  context: "ce2ba238d3c7e31457998022f69c9aaa9409e6da0afbbf626fb2bf3a6dac672c"
   original: "b2bbc444950f9b0b0b967dc529eb889a7cf0d4003be033124fc090f4e1571b48"
   mutated: "f5536f3bcd07de6521df23e5ac1e0ad1b443ac79485b5f4ed71373fd170b3670"
   reason: "Source sends the successful main return only to sys.exit; False and 0 both exit 0 with identical output after the same CI validation. Recorded row 137 survived the selected successful-main-push CLI test."
 # Evidence: tool_18b78263e0011QZt786m82W870 JSONL row 138, SURVIVED (1 test passed).
+# PR #641 reviewer 7182849803: re-keyed after the verify_ci extraction; reassess if a production caller consumes main's return as data
 - file: "scripts/release_ci.py"
   qualname: "main"
   operator: "return:None"
-  site: "/body/4"
-  context: "0fd26bb30512219f77dd179ff8787dae75943f81a96a3f0738b9b79a1e4d5e45"
+  site: "/body/2"
+  context: "ce2ba238d3c7e31457998022f69c9aaa9409e6da0afbbf626fb2bf3a6dac672c"
   original: "b2bbc444950f9b0b0b967dc529eb889a7cf0d4003be033124fc090f4e1571b48"
   mutated: "e19ede9f5e840ec5e9c3ca6096c7341b0458e6c5c14c80709062e61900e94f51"
   reason: "Source sends the successful main return only to sys.exit; None and 0 both exit 0 with identical output after the same CI validation. Recorded row 138 survived the selected successful-main-push CLI test."
