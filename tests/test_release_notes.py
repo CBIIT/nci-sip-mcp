@@ -32,6 +32,9 @@ FAKE_GH = """#!PYTHON
 import json, os, subprocess, sys
 KNOWN = "example/scratch"
 argv = sys.argv[1:]
+mode = os.environ.get("FAKE_GH_REMOTE", "")
+canned = {"notjson": "<html>", "list": "[]", "objectstr": '{"object": "x"}', "empty": "{}",
+          "nosha": '{"object": {"type": "commit"}}'}
 
 
 def git(*args):
@@ -63,6 +66,12 @@ elif "/actions/workflows/" in path:
     print(json.dumps({"workflow_runs": [run] if repo == KNOWN else []}))
 elif "/git/ref/tags/" in path:
     tag = path.rsplit("/", 1)[1]
+    if mode == "ghfail":
+        sys.stderr.write("HTTP 500")
+        sys.exit(1)
+    if mode in canned:
+        print(canned[mode])
+        sys.exit(0)
     local = git("rev-parse", f"refs/tags/{tag}")
     if os.environ.get("FAKE_GH_TAG_KIND") == "lightweight":
         obj = {"type": "commit", "sha": os.environ.get("FAKE_GH_TAG_SHA") or local}
@@ -74,13 +83,19 @@ elif "/git/tags/" in path:
     rows = git("for-each-ref", "--format=%(objectname) %(taggerdate:iso-strict)", "refs/tags")
     date = {r.partition(" ")[0]: r.partition(" ")[2] for r in rows.splitlines()}[sha]
     commit = os.environ.get("FAKE_GH_TAG_SHA") or git("rev-parse", sha + "^{commit}")
-    print(json.dumps({"tagger": {"date": os.environ.get("FAKE_GH_TAG_DATE") or date},
-                      "object": {"type": "commit", "sha": commit}}))
+    payload = {"tagger": {"date": os.environ.get("FAKE_GH_TAG_DATE") or date},
+               "object": {"type": "commit", "sha": commit}}
+    if mode == "notagger":
+        del payload["tagger"]
+    print(json.dumps(payload))
 elif "/git/commits/" in path:
     sha = path.rsplit("/", 1)[1]
     date = git("log", "-1", "--format=%cI", sha)
     date = os.environ.get("FAKE_GH_TAG_DATE") or date
-    print(json.dumps({"sha": sha, "committer": {"date": date}}))
+    payload = {"sha": sha, "committer": {"date": date}}
+    if mode == "nocommitdate":
+        del payload["committer"]
+    print(json.dumps(payload))
 elif "/releases/tags/" in path:
     state = os.environ["FAKE_GH_RELEASE"]
     head = "HTTP/2.0 {}\\r\\nContent-Type: application/json\\r\\n"
@@ -91,6 +106,9 @@ elif "/releases/tags/" in path:
         if state == "absent":
             sys.stderr.write("gh: Not Found (HTTP 404)")
         sys.exit(0 if state == "exists" else 1)
+    if state == "nostatus":
+        print("Content-Type: application/json\\r\\n\\r\\n{}")
+        sys.exit(1)
     if state == "partial":
         sys.stdout.write("HTTP/2.0 404 Not Found\\r\\nContent-Ty")
         sys.stderr.write("unexpected EOF")
@@ -278,6 +296,11 @@ class ReleaseNotesFlowTest(unittest.TestCase):
         for name, files, message in (
             ("no note", {}, "no pending release note"),
             (
+                "text before the title",
+                {"release-notes/new.md": "Heads up.\n\n" + fragment("New note")},
+                "release-notes/new.md: the sections must be exactly",
+            ),
+            (
                 "empty heading",
                 {"release-notes/new.md": fragment("New note", upgrade="  ")},
                 "release-notes/new.md: the section 'Upgrade' is empty",
@@ -445,6 +468,138 @@ class ReleaseNotesFlowTest(unittest.TestCase):
         self.assertEqual(project.git("ls-files", ".release-notes"), "")
 
 
+class RepeatedPrepareTest(unittest.TestCase):
+    def test_a_second_prepare_before_any_tag_renders_the_edited_pending_note(self):
+        project = Scratch(self)
+        project.history()
+        first = project.notes_tool("prepare")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        project.commit(
+            "docs: edit the pending note",
+            files={"release-notes/new.md": fragment("New note", changes="Edited.")},
+        )
+
+        second = project.notes_tool("prepare")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        outcome = project.release()
+
+        self.assertEqual(outcome.codes, (0, 0), outcome.prepared.stderr)
+        self.assertEqual(project.tags(), ["v0.1.0", "v0.2.0"])
+        self.assertTrue(
+            project.notes().startswith(
+                "## Release summary\n\n" + section("New note", changes="Edited.") + GENERATED
+            )
+        )
+
+
+class CliUsageTest(unittest.TestCase):
+    def test_a_missing_argument_is_a_usage_error_that_does_nothing(self):
+        for argv, missing in (
+            ((), "command"),
+            (("preview", "--head", "h", "--repository-url", "u"), "--base"),
+            (("preview", "--base", "b", "--repository-url", "u"), "--head"),
+            (("preview", "--base", "b", "--head", "h"), "--repository-url"),
+            (("recover", "v0.2.0"), "--repository"),
+        ):
+            with self.subTest(argv=argv):
+                project = Scratch(self)
+                project.history()
+
+                result = project.notes_tool(*argv)
+
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(f"the following arguments are required: {missing}", result.stderr)
+                self.assertFalse((project.root / ".release-notes").exists())
+                self.assertEqual(project.gh_calls(), [])
+
+
+class ConfigTableTest(unittest.TestCase):
+    def malformed(self, project, name, value):
+        text = (project.root / "pyproject.toml").read_text(encoding="utf-8")
+        header = "[tool.semantic_release]\n"
+        project.write("pyproject.toml", text.replace(header, f"{header}{name} = {value}\n", 1))
+
+    def test_a_config_table_of_the_wrong_type_is_refused_by_name(self):
+        project = Scratch(self)
+        self.malformed(project, "changelog", '"x"')
+        project.history()
+
+        result = project.notes_tool("prepare")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            result.stderr, "release notes: [tool.semantic_release.changelog] must be a table\n"
+        )
+
+    def test_a_remote_of_the_wrong_type_is_refused_by_the_preview(self):
+        project = Scratch(self, origin=False)
+        self.malformed(project, "remote", "1")
+        project.commit("chore: start")
+        project.git("tag", "v0.1.0")
+        base = project.git("rev-parse", "HEAD")
+        project.git("switch", "-q", "-c", "feature")
+        head = project.commit("feat: add", files={"release-notes/new.md": fragment("New")})
+
+        result = project.notes_tool(
+            "preview", "--base", base, "--head", head, "--repository-url", REPOSITORY_URL
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            result.stderr, "release notes: [tool.semantic_release.remote] must be a table\n"
+        )
+
+
+class ToolBoundaryTest(unittest.TestCase):
+    """What the tool's exit status and output files mean; the real child runs in the flow tests."""
+
+    BLOCK = "released=true\nrelease_notes<<EOF\nBody text\nEOF\n"
+
+    def render(self, returncode, output, stderr=""):
+        def fake(*command, env=None, stdin=None):
+            if output is not None:
+                Path(env["GITHUB_OUTPUT"]).write_text(output, encoding="utf-8")
+            return subprocess.CompletedProcess(command, returncode, "", stderr)
+
+        with unittest.mock.patch.object(release_notes, "run", fake):
+            return release_notes.tool_notes()
+
+    def candidate(self, returncode, stdout):
+        def fake(*command, env=None, stdin=None):
+            return subprocess.CompletedProcess(command, returncode, stdout, "")
+
+        with unittest.mock.patch.object(release_notes, "run", fake):
+            return release_notes.candidate_version()
+
+    def test_the_body_is_the_block_of_a_successful_run(self):
+        self.assertEqual(self.render(0, self.BLOCK), "Body text\n")
+
+    def test_a_failed_run_is_refused_even_with_a_plausible_block(self):
+        with self.assertRaises(release_notes.ReleaseNotesError) as raised:
+            self.render(1, self.BLOCK, stderr="boom")
+
+        self.assertEqual(str(raised.exception), "semantic-release rendered no release notes: boom")
+
+    def test_a_successful_run_without_a_block_is_refused(self):
+        for name, output in (("no file", None), ("no block", "released=true\n")):
+            with self.subTest(name), self.assertRaises(release_notes.ReleaseNotesError) as raised:
+                self.render(0, output)
+
+            self.assertEqual(str(raised.exception), "semantic-release rendered no release notes: ")
+
+    def test_the_candidate_is_the_last_word_of_a_successful_print(self):
+        self.assertEqual(self.candidate(0, "noise\n0.2.0\n"), "0.2.0")
+
+    def test_a_failed_print_is_refused_even_with_a_version_on_stdout(self):
+        with self.assertRaises(release_notes.ReleaseNotesError) as raised:
+            self.candidate(1, "0.2.0\n")
+
+        self.assertEqual(
+            str(raised.exception),
+            "semantic-release printed no candidate version; is this a release branch?",
+        )
+
+
 class FragmentFilesTest(unittest.TestCase):
     def test_a_branch_the_tool_does_not_release_from_is_reported_not_treated_as_no_release(self):
         project = Scratch(self)
@@ -499,17 +654,33 @@ class LiteralEncoderTest(unittest.TestCase):
 
 class PackagedTemplateTest(unittest.TestCase):
     def test_a_missing_packaged_template_fails_instead_of_rendering_without_it(self):
-        with tempfile.TemporaryDirectory() as directory, contextlib.chdir(directory):
-            fake_package = Path(directory) / "semantic_release" / "__init__.py"
+        for name, parts in (
+            ("nothing", ()),
+            ("components only", (".components/",)),
+            ("template file only", (".release_notes.md.j2",)),
+        ):
             with (
-                unittest.mock.patch.object(
-                    release_notes.semantic_release, "__file__", str(fake_package)
-                ),
-                self.assertRaisesRegex(release_notes.ReleaseNotesError, "another layout"),
+                self.subTest(name),
+                tempfile.TemporaryDirectory() as directory,
+                contextlib.chdir(directory),
             ):
-                release_notes.write_template("## Release summary\n\n")
+                package = Path(directory) / "semantic_release"
+                templates = package / "data/templates/conventional/md"
+                for part in parts:
+                    if part.endswith("/"):
+                        (templates / part).mkdir(parents=True)
+                    else:
+                        templates.mkdir(parents=True, exist_ok=True)
+                        (templates / part).write_text("x", encoding="utf-8")
+                with (
+                    unittest.mock.patch.object(
+                        release_notes.semantic_release, "__file__", str(package / "__init__.py")
+                    ),
+                    self.assertRaisesRegex(release_notes.ReleaseNotesError, "another layout"),
+                ):
+                    release_notes.write_template("## Release summary\n\n")
 
-            self.assertFalse((Path(directory) / ".release-notes").exists())
+                self.assertFalse((Path(directory) / ".release-notes").exists())
 
 
 class RecoveryTest(unittest.TestCase):
@@ -575,6 +746,28 @@ class RecoveryTest(unittest.TestCase):
                 f"repos/example/scratch/git/commits/{project.git('rev-parse', 'HEAD')}",
             ],
         )
+
+    def test_recovery_needs_no_inherited_pythonpath_in_a_self_contained_checkout(self):
+        project = Scratch(self)
+        for name in ("release_notes.py", "release_ci.py"):
+            project.write(f"scripts/{name}", (ROOT / "scripts" / name).read_text("utf-8"))
+        project.history()
+        project.git("tag", "-a", "v0.2.0", "-m", "v0.2.0")
+        del project.env["PYTHONPATH"]
+        cache = Path(project.directory.name) / "pycache"
+        project.env["PYTHONPYCACHEPREFIX"] = str(cache)
+
+        result = self.recover(project)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("## Release summary", project.gh_calls()[-1]["notes"])
+        # The parent runs the helper from the checkout, the child from the tagged copy.
+        imported = sorted(
+            "/" + str(p.parent.relative_to(cache)) for p in cache.rglob("release_notes.*.pyc")
+        )
+        root = str(project.root.resolve())
+        self.assertEqual(len(imported), 2, imported)
+        self.assertEqual(len([d for d in imported if d.startswith(root)]), 1, imported)
 
     def test_the_selected_repository_wins_over_the_environment_and_the_checkout(self):
         project = Scratch(self)
@@ -650,6 +843,9 @@ class RecoveryTest(unittest.TestCase):
             del project.env["GIT_COMMITTER_DATE"]
         elif setup == "advance":
             project.commit("docs: later")
+        elif setup == "lightweight":
+            project.git("tag", "-d", "v0.2.0")
+            project.git("tag", "v0.2.0")
         arguments = {
             "fork": ("v0.2.0", "other/fork"),
             "malformed": ("v0.2.0", "a/b?x=1"),
@@ -680,6 +876,60 @@ class RecoveryTest(unittest.TestCase):
                 {"FAKE_GH_TAG_DATE": "2021-01-01T00:00:00Z"},
                 "dated",
                 "tag date",
+            ),
+            (
+                "lookup without a status line",
+                {"FAKE_GH_RELEASE": "nostatus"},
+                None,
+                "could not tell whether",
+            ),
+            (
+                "remote answer: gh fails",
+                {"FAKE_GH_REMOTE": "ghfail"},
+                None,
+                "could not read git/ref/tags/v0.2.0 of example/scratch",
+            ),
+            (
+                "remote answer: not json",
+                {"FAKE_GH_REMOTE": "notjson"},
+                None,
+                "could not read git/ref/tags/v0.2.0 of example/scratch",
+            ),
+            (
+                "remote answer: a list",
+                {"FAKE_GH_REMOTE": "list"},
+                None,
+                "could not read git/ref/tags/v0.2.0 of example/scratch",
+            ),
+            (
+                "remote answer: object is text",
+                {"FAKE_GH_REMOTE": "objectstr"},
+                None,
+                "the repository's answer lacks object.type",
+            ),
+            (
+                "remote answer: empty object",
+                {"FAKE_GH_REMOTE": "empty"},
+                None,
+                "the repository's answer lacks object.type",
+            ),
+            (
+                "remote answer: no sha",
+                {"FAKE_GH_REMOTE": "nosha"},
+                None,
+                "the repository's answer lacks object.sha",
+            ),
+            (
+                "remote answer: annotated tag without a date",
+                {"FAKE_GH_REMOTE": "notagger"},
+                None,
+                "the repository's answer lacks tagger.date",
+            ),
+            (
+                "remote answer: lightweight tag without a date",
+                {"FAKE_GH_REMOTE": "nocommitdate", "FAKE_GH_TAG_KIND": "lightweight"},
+                "lightweight",
+                "the repository's answer lacks committer.date",
             ),
             (
                 "lookup sentence only",
@@ -750,6 +1000,47 @@ class PreviewTest(unittest.TestCase):
         )
         self.assertEqual(project.git("status", "--porcelain"), "")
         self.assertEqual(project.gh_calls(), [])
+
+    def test_a_preview_with_no_release_due_says_so_and_renders_no_notes(self):
+        project = Scratch(self, origin=False)
+        project.commit("chore: start")
+        project.git("tag", "v0.1.0")
+        base = project.git("rev-parse", "HEAD")
+        project.git("switch", "-q", "-c", "feature")
+        head = project.commit("docs: explain")
+
+        result = self.preview(project, base, head)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(
+            result.stdout,
+            rf"\A## Release notes preview\n\n- base: `{base}`\n- head: `{head}`\n"
+            r"- merge: `[0-9a-f]{40}`\n- release due: no\n\Z",
+        )
+
+    def test_an_unknown_base_fails_on_the_fetch_and_changes_nothing(self):
+        project = Scratch(self, origin=False)
+        _, head = self.feature(project)
+        before = (
+            project.git("rev-parse", "HEAD"),
+            project.tags(),
+            project.git("status", "--porcelain"),
+        )
+
+        result = self.preview(project, "1" * 40, head)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(
+            result.stderr.startswith("release notes: git fetch failed: "), result.stderr
+        )
+        self.assertEqual(
+            (
+                project.git("rev-parse", "HEAD"),
+                project.tags(),
+                project.git("status", "--porcelain"),
+            ),
+            before,
+        )
 
     def test_a_merge_conflict_fails_with_both_commits_and_the_git_diagnostic(self):
         project = Scratch(self, origin=False)
