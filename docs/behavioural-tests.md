@@ -10,7 +10,7 @@ An NCIt concept is a coded terminology entry. A caDSR data element defines a dat
 
 The [specification and requirement-to-test map](specification.md#4-requirements) remain the authority for behaviour. Stories explain the tests; they do not add requirements. The same shared rule is exercised across different tools and inputs, so a story may cover many cases.
 
-This is an inventory, not a passing test report. [Run reports](../acceptance/README.md#the-report) say what passed, failed or did not run. Fixture cases include recorded responses and contract-crafted scenarios; caDSR credentials are not yet issued. A fixture result does not establish live access, clinical suitability or production search quality. Implementation unit tests and harness self-tests are outside this MCP catalogue.
+This is an inventory, not a passing test report. [Run reports](../acceptance/README.md#the-report) say what passed, failed or did not run. Fixture cases include recorded responses and contract-crafted scenarios; a caDSR credential has been issued for staging only, with its protected access still unverified; see the [dated access evidence](functional-status.md). A fixture result does not establish live access, clinical suitability or production search quality. Implementation unit tests and harness self-tests are outside this MCP catalogue.
 
 | User story | Cases |
 |---|---:|
