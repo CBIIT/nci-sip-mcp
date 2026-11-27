@@ -29,6 +29,12 @@ fallback_version = "0.0.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The launcher shared with the unit tests: test-only, outside every wheel.
+pythonpath = ["../test_support"]
+# A failing self-test's captured stderr (the launch evidence of test_support/pdm_launch.py)
+# stays in the JUnit report that CI retains; passing tests add nothing.
+junit_logging = "system-err"
+junit_log_passing_tests = false
 markers = [
     "mcp_session: use a handshake session for remote session-retention assertions",
     "tool(name): the required tool the test is for, in the per-tool report",

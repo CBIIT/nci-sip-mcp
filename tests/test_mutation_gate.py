@@ -19,6 +19,7 @@ from typing import ClassVar
 from unittest.mock import patch
 
 import yaml
+from pdm_launch import pdm_run
 from scripts.processes import stop, wait_until
 from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
@@ -141,14 +142,7 @@ def json_lines(path):
 
 
 def cli(root, *args):
-    return subprocess.run(  # noqa: S603 - fixed PDM command, owned paths
-        ["pdm", "run", "mutation-gate", "--root", str(root), *args],  # noqa: S607
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
+    return pdm_run("mutation-gate", "--root", str(root), *args, cwd=ROOT, timeout=180)
 
 
 class MutationOperatorsTest(unittest.TestCase):
@@ -1775,7 +1769,7 @@ class MutationExecutionTest(unittest.TestCase):
             (root / "pyproject.toml").write_text(
                 '[project]\nname = "mapping-contract"\nversion = "0.0.0"\n'
                 'requires-python = ">=3.14"\n'
-                '[tool.pytest.ini_options]\npythonpath = ["src"]\n'
+                '[tool.pytest.ini_options]\npythonpath = ["src", "test_support"]\n'
                 '[tool.pdm.scripts]\nmutation-gate = "python -m scripts.validation.mutation_gate"\n'
             )
             (root / ".pdm-python").write_text(sys.executable)
@@ -1796,6 +1790,8 @@ class MutationExecutionTest(unittest.TestCase):
                 .read_text()
                 .split("class MutationOperatorsTest")[0]
             )
+            (root / "test_support").mkdir()
+            shutil.copy(ROOT / "test_support/pdm_launch.py", root / "test_support/pdm_launch.py")
             shutil.copytree(ROOT / "scripts", root / "scripts")
             # This tiny independent project owns no reviewed production equivalents.
             (root / "allow.yaml").write_text("[]\n")
@@ -2169,13 +2165,14 @@ class MutationCommandTest(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(text)
             before = (root / "src/example.py").read_bytes()
-            result = subprocess.run(  # noqa: S603 - fixed project command, owned fixture path
-                ["pdm", "run", "mutation-gate", "--root", str(root), "--paths", "src/example.py"],  # noqa: S607
+            result = pdm_run(
+                "mutation-gate",
+                "--root",
+                str(root),
+                "--paths",
+                "src/example.py",
                 cwd=ROOT,
-                capture_output=True,
-                text=True,
                 timeout=120,
-                check=False,
             )
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             report = [json.loads(line) for line in result.stdout.splitlines()]

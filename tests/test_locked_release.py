@@ -11,9 +11,12 @@ import venv
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import tomli_w
 import yaml
+from pdm_launch import create_project, pdm_command
+from pdm_stand_in import changed, hostile_selectors, outer_stand_in, tree
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / ".github/workflows/release.yml"
@@ -467,28 +470,32 @@ class LockedReleaseCliTest(unittest.TestCase):
                 )
 
     def test_release_sync_selects_no_project_or_unrelated_groups(self):
+        self.assert_dry_run_selects_only_the_release_group()
+
+    def test_release_dry_run_ignores_inherited_pdm_selectors(self):
+        with TemporaryDirectory() as directory:
+            outer = outer_stand_in(Path(directory).resolve())
+            before = tree(outer)
+            with patch.dict(os.environ, hostile_selectors(outer)):
+                os.environ.pop("PDM_IGNORE_ACTIVE_VENV", None)
+                self.assert_dry_run_selects_only_the_release_group()
+            self.assertEqual(changed(before, tree(outer)), {})
+
+    def assert_dry_run_selects_only_the_release_group(self):
         setup = yaml.safe_load((ROOT / ".github/actions/setup/action.yml").read_text())
         command = setup["runs"]["steps"][-1]["run"].splitlines()[-1].split()
+        self.assertEqual(command[0], "pdm")
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            for name in ("pyproject.toml", "pdm.lock"):
-                shutil.copyfile(ROOT / name, root / name)
             environment = root / ".venv"
             venv.EnvBuilder().create(environment)
-            result = subprocess.run(  # noqa: S603 - repository-owned dry-run installation command.
-                [*command, "--dry-run"],
-                cwd=root,
-                env=os.environ
-                | {
-                    "PDM_PYTHON": str(environment / "bin/python"),
-                    "PDM_IGNORE_ACTIVE_VENV": "1",
-                    "PDM_CHECK_UPDATE": "false",
-                },
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
+            create_project(
+                root,
+                interpreter=environment / "bin/python",
+                pyproject=(ROOT / "pyproject.toml").read_text(),
             )
+            shutil.copyfile(ROOT / "pdm.lock", root / "pdm.lock")
+            result = pdm_command(*command[1:], "--dry-run", project=root, timeout=60)
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertEqual(
