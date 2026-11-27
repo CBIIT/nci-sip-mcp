@@ -317,6 +317,10 @@ def run_nested_junit_session(directory: Path) -> tuple[subprocess.CompletedProce
     shutil.copy(SUPPORT / "pdm_launch.py", inner / "test_support/pdm_launch.py")
     (inner / "tests/test_inner.py").write_text(INNER_TESTS.format(canary=CANARY))
     report = inner / "tmp/test-results/unit.xml"
+    # A caller's COVERAGE_FILE (a local mutation baseline's live parallel data) would otherwise
+    # become this session's data file, which pytest-cov can erase or combine away; keep it owned.
+    owned_coverage = inner / "tmp/coverage/.coverage"
+    owned_coverage.parent.mkdir(parents=True)
     result = pdm_run(
         "test",
         "--cov=example",
@@ -328,6 +332,7 @@ def run_nested_junit_session(directory: Path) -> tuple[subprocess.CompletedProce
         "faulthandler_timeout=60",
         project=inner,
         timeout=600,
+        environment={**os.environ, "COVERAGE_FILE": str(owned_coverage)},
     )
     return result, report.read_text()
 
