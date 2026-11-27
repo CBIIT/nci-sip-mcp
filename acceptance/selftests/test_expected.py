@@ -2,7 +2,6 @@
 from a report on request."""
 
 import json
-from pathlib import Path
 
 import pytest
 import yaml
@@ -20,7 +19,6 @@ from nci_sip_acceptance.report import RANK
 
 BASE_SHA = "a" * 40
 OLD_SHA = "b" * 40
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def report(tests, mode):
@@ -66,7 +64,7 @@ def approval(test, after, *, base_sha=BASE_SHA, before="passed"):
 
 
 def run_expected(arguments):
-    return pdm_run("acceptance-expected", *arguments, cwd=ROOT, timeout=120)
+    return pdm_run("acceptance-expected", *arguments, timeout=120)
 
 
 def test_the_entry_point_ignores_inherited_pdm_selectors(files, tmp_path, monkeypatch):
