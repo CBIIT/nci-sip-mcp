@@ -122,6 +122,8 @@ For a focused local sensitivity run (for example with `--paths`), `pdm run mutat
 unit remains serial. Any baseline failure names its domain and fails the run. The shard summary's
 `baseline_domains` records freshly computed domain outcomes and seconds; imported PR-CI runs leave
 that list empty. Do not use the unselected local command to launch a second full catalogue.
+The baseline's live parallel data files share its `COVERAGE_FILE` prefix, so a test that starts a
+nested coverage-enabled pytest session gives that session its own data file.
 
 **Allowlist preflight.** `pdm run mutation-gate --base <B> --head <B>` (the same commit twice)
 validates `scripts/validation/mutation-allowlist.yaml` against the working tree with the gate's own
