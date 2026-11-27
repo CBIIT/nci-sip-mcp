@@ -7,6 +7,10 @@ name: Release
 # body is the reviewed `release-notes/*.md` fragments added since the last tag, then
 # the tool's generated list; an invalid or missing note fails before any tag exists.
 #
+# Order (#659): the tool only tags; `release_notes recover` creates a draft; the
+# image job assembles assets and attestations on that draft; the publish job makes
+# it public last. Immutable releases accept no assets once published.
+#
 # Why `workflow_run` and not `push` or `pull_request: [closed]`:
 #   - `push` would release code whose CI has not finished, or has failed.
 #   - `pull_request: closed` fires on the head of the pull request, which is not
@@ -20,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       retry_image_tag:
-        description: Existing release tag at main to retry image publication after a failed image job
+        description: Existing draft release tag at main to retry image assembly and publication
         required: false
         type: string
 
@@ -51,7 +55,7 @@ jobs:
       image_tag: ${{ steps.image.outputs.tag }}
       image_sha: ${{ steps.image.outputs.sha }}
     permissions:
-      contents: write  # push the tag and create the GitHub release
+      contents: write  # push the tag and create the draft GitHub release
       actions: read  # require successful CI for the exact checked-out main commit
     steps:
       - name: Check out main
@@ -99,29 +103,39 @@ jobs:
         if: steps.guard.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pdm run semantic-release -c .release-notes/semantic-release.json -v version --no-commit --tag --push --no-changelog --vcs-release --skip-build
+        run: pdm run semantic-release -c .release-notes/semantic-release.json -v version --no-commit --tag --push --no-changelog --no-vcs-release --skip-build
+
+      - name: Create the draft release
+        id: draft
+        if: steps.release.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: pdm run python -m scripts.release_notes recover "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY"
 
       - name: Summary
         if: ${{ !cancelled() }}
         env:
           SKIPPED: ${{ steps.guard.outputs.skip }}
           OUTCOME: ${{ steps.release.outcome }}
+          DRAFT: ${{ steps.draft.outcome }}
           RELEASED: ${{ steps.release.outputs.released }}
           TAG: ${{ steps.release.outputs.tag }}
-          LINK: ${{ steps.release.outputs.link }}
         run: |
           {
             echo "## Release"
             echo
             if [ "$SKIPPED" = "true" ]; then
               echo "Skipped: main has moved past the validated commit. The CI run of the newer commit releases it."
-            elif [ "$OUTCOME" != "success" ]; then
+            elif [ "$OUTCOME" != "success" ] || [ "$DRAFT" = "failure" ]; then
               echo "The release step did not succeed; read the log. If the tag was not pushed, start"
               echo "the workflow by hand. If it was pushed,"
-              echo "the GitHub release is missing: check the tag out in a clean clone and run"
-              echo "\`pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>\`."
+              echo "check whether its draft exists (\`gh release view <tag>\`); a failed request may"
+              echo "still have created it. If none exists, check the tag out in a clean clone and run"
+              echo "\`pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>\`,"
+              echo "then dispatch Release with retry_image_tag=<tag> while the tag is main's tip."
             elif [ "$RELEASED" = "true" ]; then
-              echo "Released **$TAG**: $LINK"
+              echo "Tagged **$TAG**; its GitHub release stays a draft until the publish release job succeeds."
             else
               echo "No release: no \`feat\`, \`fix\`, \`perf\` or breaking (\`!\`) commit since the last tag."
             fi
@@ -152,6 +166,8 @@ jobs:
     if: needs.release.outputs.image_tag != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.publish.outputs.subject-name }}@${{ steps.publish.outputs.subject-digest }}
     permissions:
       contents: write  # attach image security evidence and digest to the release
       packages: write  # push the verified release image to GHCR
@@ -192,3 +208,27 @@ jobs:
     with:
       ref: ${{ needs.release.outputs.image_sha }}
       tag: ${{ needs.release.outputs.image_tag }}
+
+  publish:
+    name: publish release
+    needs: [release, image, local-installer]
+    if: needs.release.outputs.image_tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write  # make the assembled draft public, last
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.image_sha }}
+          persist-credentials: false
+      - uses: $/.github/actions/setup
+        with:
+          release-only: "true"
+      - name: Publish the assembled draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release.outputs.image_tag }}
+          RELEASE_SHA: ${{ needs.release.outputs.image_sha }}
+          IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+        run: pdm run python -m scripts.release_notes publish "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --commit "$RELEASE_SHA" --digest "$IMAGE_DIGEST"  # zizmor: ignore[use-trusted-publishing] a GitHub release draft, not a package

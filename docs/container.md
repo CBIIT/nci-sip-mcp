@@ -128,8 +128,9 @@ flowchart TB
     Publish -. "operator selects digest" .-> Deploy["Deploy with prepared index<br/>and matching model"]
 ```
 
-PR builds never publish. A successful tag/release job alone does not imply successful image
-publication: the image job must finish too. Audit and CodeQL also run on main; neither replaces
+PR builds never publish. The release job only tags and creates a draft release; the image job
+attaches its assets and attestations to that draft, and the publish release job makes it public
+last, because a published (immutable) release accepts no assets. Audit and CodeQL also run on main; neither replaces
 the image scan. [Publication recovery](#scan-policy-and-publication) is described below.
 
 ### Local builds and dependency lock
@@ -192,10 +193,11 @@ NCI's inaccessible Twistlock/Prisma Cloud scanner has approved the image.
 even for public repositories. At first publication
 (and after an organization move), set the package's visibility to public in its package
 settings. The workflow verifies anonymous access to the exact digest and fails until that
-works. If the GitHub release exists but the image job failed, correct the cause and rerun
-Release with `retry_image_tag` naming that release at the current main commit. Security
-reports are attached before the public-access check; a successful run adds the digest and
-evidence references to the release notes. Use the digest to deploy, not a floating tag.
+works. If the draft release exists but the image job failed, correct the cause and rerun
+Release with `retry_image_tag` naming that draft's tag at the current main commit; image
+publication refuses a release that is no longer a draft. Security reports are attached before
+the public-access check; a successful run adds the digest and evidence references to the draft's
+notes, and only then is it published. Use the digest to deploy, not a floating tag.
 
 The renamed repository's next image destination is `ghcr.io/cbiit/nci-sip-mcp`.
 Before merge clearance for a change that triggers release, the owner must confirm that
