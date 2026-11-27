@@ -154,8 +154,8 @@ github-setup = "python -m scripts.github_setup"
 testpaths = ["tests"]
 # The gate scripts are imported by their tests.
 pythonpath = ["tests", "scripts/validation", "test_support"]
-# A failing test's captured stderr (the launch evidence of tests/fakes.py) stays in the JUnit
-# report that the unit job retains; passing tests add nothing.
+# A failing test's captured stderr (the launch evidence of test_support/pdm_launch.py) stays in
+# the JUnit report that the unit job retains; passing tests add nothing.
 junit_logging = "system-err"
 junit_log_passing_tests = false
 

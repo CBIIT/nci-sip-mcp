@@ -1,4 +1,4 @@
-"""Real `pdm run` for tests, bound to an owned project instead of the suite's own.
+"""Real PDM commands for tests, bound to an owned project instead of the suite's own.
 
 Test-only support shared by the unit tests and the acceptance self-tests through their pytest
 `pythonpath`; it imports no product or harness package and is not part of any wheel.
