@@ -66,6 +66,30 @@ def child_environment(home: Path, source: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
+def pdm_command(
+    *args: str,
+    timeout: int,
+    cwd: Path | None = None,
+    project: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run `pdm <subcommand> --project <owned> <rest of args>`.
+
+    The project selector sits directly after the subcommand, where PDM's parser reads it for
+    every command; it is never appended to what the subcommand forwards. `project` defaults to a
+    fresh owned copy; `cwd` is the directory the process runs in (default: the project). The
+    child sees only the allowlisted variables of `environment` (default: this process's).
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        base = Path(scratch).resolve()
+        selected = project or create_project(base / "project")
+        source = os.environ if environment is None else environment
+        env = child_environment(base / "home", source)
+        executable = shutil.which("pdm", path=env.get("PATH", "")) or UNAVAILABLE
+        argv = [executable, args[0], "--project", str(selected), *args[1:]]
+        return launch(argv, cwd or selected, env, timeout, selected)
+
+
 def pdm_run(
     *command: str,
     timeout: int,
@@ -73,27 +97,27 @@ def pdm_run(
     project: Path | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run `pdm run command` with `project` (default a fresh owned copy) selected.
+    """Run `pdm run command` in an owned project.
 
-    `cwd` overrides the directory the command runs in; without it PDM decides, as it does for a
-    script's own `working_dir`, relative to the owned project. The child sees only the
-    allowlisted variables of `environment` (default: this process's).
+    `cwd` also becomes PDM's `--working-dir`, overriding a script's own `working_dir`; without it
+    PDM decides, relative to the owned project.
     """
-    with tempfile.TemporaryDirectory() as scratch:
-        base = Path(scratch).resolve()
-        selected = project or create_project(base / "project")
-        argv = ["pdm", "run", "--project", str(selected)]
-        if cwd is not None:
-            argv += ["--working-dir", str(cwd)]
-        source = os.environ if environment is None else environment
-        env = child_environment(base / "home", source)
-        argv[0] = shutil.which("pdm", path=env.get("PATH", "")) or UNAVAILABLE
-        return _launch([*argv, *command], cwd or selected, env, timeout, selected)
+    working = [] if cwd is None else ["--working-dir", str(cwd)]
+    return pdm_command(
+        "run",
+        *working,
+        *command,
+        timeout=timeout,
+        cwd=cwd,
+        project=project,
+        environment=environment,
+    )
 
 
-def _launch(
+def launch(
     argv: Sequence[str], cwd: Path, env: dict[str, str], timeout: int, project: Path
 ) -> subprocess.CompletedProcess[str]:
+    """Run `argv` in its own process group and record the launch on stderr (see the module)."""
     started = _now()
     before = _interpreter_file(project)
     outcome, stdout, stderr = "not started", "", ""

@@ -2,12 +2,11 @@
 from a report on request."""
 
 import json
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+from pdm_launch import pdm_run
 from pdm_stand_in import changed, hostile_selectors, outer_stand_in, tree
 
 from nci_sip_acceptance.expected import (
@@ -22,16 +21,6 @@ from nci_sip_acceptance.report import RANK
 BASE_SHA = "a" * 40
 OLD_SHA = "b" * 40
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def pdm_path():
-    path = shutil.which("pdm")
-    if path is None:
-        raise RuntimeError("pdm is required to test the acceptance-expected entry point")
-    return path
-
-
-PDM = pdm_path()
 
 
 def report(tests, mode):
@@ -77,13 +66,7 @@ def approval(test, after, *, base_sha=BASE_SHA, before="passed"):
 
 
 def run_expected(arguments):
-    return subprocess.run(  # noqa: S603 - fixed PDM entry point and test-owned paths
-        [PDM, "run", "acceptance-expected", *arguments],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    return pdm_run("acceptance-expected", *arguments, cwd=ROOT, timeout=120)
 
 
 def test_the_entry_point_ignores_inherited_pdm_selectors(files, tmp_path, monkeypatch):

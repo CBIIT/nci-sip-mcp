@@ -15,6 +15,7 @@ from unittest.mock import patch
 import yaml
 from packaging.utils import canonicalize_name
 from packaging.version import Version
+from pdm_launch import child_environment, create_project, launch
 from pdm_stand_in import changed, hostile_selectors, outer_stand_in, tree
 from pip_audit._cli import audit
 from pip_audit._service.interface import Dependency, VulnerabilityID, VulnerabilityResult
@@ -26,7 +27,7 @@ PDM_BOUNDARY = """
 pdm() {
     if [[ "$1" == export ]]; then
         case "$EXPORT_MODE" in
-            real) command "$PDM_COMMAND" "$@" ;;
+            real) command "$PDM_COMMAND" export --project "$PDM_EXPORT_PROJECT" "${@:2}" ;;
             fail) printf 'export failed\\n' >&2; return 23 ;;
             fixture) cp "$EXPORT_INPUT" "${@: -1}" ;;
         esac
@@ -59,19 +60,26 @@ def execute_audit(
         requirements = root / "requirements.txt"
         requirements.write_text("stale-package==9.0\n")
         invoked = root / "audit-invoked"
+        # The real export reads copies of the lock and project metadata in an owned project that
+        # the wrapper selects explicitly; the workflow text itself is unchanged.
+        project = create_project(root / "project", pyproject=(ROOT / "pyproject.toml").read_text())
+        shutil.copyfile(ROOT / "pdm.lock", project / "pdm.lock")
         environment = {
-            **os.environ,
+            **child_environment(root / "home", os.environ),
             "RUNNER_TEMP": str(root),
             "EXPORT_INPUT": str(source),
             "EXPORT_MODE": mode,
             "PDM_COMMAND": shutil.which("pdm") or "pdm",
+            "PDM_EXPORT_PROJECT": str(project),
+            # The test module is also the offline auditor entry point, and imports the launcher.
+            "PYTHONPATH": str(ROOT / "test_support"),
             "AUDIT_PYTHON": sys.executable,
             "AUDIT_FIXTURE": str(Path(__file__).resolve()),
             "AUDIT_INVOKED": str(invoked),
             "PIP_AUDIT_VULNERABILITY_SERVICE": "pypi",
         }
-        result = subprocess.run(  # noqa: S603 - execute the tracked workflow offline.
-            [  # noqa: S607 - GitHub run-step shell semantics.
+        result = launch(
+            [
                 "bash",
                 "--noprofile",
                 "--norc",
@@ -80,11 +88,10 @@ def execute_audit(
                 "-c",
                 PDM_BOUNDARY + audit_block(),
             ],
-            cwd=ROOT,
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=False,
+            ROOT,
+            environment,
+            300,
+            project,
         )
         return result, requirements.read_text(), invoked.exists()
 
