@@ -77,8 +77,9 @@ def pdm_command(
 
     The project selector sits directly after the subcommand, where PDM's parser reads it for
     every command; it is never appended to what the subcommand forwards. `project` defaults to a
-    fresh owned copy; `cwd` is the directory the process runs in (default: the project). The
-    child sees only the allowlisted variables of `environment` (default: this process's).
+    fresh owned copy; `cwd` is the directory the process runs in (default: a scratch directory
+    that is no project, so `--project` is the only selection). The child sees only the
+    allowlisted variables of `environment` (default: this process's).
     """
     with tempfile.TemporaryDirectory() as scratch:
         base = Path(scratch).resolve()
@@ -87,7 +88,7 @@ def pdm_command(
         env = child_environment(base / "home", source)
         executable = shutil.which("pdm", path=env.get("PATH", "")) or UNAVAILABLE
         argv = [executable, args[0], "--project", str(selected), *args[1:]]
-        return launch(argv, cwd or selected, env, timeout, selected)
+        return launch(argv, cwd or base, env, timeout, selected)
 
 
 def pdm_run(

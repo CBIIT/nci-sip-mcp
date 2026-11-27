@@ -88,7 +88,7 @@ def execute_audit(
                 "-c",
                 PDM_BOUNDARY + audit_block(),
             ],
-            ROOT,
+            root,
             environment,
             300,
             project,
