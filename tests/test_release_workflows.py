@@ -20,9 +20,15 @@ FAILURE_LINE = (
 GROUP = "release-notes-preview-${{ github.event.pull_request.number || github.ref }}"
 HEAD_REF = "${{ github.event.pull_request.head.sha || github.sha }}"
 RECOVERY_LINES = [
-    'echo "the GitHub release is missing: check the tag out in a clean clone and run"',
-    'echo "\\`pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>\\`."',
+    'echo "check whether its draft exists (\\`gh release view <tag>\\`); a failed request may"',
+    'echo "still have created it. If none exists, check the tag out in a clean clone and run"',
+    'echo "\\`pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>\\`,"',
+    'echo "then dispatch Release with retry_image_tag=<tag> while the tag is main\'s tip."',
 ]
+TAGGED_LINE = (
+    'echo "Tagged **$TAG**; its GitHub release stays a draft until the publish release job'
+    ' succeeds."'
+)
 
 
 def load(name):
@@ -51,13 +57,16 @@ class ReleaseWorkflowTest(unittest.TestCase):
         lines = [line.strip() for line in summary["run"].splitlines()]
         start = lines.index(FAILURE_LINE)
         self.assertEqual(
-            lines[start : start + 4],
+            lines[start : start + 6],
             [
                 FAILURE_LINE,
                 'echo "the workflow by hand. If it was pushed,"',
                 *RECOVERY_LINES,
             ],
         )
+        self.assertIn(TAGGED_LINE, lines)
+        self.assertNotIn("Released", summary["run"])
+        self.assertEqual(summary["env"]["DRAFT"], "${{ steps.draft.outcome }}")
 
     def test_the_release_job_keeps_its_permissions_and_trigger(self):
         workflow = load("release.yml")

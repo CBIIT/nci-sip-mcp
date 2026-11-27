@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / ".github/workflows/release.yml"
 CLI = (
     "pdm run semantic-release -c .release-notes/semantic-release.json -v version "
-    "--no-commit --tag --push --no-changelog --vcs-release --skip-build"
+    "--no-commit --tag --push --no-changelog --no-vcs-release --skip-build"
 )
 INSTALL = (
     "pdm lock --check\n"
@@ -272,6 +272,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 "Install locked release group",
                 "Prepare release notes",
                 "Semantic release",
+                "Create the draft release",
             }
         ]
         self.assertEqual(
@@ -295,6 +296,17 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     "env": {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"},
                     "run": CLI,
                 },
+                {
+                    "name": "Create the draft release",
+                    "id": "draft",
+                    "if": "steps.release.outputs.released == 'true'",
+                    "env": {
+                        "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
+                        "RELEASE_TAG": "${{ steps.release.outputs.tag }}",
+                    },
+                    "run": "pdm run python -m scripts.release_notes recover "
+                    '"$RELEASE_TAG" --repository "$GITHUB_REPOSITORY"',
+                },
             ],
         )
         self.assertEqual(
@@ -305,6 +317,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 "Set up release tooling",
                 "Prepare release notes",
                 "Semantic release",
+                "Create the draft release",
                 "Summary",
                 "Select the exact released commit for image publication",
             ],
