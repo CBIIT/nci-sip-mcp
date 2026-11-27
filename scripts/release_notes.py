@@ -359,21 +359,36 @@ def remote_tag(repository: str, tag: str) -> RemoteTag:
     return RemoteTag(sha, _text(commit, "committer", "date"))
 
 
-def release_exists(repository: str, tag: str) -> bool:
-    """Whether the release exists, from a complete lookup that ended as its status says.
+def _unknown(repository: str, tag: str) -> ReleaseNotesError:
+    return ReleaseNotesError(
+        f"could not tell whether {tag} has a release in {repository}; nothing was created"
+    )
 
-    gh exits 0 on 200 and 1 on 404, and prints its own diagnostic on stderr for the 404, so
-    stderr is not read; a failed or cut-off invocation carrying a header refuses.
+
+def release_exists(repository: str, tag: str) -> bool:
+    """Whether a published or draft release exists, from lookups that ended as they say.
+
+    The tag lookup sees published releases only (GitHub: "Get a published release with the
+    specified tag"); after its clear 404, the release list, which includes drafts for a caller
+    with push access, is read in full. gh exits 0 on 200 and 1 on 404 and prints its own
+    diagnostic on stderr for the 404, so stderr is not read; a failed or cut-off invocation
+    carrying a header refuses.
     """
     result = run("gh", "api", "-i", f"repos/{repository}/releases/tags/{tag}")
     status = _HTTP_STATUS.match(result.stdout)
     complete = _HEADERS_END.search(result.stdout) is not None
     outcome = {"200": 0, "404": 1}  # status -> the exit code gh ends with
-    if status and complete and outcome.get(status[1]) == result.returncode:
-        return status[1] == "200"
-    raise ReleaseNotesError(
-        f"could not tell whether {tag} has a release in {repository}; nothing was created"
-    )
+    if not (status and complete and outcome.get(status[1]) == result.returncode):
+        raise _unknown(repository, tag)
+    if status[1] == "200":
+        return True
+    listed = run(
+        "gh", "api", "--paginate", "--jq", ".[].tag_name",
+        f"repos/{repository}/releases?per_page=100",
+    )  # fmt: skip
+    if listed.returncode:
+        raise _unknown(repository, tag)
+    return tag in listed.stdout.splitlines()
 
 
 def frozen_notes(tag: str, commit: str, repository: str) -> str:
