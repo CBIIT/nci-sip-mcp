@@ -7,8 +7,6 @@ from contextlib import contextmanager
 from copy import deepcopy
 from urllib.parse import urlencode
 
-from pdm_launch import create_project, pdm_run  # noqa: F401 - the launcher moved to test_support
-
 from nci_sip_mcp.audit import JsonFormatter
 from nci_sip_mcp.config import DEFAULT_EXCLUSION_ROLE_CODES
 from nci_sip_mcp.evs import INDEX_INCLUDE, LOOKUP_INCLUDE, EVSNotFoundError, verify_content

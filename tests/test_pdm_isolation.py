@@ -17,10 +17,9 @@ from subprocess import TimeoutExpired
 from unittest.mock import patch
 from xml.etree import ElementTree
 
+from pdm_launch import create_project, pdm_run
 from pdm_stand_in import SHOW, SUBJECT, changed, hostile_selectors, outer_stand_in, tree
 from scripts.processes import wait_until
-
-from fakes import create_project, pdm_run
 
 CANARY = "canary-9f3a1c"
 SUPPORT = Path(__file__).resolve().parents[1] / "test_support"

@@ -384,8 +384,8 @@ tests exercise real worker termination. See the
 [assurance record](docs/government-site-assurance.md#automated-browser-regression-journeys)
 for setup commands, manual checks and limitations.
 
-The real-PDM tests (the mutation gate and coverage, the dependency audit's real export, the
-locked-release dry-run and the acceptance `run_expected`) launch through `pdm_run` and
+The migrated real-PDM tests (the mutation gate and coverage, the dependency audit's real export,
+the locked-release dry-run and the acceptance `run_expected`) launch through `pdm_run` and
 `pdm_command` in `test_support/pdm_launch.py`, which both pytest configurations reach through
 `pythonpath`; it is test-only: the root source distribution carries it with the tests that import
 it, and no wheel carries either. The launch selects an owned project (a copy of the

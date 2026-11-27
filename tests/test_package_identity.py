@@ -14,7 +14,7 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_TIMEOUT_SECONDS = 300
 CARRIED_TOGETHER = (
-    "tests/fakes.py",
+    "tests/test_mutation_coverage.py",
     "tests/test_pdm_isolation.py",
     "test_support/pdm_launch.py",
     "test_support/pdm_stand_in.py",

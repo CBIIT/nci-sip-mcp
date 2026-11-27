@@ -11,12 +11,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from coverage import CoverageData
+from pdm_launch import create_project, pdm_run
 from scripts.validation.mutation_coverage import SHARDS, export, identity, load
 from scripts.validation.mutation_gate import schedule
 from scripts.validation.mutation_run import baseline, environment, run_domain, selection
 from scripts.validation.mutation_source import candidates
 
-from fakes import create_project, pdm_run
 from test_mutation_gate import ROOT, cli, project
 
 
