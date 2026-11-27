@@ -291,7 +291,7 @@ jobs:
         with:
           name: documentation-preview-${{ github.sha }}
           path: tmp/pages-site
-      - name: Check the artifact's source and links
+      - name: Check the artifact's source and symbolic links
         shell: bash
         run: |
           set -euo pipefail
@@ -305,7 +305,8 @@ jobs:
         with:
           path: tmp/pages-site
 
-  # Privileged: deploys the packaged site only for a successful push run that is still main.
+  # Privileged: deploys the packaged site for a successful push run whose commit a lookup just
+  # before deployment still finds at main (a check, not an atomic guarantee).
   pages-deploy:
     name: pages deploy
     needs: [pages-package, required]

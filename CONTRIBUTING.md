@@ -697,9 +697,11 @@ path-filtered. CodeQL is GitHub-managed default setup, not a workflow file in th
 GitHub Pages serves the documentation that CI's `documentation` job built and validated in the
 same run. `pages-package` checks that artifact's `build.json` names the run's commit and that it
 holds no symbolic links, then packages it on every event. `pages-deploy` publishes it only for
-a push to `main` whose `required` check succeeded and only while that commit is still `main`; a
-superseded run deploys nothing. Pages serves static files: none of the companion container's
-health route, custom headers or request logs apply there.
+a push to `main` whose `required` check succeeded, and only if a lookup just before deployment
+still finds that commit at `main`; a run already superseded at that check skips deployment. The
+check and the deployment are separate steps, so this is not an atomic guarantee. Pages serves
+static files: the companion container's health route, custom headers and application logs do
+not apply there; GitHub's own Pages logging is GitHub's, not this repository's.
 
 ### Verification before merge
 

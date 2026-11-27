@@ -1,7 +1,6 @@
 """GitHub Pages publishes the same run's validated documentation, and only from fresh main."""
 
 import os
-import stat
 import subprocess
 import tempfile
 import unittest
@@ -55,7 +54,11 @@ PACKAGE = {
             "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
             "with": {"name": "documentation-preview-${{ github.sha }}", "path": "tmp/pages-site"},
         },
-        {"name": "Check the artifact's source and links", "shell": "bash", "run": PACKAGE_CHECK},
+        {
+            "name": "Check the artifact's source and symbolic links",
+            "shell": "bash",
+            "run": PACKAGE_CHECK,
+        },
         {
             "uses": "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
             "with": {"path": "tmp/pages-site"},
@@ -161,15 +164,18 @@ class PackageCheckTest(unittest.TestCase):
         self.assertIn("contains symbolic links", result.stdout)
 
     def test_a_failed_link_scan_fails(self):
+        # A find that fails must fail the check, whatever the runner's file permissions.
         with tempfile.TemporaryDirectory() as root:
-            site = self.site(root, f'{{"source_commit": "{SHA}"}}')
-            hidden = site / "unreadable"
-            hidden.mkdir()
-            hidden.chmod(0)
-            try:
-                result = run(PACKAGE_CHECK, root, {"GITHUB_SHA": SHA})
-            finally:
-                hidden.chmod(stat.S_IRWXU)
+            self.site(root, f'{{"source_commit": "{SHA}"}}')
+            stub = Path(root) / "bin"
+            stub.mkdir()
+            (stub / "find").write_text("#!/bin/sh\necho 'find: scan failed' >&2\nexit 1\n")
+            (stub / "find").chmod(0o755)
+            result = run(
+                PACKAGE_CHECK,
+                root,
+                {"GITHUB_SHA": SHA, "PATH": f"{stub}:{os.environ['PATH']}"},
+            )
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("contains symbolic links", result.stdout)
 

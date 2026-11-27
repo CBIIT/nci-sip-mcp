@@ -204,5 +204,6 @@ remain owner/platform decisions.
 Once Pages is enabled (#646), a GitHub Pages project site serves the same validated static
 documentation that CI builds. That host is not an approved agency deployment: the government
 banner's official-domain statements do not apply to it, and it has none of the companion
-container's health route, custom headers or request logs. The deployed-service checks above stay
-pending for an approved deployment.
+container's health route, custom headers or application logs. GitHub documents its own logging
+of Pages visitors' IP addresses for security; that is GitHub's practice, not this repository's.
+The deployed-service checks above stay pending for an approved deployment.
