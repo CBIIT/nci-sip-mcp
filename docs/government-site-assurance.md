@@ -200,3 +200,9 @@ evidence stays explicitly pending. #197 still blocks UAT/PROD admin exposure wit
 platform integration. This review does not change repository visibility or introduce a custom
 identity service or institutional login for local users. Agency policy and production settings
 remain owner/platform decisions.
+
+Once Pages is enabled (#646), a GitHub Pages project site serves the same validated static
+documentation that CI builds. That host is not an approved agency deployment: the government
+banner's official-domain statements do not apply to it, and it has none of the companion
+container's health route, custom headers or request logs. The deployed-service checks above stay
+pending for an approved deployment.
