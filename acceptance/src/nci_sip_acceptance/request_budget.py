@@ -622,7 +622,7 @@ class ControlledRun:
     def require_supervision_owner(self) -> None:
         if not self._owner:
             raise RequestPolicyError("authorization")
-        with self._connection() as connection:
+        with self._connection(write=False) as connection:
             enabled, _heartbeat = self._supervision(connection)
             state = connection.execute("SELECT state FROM run").fetchone()[0]
             if not enabled or state != "created" or self._failure() is not None:
@@ -631,7 +631,7 @@ class ControlledRun:
 
     def participant_pending(self, participant: str) -> bool:
         _participant(participant)
-        with self._connection() as connection:
+        with self._connection(write=False) as connection:
             if (
                 not self._owner
                 or connection.execute(
@@ -696,14 +696,14 @@ class ControlledRun:
             valid = isinstance(delay_seconds, (int, float)) and not isinstance(delay_seconds, bool)
             if not valid or not math.isfinite(delay_seconds) or delay_seconds < 0:
                 self._deny("authorization")
-            with self._connection() as connection:
+            with self._connection(write=False) as connection:
                 self._guard(connection, delay_seconds)
         except OverflowError:
             self._deny("authorization")
 
     def timeout(self, maximum: float) -> float:
         """Return a positive timeout under the verified run origin and current admission."""
-        with self._connection() as connection:
+        with self._connection(write=False) as connection:
             if type(maximum) not in (int, float):
                 self._deny("authorization")
             try:
@@ -933,7 +933,7 @@ class AttemptLease:
                 self.run._mark_failed(reason, event=event)
 
     def _pending_entry(self) -> bool:
-        with self.run._connection() as connection:
+        with self.run._connection(write=False) as connection:
             return bool(self._row(connection)["entry_pending"])
 
     def _abort_entry(self) -> None:
