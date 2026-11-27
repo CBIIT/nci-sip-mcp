@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -435,11 +436,16 @@ INHERITED = (
     "PYTHONPATH",
     "PYTHONDONTWRITEBYTECODE",
     "NCI_SIP_DATA_DIR",
+    # A baseline run (mutation_run) maps the lines that only a nested PDM child executes through
+    # exactly these: the child's coverage start-up, its data file and per-test context.
+    "COVERAGE_PROCESS_START",
+    "COVERAGE_PROCESS_CONFIG",
+    "COVERAGE_FILE",
     "MUTATION_COVERAGE_CONTEXT",
 )
-# Coverage settings are the one deliberately configured input a child may carry: a baseline run
-# maps the lines that only a nested PDM child executes through them.
-COVERAGE_PREFIX = "COVERAGE"
+
+
+UNAVAILABLE = "unavailable"
 
 
 def create_project(
@@ -454,11 +460,7 @@ def create_project(
 
 
 def child_environment(home: Path, source: Mapping[str, str]) -> dict[str, str]:
-    env = {
-        key: value
-        for key, value in source.items()
-        if key in INHERITED or key.startswith(COVERAGE_PREFIX)
-    }
+    env = {key: value for key, value in source.items() if key in INHERITED}
     env.update(
         HOME=str(home),
         XDG_CONFIG_HOME=str(home / "config"),
@@ -493,6 +495,7 @@ def pdm_run(
             argv += ["--working-dir", str(cwd)]
         source = os.environ if environment is None else environment
         env = child_environment(base / "home", source)
+        argv[0] = shutil.which("pdm", path=env.get("PATH", "")) or UNAVAILABLE
         return _launch([*argv, *command], cwd or selected, env, timeout, selected)
 
 
@@ -534,6 +537,8 @@ def _launch(
 def _run(
     argv: Sequence[str], cwd: Path, env: dict[str, str], timeout: int
 ) -> subprocess.CompletedProcess[str]:
+    if argv[0] == UNAVAILABLE:
+        raise FileNotFoundError("pdm executable not found on the launch PATH")
     with subprocess.Popen(  # noqa: S603 - fixed PDM command, owned project and paths
         argv,
         cwd=cwd,
@@ -557,7 +562,11 @@ def _run(
 
 
 def _kill_group(process: subprocess.Popen[str]) -> None:
-    """The launch owns its session; a grandchild must not outlive an abandoned launch."""
+    """Kill the process group this Popen created (`start_new_session`), by its pid only.
+
+    A descendant that leaves the group (another session, or `setpgid`) is not reached; nothing
+    else is signalled.
+    """
     with contextlib.suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)
 
@@ -567,10 +576,14 @@ def _now() -> str:
 
 
 def _interpreter_file(project: Path) -> tuple[str, str]:
+    """The saved interpreter and its identity; a file that cannot be read is reported as such."""
     try:
         data = (project / ".pdm-python").read_bytes()
     except FileNotFoundError:
         return "absent", "absent"
+    except OSError as error:
+        unavailable = f"unavailable: {type(error).__name__}"
+        return unavailable, unavailable
     return data.decode(errors="replace").strip(), hashlib.sha256(data).hexdigest()[:12]
 
 
