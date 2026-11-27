@@ -237,21 +237,36 @@ Post plans, review rounds and reviewer questions as GitHub comments; the reviewe
 Ask the owner directly only for owner decisions: scope, specification conventions, repository
 settings and rulesets.
 
-An executable issue is one independently reviewable outcome that fits one focused work session
-(hours). Its estimate counts implementation, tests, documentation, review corrections and every
-gate. Work without a defensible estimate is not ready to start; oversized work is split into
-independently reviewable slices before entry. A broad investigation is a tracking umbrella whose
-finite batches are the executable issues. A stalled external dependency is BLOCKED, with an owner.
+An executable issue is one independently reviewable outcome that completes within hours and at
+most one elapsed calendar day, from its ready execution start to completion. Its estimate counts
+implementation, tests, documentation, review corrections and every gate. Work without a defensible
+estimate is not ready to start; oversized work is split into independently reviewable slices before
+entry. A broad investigation is a tracking umbrella whose finite batches are the executable issues.
+A stalled external dependency is BLOCKED, with an owner.
 
 A milestone fits one pull request reviewable in one sitting: about four issues and 1,500 changed
-lines (excluding generated files and `acceptance/expected/fixture.json`), and at most seven
-planned working days, including integration, review and gate reserve. More than seven needs the
-owner's recorded approval, and ten is the limit; neither is a target, and more time never permits
-an oversized pull request. Calendar forecasts and external waits are kept apart from planned
-active work. If a milestone outgrows these bounds, split it before opening the pull request and
-move the remaining work to a new milestone. Measure insertions plus deletions with
+lines (excluding generated files and `acceptance/expected/fixture.json`). Target completion within
+seven elapsed calendar days, including integration, review and gates. Planning beyond seven
+requires the owner's recorded approval; ten is the maximum. Do not pad a milestone to reach seven
+days, and more time never permits an oversized pull request. If a milestone outgrows these bounds,
+split it before opening the pull request and move the remaining work to a new milestone. Measure
+insertions plus deletions with
 `git diff --shortstat origin/main...milestone/<phase> -- . ':!acceptance/expected/fixture.json'`,
 adding exclusion pathspecs for generated files.
+
+Each clock starts when ready work enters execution and runs continuously: CI and review waits,
+nights and weekends count, and a blockage after the start consumes the budget rather than pausing
+or resetting it. Work blocked before entry for a required input receives no committed execution or
+completion date until that input exists; a clearly labelled input or checkpoint date is not a
+delivery forecast. An unknown historical start stays unknown.
+
+One shared reviewer orchestrates, and one implementer is the default. The reviewer may add an
+optional second implementer (two in total) for independent, approved, ready work after recording
+its slice and branch, isolated mutable environment, evidence and cleanup owner, dependency
+boundaries, review and heavy-run capacity, expected benefit and stop or handoff condition. Return to
+one implementer when no useful independent approved work remains or the second would consume
+unavailable review or heavy-run capacity. Estimates are not divided by the number of implementers
+and scope does not grow; landings stay serialized and each candidate keeps its own proof.
 
 **Issue clarity.** Lead with the purpose and the result the caller or maintainer needs. Use
 literal prose; add a short flow or numbered stages when order matters. Name actual dependencies
@@ -441,7 +456,8 @@ Rules learned the hard way:
 - When a run falls more than 25% behind its projection, find the cause before waiting longer;
   a new estimate is not a cause. Stop the run cooperatively where the cause or the cost requires it,
   never by killing blindly.
-- Run one heavy local execution (full test suite, self-tests, mutation sample) at a time.
+- Run one heavy local execution (full test suite, self-tests, mutation sample, a push with its
+  pre-push suite) at a time per machine; separate sessions on one machine share that one slot.
 - Name roles, never people, in code, issues and pull requests.
 - Licence and attribution text is passed through from what the upstream API returns; the server
   keeps no licence data of its own. A licence key or credential is never logged or committed.
