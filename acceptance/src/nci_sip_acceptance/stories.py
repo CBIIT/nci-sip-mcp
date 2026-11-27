@@ -189,7 +189,9 @@ def render(stories: list[dict], cases: list[Case]) -> str:
         "This is an inventory, not a passing test report. "
         "[Run reports](../acceptance/README.md#the-report) "
         "say what passed, failed or did not run. Fixture cases include recorded responses and "
-        "contract-crafted scenarios; caDSR credentials are not yet issued. A fixture result does "
+        "contract-crafted scenarios; a caDSR credential has been issued for staging only, with its "
+        "protected access still unverified; see the "
+        "[dated access evidence](functional-status.md). A fixture result does "
         "not establish live access, clinical suitability or production search quality. "
         "Implementation unit tests and harness self-tests are outside this MCP catalogue.",
         "",
