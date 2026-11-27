@@ -387,7 +387,8 @@ for setup commands, manual checks and limitations.
 The real-PDM tests (the mutation gate and coverage, the dependency audit's real export, the
 locked-release dry-run and the acceptance `run_expected`) launch through `pdm_run` and
 `pdm_command` in `test_support/pdm_launch.py`, which both pytest configurations reach through
-`pythonpath`; it is test-only and in no wheel. The launch selects an owned project (a copy of the
+`pythonpath`; it is test-only: the root source distribution carries it with the tests that import
+it, and no wheel carries either. The launch selects an owned project (a copy of the
 checkout's `pyproject.toml` whose `.pdm-python` names the interpreter; the running one unless a
 test binds another), an allowlisted environment (the coverage keys a nested baseline needs are
 listed in `INHERITED`) and owned PDM configuration and cache, so an inherited `PDM_PROJECT`,
@@ -400,8 +401,8 @@ created, addressed by that process only: a descendant that leaves the group (a n
 identity, UTC times, outcome and captured output, never the environment, to stderr. With
 `junit_logging = "system-err"` in `pyproject.toml` and `acceptance/pyproject.toml`, the unit and
 self-test JUnit XML keep that text for a failing test (`tests/test_pdm_isolation.py` and
-`acceptance/selftests/test_pdm_evidence.py` run each configuration to show it). Other tests that
-launch PDM, such as the dependency-update tests that assert a patched `pdm lock` argv, do not.
+`acceptance/selftests/test_pdm_evidence.py` run each configuration to show it). The
+dependency-update tests launch no PDM: they assert the argv of a patched `pdm lock`.
 
 Coverage includes lines, branches and Python subprocesses for the server and harness suites.
 It identifies execution gaps, not missing assertions: use a targeted mutation when an
