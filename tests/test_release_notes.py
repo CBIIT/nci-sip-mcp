@@ -113,6 +113,11 @@ elif "/git/commits/" in path:
     if mode == "nocommitdate":
         del payload["committer"]
     print(json.dumps(payload))
+elif path.split("?")[0].endswith("/releases"):
+    if os.environ.get("FAKE_GH_LIST") == "fail":
+        sys.stderr.write("HTTP 502")
+        sys.exit(1)
+    print(os.environ.get("FAKE_GH_RELEASE_TAGS", ""))
 elif "/releases/tags/" in path:
     state = os.environ["FAKE_GH_RELEASE"]
     head = "HTTP/2.0 {}\\r\\nContent-Type: application/json\\r\\n"
@@ -808,6 +813,13 @@ class RecoveryTest(unittest.TestCase):
                 ["api", f"repos/example/scratch/git/tags/{tag_object}"],
                 ["api", "-i", "repos/example/scratch/releases/tags/v0.2.0"],
                 [
+                    "api",
+                    "--paginate",
+                    "--jq",
+                    ".[].tag_name",
+                    "repos/example/scratch/releases?per_page=100",
+                ],
+                [
                     "release",
                     "create",
                     "v0.2.0",
@@ -819,7 +831,7 @@ class RecoveryTest(unittest.TestCase):
                 ],
             ],
         )
-        self.assertEqual(calls[4]["notes"], original)
+        self.assertEqual(calls[5]["notes"], original)
         self.assertEqual(project.tags(), ["v0.1.0", "v0.2.0"])
 
     def test_a_lightweight_tag_is_checked_by_its_commit_and_date(self):
@@ -905,6 +917,33 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("the history at v0.3.0 no longer yields that release", result.stderr)
         self.assertNotIn("create", [call["argv"][1] for call in project.gh_calls()])
+
+    def test_an_existing_draft_is_refused_without_creating_a_second(self):
+        """The tag lookup sees published releases only; drafts must not be duplicated."""
+        project = Scratch(self)
+        self.release_and_notes(project)
+        project.env["FAKE_GH_RELEASE_TAGS"] = "v0.1.0\nv0.2.0"
+        result = self.recover(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (1, "release notes: v0.2.0 already has a release; notes are never overwritten\n"),
+        )
+        self.assertNotIn(["release", "create"], [c["argv"][:2] for c in project.gh_calls()])
+
+    def test_an_unreadable_release_list_refuses_without_creating(self):
+        project = Scratch(self)
+        self.release_and_notes(project)
+        project.env["FAKE_GH_LIST"] = "fail"
+        result = self.recover(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (
+                1,
+                "release notes: could not tell whether v0.2.0 has a release in example/scratch;"
+                " nothing was created\n",
+            ),
+        )
+        self.assertNotIn(["release", "create"], [c["argv"][:2] for c in project.gh_calls()])
 
     def test_a_failed_creation_is_reported(self):
         project = Scratch(self)
