@@ -17,6 +17,7 @@ from subprocess import TimeoutExpired
 from unittest.mock import patch
 from xml.etree import ElementTree
 
+from coverage import CoverageData
 from pdm_launch import create_project, pdm_run
 from pdm_stand_in import SHOW, SUBJECT, changed, hostile_selectors, outer_stand_in, tree
 from scripts.processes import wait_until
@@ -304,31 +305,38 @@ class Inner(unittest.TestCase):
 """
 
 
+def run_nested_junit_session(directory: Path) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Run a nested `pdm run test` session in an owned project; return it and its JUnit report.
+
+    The pytest flags are those `pdm run test` and the CI unit job pass (pyproject.toml's `test`
+    script, ci.yml's `--junitxml`, `-vv` and `faulthandler_timeout`), nothing else.
+    """
+    inner = create_project(directory / "inner")
+    (inner / "tests").mkdir()
+    (inner / "test_support").mkdir()
+    shutil.copy(SUPPORT / "pdm_launch.py", inner / "test_support/pdm_launch.py")
+    (inner / "tests/test_inner.py").write_text(INNER_TESTS.format(canary=CANARY))
+    report = inner / "tmp/test-results/unit.xml"
+    result = pdm_run(
+        "test",
+        "--cov=example",
+        "--cov-fail-under=0",
+        "--cov-report=",
+        f"--junitxml={report}",
+        "-vv",
+        "-o",
+        "faulthandler_timeout=60",
+        project=inner,
+        timeout=600,
+    )
+    return result, report.read_text()
+
+
 class JunitReportTest(unittest.TestCase):
     def test_failed_launches_keep_their_evidence_in_the_projects_junit_report(self):
-        # The pytest flags are those `pdm run test` and the CI unit job pass (pyproject.toml's
-        # `test` script, ci.yml's `--junitxml`, `-vv` and `faulthandler_timeout`), nothing else.
         with tempfile.TemporaryDirectory() as directory:
-            inner = create_project(Path(directory).resolve() / "inner")
-            (inner / "tests").mkdir()
-            (inner / "test_support").mkdir()
-            shutil.copy(SUPPORT / "pdm_launch.py", inner / "test_support/pdm_launch.py")
-            (inner / "tests/test_inner.py").write_text(INNER_TESTS.format(canary=CANARY))
-            report = inner / "tmp/test-results/unit.xml"
-            result = pdm_run(
-                "test",
-                "--cov=example",
-                "--cov-fail-under=0",
-                "--cov-report=",
-                f"--junitxml={report}",
-                "-vv",
-                "-o",
-                "faulthandler_timeout=60",
-                project=inner,
-                timeout=600,
-            )
+            result, text = run_nested_junit_session(Path(directory).resolve())
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            text = report.read_text()
         self.assertNotIn(CANARY, text)
         cases = {
             case.get("name"): "".join(
@@ -347,6 +355,26 @@ class JunitReportTest(unittest.TestCase):
         timed_out = cases.get("test_timeout", "")
         self.assertIn("TimeoutExpired", timed_out)
         self.assertIn('pdm-launch outcome: "timeout after 3s"', timed_out)
+
+    def test_nested_session_preserves_callers_parallel_coverage(self):
+        # Given a caller (as a local mutation baseline is) whose COVERAGE_FILE directory holds a
+        # valid parallel data file it owns, the nested coverage session must leave that file alone.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            caller = root / "caller"
+            caller.mkdir()
+            owned = CoverageData(basename=str(caller / ".coverage"), suffix="caller.pid1.owned")
+            owned.add_lines({"/caller/subject.py": [1, 2, 3]})
+            owned.write()
+            sentinel = Path(owned.data_filename())
+            before = sentinel.read_bytes()
+            with patch.dict(os.environ, {"COVERAGE_FILE": str(caller / ".coverage")}):
+                run_nested_junit_session(root)
+            self.assertTrue(sentinel.exists(), sorted(path.name for path in caller.iterdir()))
+            self.assertEqual(sentinel.read_bytes(), before)
+            preserved = CoverageData(basename=str(sentinel))
+            preserved.read()
+            self.assertEqual(sorted(preserved.lines("/caller/subject.py") or []), [1, 2, 3])
 
 
 if __name__ == "__main__":
