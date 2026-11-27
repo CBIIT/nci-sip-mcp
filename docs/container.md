@@ -128,9 +128,11 @@ flowchart TB
     Publish -. "operator selects digest" .-> Deploy["Deploy with prepared index<br/>and matching model"]
 ```
 
-PR builds never publish. The release job only tags and creates a draft release; the image job
-attaches its assets and attestations to that draft, and the publish release job makes it public
-last, because a published (immutable) release accepts no assets. Audit and CodeQL also run on main; neither replaces
+PR builds never publish. The release job only tags and creates a draft release. The image job
+pushes the image to GHCR, uploads `scan.json`, `sbom.cdx.json` and `image-digest.txt` to the draft
+and pushes the image's provenance and SBOM attestations to the registry. The publish release job
+then checks the draft and makes it public last, because a published (immutable) release accepts
+no assets. Audit and CodeQL also run on main; neither replaces
 the image scan. [Publication recovery](#scan-policy-and-publication) is described below.
 
 ### Local builds and dependency lock

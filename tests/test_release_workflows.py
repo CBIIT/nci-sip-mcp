@@ -14,21 +14,39 @@ head="$(git rev-parse HEAD)"
 pdm run python -m scripts.release_notes preview --base "$base" --head "$head" \\
   --repository-url "https://github.com/$REPOSITORY.git" | tee -a "$GITHUB_STEP_SUMMARY"
 """
-FAILURE_LINE = (
-    'echo "The release step did not succeed; read the log. If the tag was not pushed, start"'
-)
 GROUP = "release-notes-preview-${{ github.event.pull_request.number || github.ref }}"
 HEAD_REF = "${{ github.event.pull_request.head.sha || github.sha }}"
-RECOVERY_LINES = [
-    'echo "check whether its draft exists (\\`gh release view <tag>\\`); a failed request may"',
-    'echo "still have created it. If none exists, check the tag out in a clean clone and run"',
-    'echo "\\`pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>\\`,"',
-    'echo "then dispatch Release with retry_image_tag=<tag> while the tag is main\'s tip."',
-]
-TAGGED_LINE = (
-    'echo "Tagged **$TAG**; its GitHub release stays a draft until the publish release job'
-    ' succeeds."'
-)
+SUMMARY_STEP = {
+    "name": "Summary",
+    "if": "${{ !cancelled() }}",
+    "env": {
+        "SKIPPED": "${{ steps.guard.outputs.skip }}",
+        "OUTCOME": "${{ steps.release.outcome }}",
+        "DRAFT": "${{ steps.draft.outcome }}",
+        "RELEASED": "${{ steps.release.outputs.released }}",
+        "TAG": "${{ steps.release.outputs.tag }}",
+    },
+    "run": """\
+{
+  echo "## Release"
+  echo
+  if [ "$SKIPPED" = "true" ]; then
+    echo "Skipped: main has moved past the validated commit. The CI run of the newer commit releases it."
+  elif [ "$OUTCOME" != "success" ] || [ "$DRAFT" = "failure" ]; then
+    echo "The release step did not succeed; read the log. If the tag was not pushed, start"
+    echo "the workflow by hand. If it was pushed,"
+    echo "check whether its draft exists (\\`gh release view <tag>\\`); a failed request may"
+    echo "still have created it. If none exists, check the tag out in a clean clone and run"
+    echo "\\`pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>\\`,"
+    echo "then dispatch Release with retry_image_tag=<tag> while the tag is main's tip."
+  elif [ "$RELEASED" = "true" ]; then
+    echo "Tagged **$TAG**; its GitHub release stays a draft until the publish release job succeeds."
+  else
+    echo "No release: no \\`feat\\`, \\`fix\\`, \\`perf\\` or breaking (\\`!\\`) commit since the last tag."
+  fi
+} >> "$GITHUB_STEP_SUMMARY"
+""",  # noqa: E501
+}
 
 
 def load(name):
@@ -53,20 +71,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
             ],
         )
         self.assertEqual(names.index("Prepare release notes") + 1, names.index("Semantic release"))
-        self.assertNotIn("--generate-notes", summary["run"])
-        lines = [line.strip() for line in summary["run"].splitlines()]
-        start = lines.index(FAILURE_LINE)
-        self.assertEqual(
-            lines[start : start + 6],
-            [
-                FAILURE_LINE,
-                'echo "the workflow by hand. If it was pushed,"',
-                *RECOVERY_LINES,
-            ],
-        )
-        self.assertIn(TAGGED_LINE, lines)
-        self.assertNotIn("Released", summary["run"])
-        self.assertEqual(summary["env"]["DRAFT"], "${{ steps.draft.outcome }}")
+        self.assertEqual(summary, SUMMARY_STEP)
 
     def test_the_release_job_keeps_its_permissions_and_trigger(self):
         workflow = load("release.yml")

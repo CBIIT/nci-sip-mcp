@@ -62,11 +62,16 @@ if argv[0] != "api" and argv[:2] not in RELEASE_COMMANDS:
 if argv[:2] == ["release", "view"]:
     print(os.environ["FAKE_GH_VIEW"])
 elif argv[:2] == ["release", "download"]:
+    if os.environ.get("FAKE_GH_DOWNLOAD") == "fail":
+        sys.stderr.write("HTTP 502")
+        sys.exit(1)
     target = os.path.join(argv[argv.index("--dir") + 1], argv[argv.index("--pattern") + 1])
     with open(target, "w", encoding="utf-8") as asset:
         asset.write(os.environ["FAKE_GH_DIGEST"])
 elif argv[:2] == ["release", "edit"]:
-    pass
+    if os.environ.get("FAKE_GH_EDIT") == "fail":
+        sys.stderr.write("HTTP 502")
+        sys.exit(1)
 elif argv[:2] == ["release", "create"]:
     if repo != KNOWN or os.environ.get("FAKE_GH_CREATE") == "fail":
         sys.stderr.write("HTTP 500")
@@ -910,7 +915,11 @@ class RecoveryTest(unittest.TestCase):
         result = self.recover(project)
 
         self.assertEqual(result.returncode, 1)
-        self.assertIn("gh release create failed: HTTP 500", result.stderr)
+        self.assertEqual(
+            result.stderr,
+            "release notes: gh release create failed: HTTP 500; the draft may still exist: "
+            "check `gh release view v0.2.0` before running recover again\n",
+        )
 
     def run_arranged(self, project, setup):
         """Recover after the named change to the scratch project, if any."""
@@ -1132,6 +1141,30 @@ class PublishTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(message, result.stderr)
                 self.assertNotIn("edit", [c[1] for c in self.release_calls(project)])
+
+    def test_a_failed_digest_download_is_refused_before_any_edit(self):
+        project = self.draft()
+        project.env["FAKE_GH_DOWNLOAD"] = "fail"
+        result = self.publish(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (1, "release notes: could not download image-digest.txt of v0.2.0\n"),
+        )
+        self.assertEqual([c[1] for c in self.release_calls(project)], ["view", "download"])
+
+    def test_a_failed_final_edit_is_reported_as_possibly_published_and_not_retried(self):
+        project = self.draft()
+        project.env["FAKE_GH_EDIT"] = "fail"
+        result = self.publish(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (
+                1,
+                "release notes: gh release edit failed: HTTP 502; v0.2.0 may still have been "
+                "published: check `gh release view v0.2.0` against the tag commit and digest\n",
+            ),
+        )
+        self.assertEqual([c[1] for c in self.release_calls(project)], ["view", "download", "edit"])
 
     def test_a_tag_on_another_commit_is_refused(self):
         project = self.draft()

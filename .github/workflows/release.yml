@@ -8,8 +8,10 @@ name: Release
 # the tool's generated list; an invalid or missing note fails before any tag exists.
 #
 # Order (#659): the tool only tags; `release_notes recover` creates a draft; the
-# image job assembles assets and attestations on that draft; the publish job makes
-# it public last. Immutable releases accept no assets once published.
+# image job pushes the image to GHCR, uploads scan.json, sbom.cdx.json and
+# image-digest.txt to the draft, and pushes the image attestations to the registry;
+# the publish job checks the draft and makes it public last. Immutable releases
+# accept no assets once published.
 #
 # Why `workflow_run` and not `push` or `pull_request: [closed]`:
 #   - `push` would release code whose CI has not finished, or has failed.
