@@ -11,10 +11,20 @@ from .audit import emit
 from .models import IndexManifest, NcitConcept, SearchHit, Truncation
 from .validation import MAX_INDEX_SEARCH_LIMIT, validate_search
 
+# Events an operator must act on, not just read.
+_WARNING_EVENTS = frozenset(
+    {
+        "index_build_removal_pending",
+        "index_model_revision_mismatch",
+        "index_model_revision_unknown",
+    }
+)
+
 
 def index_event(name: str, details: dict[str, Any]) -> None:
     """Preserve the existing audit logger and event fields for local operations."""
-    emit(logging.getLogger("nci_sip_mcp.index"), logging.INFO, name, **details)
+    level = logging.WARNING if name in _WARNING_EVENTS else logging.INFO
+    emit(logging.getLogger("nci_sip_mcp.index"), level, name, **details)
 
 
 def manifest_record(manifest: StoredManifest) -> IndexManifest:

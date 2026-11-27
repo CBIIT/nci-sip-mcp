@@ -13,7 +13,8 @@ from dataclasses import replace
 from itertools import batched, chain, groupby
 from pathlib import Path
 from tempfile import TemporaryFile
-from typing import Any, Literal
+from time import monotonic
+from typing import Any, Literal, NamedTuple
 from uuid import uuid4
 
 from .embeddings import EmbeddingProvider
@@ -23,6 +24,7 @@ from .errors import (
     IndexCompatibilityError,
     IndexCursorError,
     IndexEvaluationError,
+    IndexModelRevisionError,
     IndexReleaseError,
     IndexStateError,
     IndexStorageError,
@@ -40,6 +42,7 @@ from .storage import (
     create_fts,
     delete_build,
     fts_table,
+    holds_index,
     migrate,
     name_key,
     vector_bytes,
@@ -177,6 +180,17 @@ def _check_dimensions(previous: int, width: int, compatible: IndexManifest | Non
         )
 
 
+class _Activation(NamedTuple):
+    manifest: IndexManifest
+    switched: bool  # False when the build was already active
+    superseded: list[str]  # builds hidden by this or an earlier activation, not yet removed
+
+
+def _superseded(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute("SELECT build_id FROM manifests WHERE state = 'superseded'")
+    return sorted(row[0] for row in rows)
+
+
 def _sample_base_is_active(conn: sqlite3.Connection, active: IndexManifest | None) -> bool:
     """Whether the build a sample extended is still the active one."""
     row = conn.execute("SELECT build_id FROM manifests WHERE active = 1").fetchone()
@@ -203,6 +217,8 @@ class LocalIndex:
         self, data_dir: Path, *, on_event: Callable[[str, dict[str, Any]], None] | None = None
     ) -> None:
         self.on_event = on_event
+        # (event, build) pairs already recorded by this process, so a probe loop stays quiet.
+        self._noted: set[tuple[str, str]] = set()
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.data_dir / "nci_si.sqlite3"
@@ -230,26 +246,47 @@ class LocalIndex:
             raise
 
     def _init_db(self) -> None:
+        migration: tuple[int, float] | None = None
         with self._connect() as conn:
-            if self._schema_current(conn):
+            if self._schema_version(conn) == SCHEMA_VERSION:
                 return
             if conn.execute("PRAGMA page_count").fetchone()[0] == 0:
                 # Larger pages avoid overflow-page reads for per-concept vector BLOBs.
                 conn.execute("PRAGMA page_size = 65536")
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("BEGIN IMMEDIATE")
-            # Another opener may have migrated while this one waited for the lock.
-            if not self._schema_current(conn):
+            # Another opener may have migrated while this one waited for the lock, so the
+            # version this migration starts from is the one read under it.
+            version = self._schema_version(conn)
+            if version != SCHEMA_VERSION:
+                migration = self._announce_migration(conn, version)
                 migrate(conn)
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        # Past the commit: a start record without this one leaves the outcome unknown.
+        if migration is not None:
+            self._event(
+                "index_migration_finished",
+                from_version=migration[0],
+                to_version=SCHEMA_VERSION,
+                elapsed_seconds=monotonic() - migration[1],
+            )
 
-    def _schema_current(self, conn: sqlite3.Connection) -> bool:
+    def _announce_migration(
+        self, conn: sqlite3.Connection, version: int
+    ) -> tuple[int, float] | None:
+        """Record the start of a migration of an existing file; a new empty file is only created."""
+        if not holds_index(conn):
+            return None
+        self._event("index_migration_started", from_version=version, to_version=SCHEMA_VERSION)
+        return version, monotonic()
+
+    def _schema_version(self, conn: sqlite3.Connection) -> int:
         version = int(conn.execute("PRAGMA user_version").fetchone()[0])
         if version > SCHEMA_VERSION:
             raise IndexCompatibilityError(
                 f"Index schema {version} at {self.db_path} is newer than supported {SCHEMA_VERSION}"
             )
-        return version == SCHEMA_VERSION
+        return version
 
     @staticmethod
     def _manifest(row: sqlite3.Row) -> IndexManifest:
@@ -364,6 +401,7 @@ class LocalIndex:
             build_id=build_id,
             build_kind=build_kind,
             unclassified_source_build=unclassified_source_build,
+            embedding_revision=provider.revision,
         )
         with build_lease(self.data_dir, build_id):
             self._start_build(manifest)
@@ -413,12 +451,49 @@ class LocalIndex:
         return len(seen), dimensions
 
     def activate(self, build_id: str) -> IndexManifest:
-        """Atomically activate a completed snapshot and retain only its predecessor."""
+        """Atomically activate a completed snapshot and retain only its predecessor.
+
+        No production code in this repository calls it (`index-activate` uses
+        `activate_and_report`); it is kept as the portable package's operator API, the one that
+        docs/index-migration.md names for activation and rollback.
+        """
+        return self.activate_and_report(build_id)[0]
+
+    def activate_and_report(self, build_id: str) -> tuple[IndexManifest, list[str]]:
+        """Activate, then remove what the activation superseded; return the builds left over.
+
+        The other completed builds are hidden in the same transaction and removed after it
+        commits, so a failed removal can never undo the activation. The list of builds to
+        remove is read inside that transaction, so no read after the commit can fail the call.
+        A storage failure while deleting is handled: the builds still present are returned and
+        logged as `index_build_removal_pending`. Any other failure of a removal propagates, after
+        the activation has committed.
+        """
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            return self._activate(conn, build_id)
+            activation = self._activate(conn, build_id)
+        self._announce_activation(activation.manifest, activation.switched)
+        return activation.manifest, self._remove_superseded(activation.superseded)
 
-    def _activate(self, conn: sqlite3.Connection, build_id: str) -> IndexManifest:
+    def _remove_superseded(self, superseded: list[str]) -> list[str]:
+        """Delete superseded builds one transaction each; stop at the first storage failure.
+
+        Runs after every activation, including one that changed nothing, so a removal that
+        was interrupted is retried by the next activation of any build. Returns the builds
+        still present.
+        """
+        for position, build_id in enumerate(superseded):
+            try:
+                with self._connect() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    delete_build(conn, build_id)
+            except IndexStorageError:
+                remaining = superseded[position:]
+                self._event("index_build_removal_pending", build_ids=remaining)
+                return remaining
+        return []
+
+    def _activate(self, conn: sqlite3.Connection, build_id: str) -> _Activation:
         row = conn.execute(
             "SELECT payload, active FROM manifests WHERE build_id = ? AND state = 'complete'",
             (build_id,),
@@ -430,24 +505,24 @@ class LocalIndex:
         manifest = LocalIndex._manifest(row)
         _require_evaluated(manifest)
         if manifest.active:
-            return manifest
+            return _Activation(manifest, False, _superseded(conn))
         previous = conn.execute("SELECT build_id FROM manifests WHERE active = 1").fetchone()
-        keep = {build_id, previous["build_id"] if previous else build_id}
+        predecessor = previous["build_id"] if previous else build_id
         conn.execute("UPDATE manifests SET active = 0 WHERE active = 1")
         conn.execute("UPDATE manifests SET active = 1 WHERE build_id = ?", (build_id,))
-        stale = [
-            row[0]
-            for row in conn.execute("SELECT build_id FROM manifests WHERE state = 'complete'")
-            if row[0] not in keep
-        ]
-        for identifier in stale:
-            delete_build(conn, identifier)
-        self._event(
-            "index_activated",
-            build_id=build_id,
-            release=manifest.release_version,
+        conn.execute(
+            "UPDATE manifests SET state = 'superseded' "
+            "WHERE state = 'complete' AND build_id NOT IN (?, ?)",
+            (build_id, predecessor),
         )
-        return replace(manifest, active=True)
+        return _Activation(replace(manifest, active=True), True, _superseded(conn))
+
+    def _announce_activation(self, manifest: IndexManifest, switched: bool) -> None:
+        """Called after the commit: a record of an activation that was rolled back would lie."""
+        if switched:
+            self._event(
+                "index_activated", build_id=manifest.build_id, release=manifest.release_version
+            )
 
     def rebuild(self, build_id: str, provider: EmbeddingProvider) -> IndexManifest:
         """Offline rebuild from stored payloads; explicit activation is a separate step."""
@@ -510,10 +585,18 @@ class LocalIndex:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if _sample_base_is_active(conn, base):
-                return self._activate(conn, build_id)
-            # Committed before the error is raised: the unreferenced snapshot is not kept.
-            delete_build(conn, build_id)
-        raise IndexStateError("The active index changed during sample indexing; retry the sample")
+                activation = self._activate(conn, build_id)
+            else:
+                # Committed before the error is raised: the unreferenced snapshot is not kept.
+                delete_build(conn, build_id)
+                activation = None
+        if activation is None:
+            raise IndexStateError(
+                "The active index changed during sample indexing; retry the sample"
+            )
+        self._announce_activation(activation.manifest, activation.switched)
+        self._remove_superseded(activation.superseded)
+        return activation.manifest
 
     @staticmethod
     def _sample_concepts(
@@ -600,6 +683,7 @@ class LocalIndex:
             conn.execute("BEGIN")
             manifest = _completed_manifest(conn, build_id)
             _require_searchable(manifest, provider)
+            self._require_revision(manifest, provider)
             hits, _ = _ranked_page(conn, manifest, provider, query, limit, mode)
             return hits, manifest
 
@@ -618,7 +702,34 @@ class LocalIndex:
                 requested_release or manifest.release_version, manifest.release_version
             )
         _require_searchable(manifest, provider)
+        self._require_revision(manifest, provider)
         return manifest
+
+    def _require_revision(self, manifest: IndexManifest, provider: EmbeddingProvider) -> None:
+        """Refuse a model revision other than the stored one; note a build that stores none."""
+        stored, runtime = manifest.embedding_revision, provider.revision
+        if stored is None:
+            self._note("index_model_revision_unknown", manifest, runtime_revision=runtime)
+        elif stored != runtime:
+            self._note(
+                "index_model_revision_mismatch",
+                manifest,
+                stored_revision=stored,
+                runtime_revision=runtime,
+            )
+            if runtime is None:
+                raise IndexModelRevisionError(
+                    f"Index model revision {stored} cannot be compared: "
+                    "the serving model revision cannot be determined"
+                )
+            raise IndexModelRevisionError(
+                f"Index model revision {stored} does not match the serving model revision {runtime}"
+            )
+
+    def _note(self, event: str, manifest: IndexManifest, **details: str | None) -> None:
+        if (event, manifest.build_id) not in self._noted:
+            self._noted.add((event, manifest.build_id))
+            self._event(event, build_id=manifest.build_id, **details)
 
 
 def _require_searchable(manifest: IndexManifest, provider: EmbeddingProvider) -> None:

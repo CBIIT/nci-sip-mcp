@@ -5,6 +5,11 @@ Merge releases follow included commit messages; squash releases follow the title
 
 Closes #
 
+## Release note
+
+For a `feat`, `fix`, `perf` or breaking change: the added `release-notes/<slug>.md` fragment
+(CONTRIBUTING.md, "Release notes"); otherwise "Not a releasing change".
+
 ## Acceptance outcomes
 
 The `acceptance/expected/fixture.json` diff grouped by test function, with before and after counts,

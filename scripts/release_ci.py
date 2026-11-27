@@ -43,9 +43,8 @@ def require_success(response: object, sha: str) -> None:
         raise ValueError("Newest CI run has not completed successfully")
 
 
-def main() -> int:
-    sha = sys.argv[1]
-    repository = os.environ["GITHUB_REPOSITORY"]
+def verify_ci(repository: str, sha: str) -> None:
+    """Raise ValueError unless the newest CI run of `sha` on main succeeded."""
     route = (
         f"repos/{repository}/actions/workflows/ci.yml/runs"
         f"?head_sha={sha}&branch=main&event=push&per_page=100"
@@ -55,12 +54,19 @@ def main() -> int:
             ["gh", "api", route],  # noqa: S607 - required runner tool
             stderr=subprocess.PIPE,
         )
-        require_success(json.loads(output), sha)
-    except (ValueError, subprocess.CalledProcessError) as error:
+    except subprocess.CalledProcessError as error:
         # Never print an upstream body, command output or credential.
-        reason = str(error) if isinstance(error, ValueError) else "CI API request failed"
+        raise ValueError("CI API request failed") from error
+    require_success(json.loads(output), sha)
+
+
+def main() -> int:
+    sha = sys.argv[1]
+    try:
+        verify_ci(os.environ["GITHUB_REPOSITORY"], sha)
+    except ValueError as error:
         print(
-            f"Release refused: {reason}. Require successful CI for this main SHA.", file=sys.stderr
+            f"Release refused: {error}. Require successful CI for this main SHA.", file=sys.stderr
         )
         return 1
     return 0

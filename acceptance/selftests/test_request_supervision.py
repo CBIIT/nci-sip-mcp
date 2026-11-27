@@ -2098,3 +2098,149 @@ def test_unrelated_body_group_keeps_observed_child_failure(tmp_path):
         assert type(leaves[1]) is RequestPolicyError and leaves[1].reason == "transport"
         assert child.returncode == FAILED_WORKER_EXIT
     assert owner.snapshot()["state"] == "failed"
+
+
+def final_errors_after_refused_heartbeat(owner, monkeypatch):
+    locked = threading.Event()
+    pulsed = threading.Event()
+    heartbeat = owner.run.heartbeat
+
+    def observed():
+        # Pulse only a heartbeat run under the held lock; the bounded waits are hang protection.
+        held = locked.wait(10)
+        try:
+            heartbeat()
+        finally:
+            if held:
+                pulsed.set()
+
+    monkeypatch.setattr(owner.run, "heartbeat", observed)
+    failure = None
+    try:
+        with (
+            owner,
+            closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as blocker,
+            blocker,
+        ):
+            try:
+                blocker.execute("BEGIN EXCLUSIVE")
+                locked.set()
+                assert pulsed.wait(10), "The observer never pulsed under the held lock"
+            finally:
+                locked.set()
+    except (RequestPolicyError, MemoryError, BaseExceptionGroup) as error:
+        failure = error
+    assert failure is not None
+    return failure.exceptions if isinstance(failure, BaseExceptionGroup) else (failure,)
+
+
+def test_heartbeat_refusal_reaches_the_final_failure_note(tmp_path, monkeypatch):
+    errors = final_errors_after_refused_heartbeat(supervisor(tmp_path), monkeypatch)
+    notes = [note for error in errors for note in getattr(error, "__notes__", ())]
+    prefix = "immediate ledger refusals: "
+    refusals = [note for note in notes if note.startswith(prefix)]
+    assert len(refusals) == 1, notes
+    note = refusals[0]
+    records, _, dropped = note.removeprefix(prefix).rpartition(" dropped=")
+    (record,) = json.loads(records)
+    assert (record["stage"], record["write"], record["caught"], dropped) == (
+        "begin",
+        True,
+        {"category": "sqlite", "sqlite_errorcode": 5, "sqlite_errorname": "SQLITE_BUSY"},
+        "0",
+    )
+
+
+def test_note_serialisation_failure_never_replaces_the_refusal(tmp_path, monkeypatch):
+    real_json = request_supervision.json
+
+    def dumps(value, *args, **kwargs):
+        if isinstance(value, list):
+            raise MemoryError("note allocation")
+        return real_json.dumps(value, *args, **kwargs)
+
+    monkeypatch.setattr(request_supervision, "json", SimpleNamespace(dumps=dumps))
+    errors = final_errors_after_refused_heartbeat(supervisor(tmp_path), monkeypatch)
+    refusals = [error for error in errors if isinstance(error, RequestPolicyError)]
+    assert [error.reason for error in refusals] == ["accounting"]
+    assert not any(isinstance(error, MemoryError) for error in errors)
+    notes = [note for error in refusals for note in error.__notes__]
+    (note,) = [note for note in notes if note.startswith("immediate ledger refusals: ")]
+    assert note.rpartition(" dropped=")[2] == "1", note
+
+
+def test_unreadable_refusal_ledger_never_replaces_the_refusal_and_is_reported(
+    tmp_path, monkeypatch
+):
+    owner = supervisor(tmp_path)
+
+    def unreadable():
+        raise MemoryError("snapshot copy")
+
+    monkeypatch.setattr(owner.run, "immediate_refusals", unreadable)
+    errors = final_errors_after_refused_heartbeat(owner, monkeypatch)
+    refusals = [error for error in errors if isinstance(error, RequestPolicyError)]
+    assert [error.reason for error in refusals] == ["accounting"]
+    notes = [note for error in refusals for note in error.__notes__]
+    assert "immediate ledger refusals: [] dropped=unknown" in notes
+
+
+class UnformattableCount(int):
+    def __format__(self, spec):
+        raise MemoryError("note formatting")
+
+
+def unreadable_refusals():
+    raise MemoryError("snapshot copy")
+
+
+def unformattable_refusals():
+    return {"records": [], "dropped": UnformattableCount(1)}
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [None, unreadable_refusals, unformattable_refusals],
+    ids=["note", "fallback", "format"],
+)
+def test_failing_note_sink_never_replaces_the_refusal(tmp_path, monkeypatch, snapshot):
+    owner = supervisor(tmp_path)
+    if snapshot is not None:
+        monkeypatch.setattr(owner.run, "immediate_refusals", snapshot)
+    add_note = RequestPolicyError.add_note
+
+    def sink(self, note):
+        if note.startswith("immediate ledger refusals: "):
+            raise MemoryError("note sink")
+        add_note(self, note)
+
+    monkeypatch.setattr(RequestPolicyError, "add_note", sink)
+    errors = final_errors_after_refused_heartbeat(owner, monkeypatch)
+    assert [type(error) for error in errors] == [RequestPolicyError]
+    assert errors[0].reason == "accounting"
+
+
+def test_dropped_only_loss_reaches_the_final_failure_note(tmp_path, monkeypatch):
+    class FullList(list):
+        def append(self, item):
+            raise MemoryError("record storage")
+
+    owner = supervisor(tmp_path)
+    monkeypatch.setattr(owner.run, "_refusals", FullList())
+    errors = final_errors_after_refused_heartbeat(owner, monkeypatch)
+    notes = [note for error in errors for note in getattr(error, "__notes__", ())]
+    assert "immediate ledger refusals: [] dropped=1" in notes
+
+
+class PrefixingError(RuntimeError):
+    def add_note(self, note):
+        super().add_note(f"caller: {note}")
+
+
+def test_caller_exception_gets_no_note_when_nothing_was_refused(tmp_path):
+    original = PrefixingError("caller failure")
+    original.add_note("existing")
+    with pytest.raises(PrefixingError) as failure, supervisor(tmp_path):
+        raise original
+    assert failure.value is original
+    assert failure.value.__notes__ == ["caller: existing"]

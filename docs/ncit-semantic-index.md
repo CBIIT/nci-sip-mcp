@@ -64,19 +64,50 @@ bakeoff. They establish neither superiority over alternatives nor clinical or sp
 Definitions provide additional indexed fields, but the model card's entity-name task does not
 by itself establish quality for arbitrary long definitions or downstream workflows.
 
-The actual [provider](../src/ncit_index/embeddings.py) constructs
-`SentenceTransformer(model_name)` and calls `encode` with `normalize_embeddings=True` and
+The actual [provider](../src/ncit_index/embeddings.py) loads a
+`SentenceTransformer` from the model directory or the cached Hub snapshot, found in the cache sentence-transformers
+downloads to (`SENTENCE_TRANSFORMERS_HOME` when set, else the Hugging Face hub cache; a cached
+snapshot is used as it is; refresh the cache to update the model, since only an empty cache downloads) and calls `encode` with `normalize_embeddings=True` and
 `show_progress_bar=False`, then converts the result to float32. Pooling, tokenization, truncation
 and inference batching are delegated to the loaded model/library; this wrapper specifies no
 CLS pooling or model-card example length. Do not copy those example settings into a description
 of the historical calibration without evidence that they were used.
 
-Runtime compatibility checks **provider, model name and dimensions**, not the recorded model
-revision or asset hashes. There is no model-revision CLI option in this procedure. A changed
-same-named model can therefore pass that identity check. Preserve the actual frozen model assets,
-revision, software versions and evaluation data externally when reproducing a run; the commands
-below alone do not provide a byte-reproducible model pin. Changing that enforcement is separate
-work, not a documentation feature.
+Runtime compatibility checks **provider, model name and dimensions**, and the model **revision**
+of every build that stores one: it is refused unless the serving revision is known and equal. A build records the commit of the model files that embedded it, read
+from the same cache (a Hub model's `snapshots/<commit>` folder; no download or Hub
+call is added for it). The cases:
+
+- Stored and runtime revisions known and equal: served.
+- Both known and different: search, evaluation and `/ready` refuse with an
+  `IndexModelRevisionError` naming both, and one `index_model_revision_mismatch` record per build
+  and process is logged. Serve the model files the build was embedded with, or run `index-rebuild`
+  with the serving model and activate its evaluated build.
+- Stored known, runtime unknown (a custom provider that cannot tell): refused the same way,
+  because the two cannot be compared.
+- Stored unknown (a build made before this check): served after the
+  checks above, and one `index_model_revision_unknown` record per build and process is logged. A
+  stored build is never backfilled; rebuild to record a revision. `index-builds` shows
+  `embedding_revision` (`null` when unknown). The hashing provider's revision names its algorithm.
+
+A model supplied as a directory is identified by its content: the revision is `sha256:` followed
+by the SHA-256 of the lines `<relative path>\0<file SHA-256 hex>\n` for every file. The path
+is relative to the directory (which may itself be a link), uses `/` as separator on every
+platform and has no leading `./`; the hex is lowercase; the lines are sorted as strings by code
+point, joined without separator and encoded as UTF-8 before hashing. A file link counts as the content of its target under the link's own path (a Hub
+snapshot folder of links into `blobs/` hashes like a copy); location and modification time do not
+count, a changed byte, a rename or an added file does. A directory link, a broken link, a special
+file or an empty directory is refused, naming the path. Copy a model directory unchanged: the
+path comparison is exact, including case. The hash covers the files as read once, when the
+provider is created (at build and at start-up), so the container serving `/model` refuses to start
+when the directory it finds then differs from the one the index was embedded with. The directory,
+including the targets of its links, must stay unchanged while a process runs: a later or
+concurrent change is not detected. On one proxy sample (the cached `all-mpnet-base-v2` snapshot,
+438.7 MB in 11 files, warm file cache, one machine; not the SapBERT model) hashing took about
+0.17 s; this is not an upper bound, since a cold cache or network storage can be slower. A build made before this check stores no
+revision and stays in the "stored unknown" case until it is rebuilt. Preserve the actual
+software versions and evaluation data externally when reproducing a run; the commands below
+alone do not provide a byte-reproducible model pin.
 
 ## How retrieval uses the fields
 
@@ -159,13 +190,20 @@ pdm run nci-sip-mcp index-builds
 
 Evaluation reads that candidate without activating it. Activation requires a passing report
 bound to its build/release/embedding identity and changes the active snapshot atomically.
-**Activation retains only the selected build and the former active build**, deleting other
-completed snapshots. Preserve needed evidence/backups before activation; do not assume every
-listed candidate will remain available. Verify search/readiness with the same embedding settings
+**Activation retains only the selected build and the former active build.** The other
+completed snapshots are hidden at once (they no longer appear in `index-builds` and cannot be
+activated) and deleted after the activation commits. A failed deletion never undoes the
+activation: after a storage failure while deleting, the result lists the builds still awaiting
+removal in `pendingRemoval`, the log carries a warning `index_build_removal_pending`, and their
+disk space stays in use until a later activation, for example `index-activate` of the already active build, removes them. A removal
+frees pages inside the SQLite file for reuse; the file itself does not shrink. Preserve
+needed evidence/backups before activation; do not assume every listed candidate will remain
+available. Verify search/readiness with the same embedding settings
 and intended release after activating; distribute matching assets separately to any serving replica.
 
 For rollback, set `PREVIOUS_BUILD_ID` to the retained predecessor, keep its matching embedding
-settings, and explicitly activate it:
+settings and model files (the revision check applies to a rollback too), and explicitly
+activate it:
 
 ```bash
 pdm run nci-sip-mcp index-activate "$PREVIOUS_BUILD_ID"
@@ -188,7 +226,8 @@ For an old developer sample, recreate it separately with `index-sample` instead.
 
 Legacy schema migration preserves cached lookup data, but old concatenated vectors require
 explicit rebuild before field search (`capability_unavailable`). Opening a database never
-re-embeds it. For the recorded SQLite page-layout experiment and conversion precautions, use
+re-embeds it. A migration on open logs `index_migration_started` and
+`index_migration_finished` (see [deployment](deployment.md)). For the recorded SQLite page-layout experiment and conversion precautions, use
 the [calibration reproduction notes](evaluation/ncit-v1-notes.md#reproducing-the-evidence).
 
 Recalibrate after model/release/field-policy or judgment changes; retain full per-query reports,

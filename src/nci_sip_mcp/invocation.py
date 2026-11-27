@@ -11,6 +11,7 @@ from ncit_index.errors import (
     IndexCompatibilityError,
     IndexCursorError,
     IndexEvaluationError,
+    IndexModelRevisionError,
     IndexReleaseError,
     IndexStateError,
     IndexStorageError,
@@ -95,6 +96,11 @@ _ERROR_CODES: dict[type[Exception], tuple[ErrorCode, str]] = {
     IndexStateError: (
         "internal_error",
         "Inspect `index-builds` and retry against an available completed build.",
+    ),
+    IndexModelRevisionError: (
+        "internal_error",
+        "Serve the model files this build was embedded with, or run `index-rebuild` with the "
+        "serving model and activate its evaluated build.",
     ),
     IndexCompatibilityError: (
         "internal_error",

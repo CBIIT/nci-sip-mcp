@@ -1,13 +1,11 @@
 import asyncio
 import base64
 import hashlib
-import io
 import json
 import logging
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from threading import Barrier
@@ -19,8 +17,8 @@ import yaml
 from mcp.types import JSONRPCMessage
 from pydantic import TypeAdapter
 
-from fakes import FakeSSIS, catalogue_rows, concept
-from nci_sip_mcp.audit import JsonFormatter, audited, compact, emit, hashed, secrets
+from fakes import FakeSSIS, captured, catalogue_rows, concept, records
+from nci_sip_mcp.audit import audited, compact, emit, hashed, secrets
 from nci_sip_mcp.bounds import Budget, RequestBudgetError, budgeted
 from nci_sip_mcp.config import Settings, configure_logging
 from nci_sip_mcp.context import Context
@@ -36,34 +34,9 @@ from test_index import normalized
 from test_server import ServerFixture, pinned
 
 
-@contextmanager
-def captured():
-    """Capture actual JSON records through the production formatter."""
-
-    stream = io.StringIO()
-    handler = logging.StreamHandler(stream)
-    handler.setFormatter(JsonFormatter())
-    logger = logging.getLogger("nci_sip_mcp")
-    level, disabled = logger.level, logging.root.manager.disable
-    logger.addHandler(handler)
-    logger.setLevel(logging.DEBUG)
-    logging.disable(logging.NOTSET)
-    try:
-        yield stream
-    finally:
-        logger.removeHandler(handler)
-        logger.setLevel(level)
-        logging.disable(disabled)
-
-
 def digest(value):
     encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(encoded.encode()).hexdigest()
-
-
-def records(stream, event="call_completed"):
-    found = [json.loads(line) for line in stream.getvalue().splitlines()]
-    return [record for record in found if record["event"] == event]
 
 
 class AuditRecordTest(unittest.TestCase):

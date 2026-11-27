@@ -91,6 +91,11 @@ fails closed. A refusal
 latches the `failed` marker holding exactly its reason; a sibling `failed.detail` records a closed
 category (`sqlite` or `other`) and, for SQLite, a validated error code and name. It is never read
 on a fail-closed path, and the supervisor's final failure prints it as a note.
+The run object that refused also keeps up to eight closed-vocabulary records of the exception
+its connection boundary caught (stage, write, timeout, elapsed time including the closure attempt,
+the caught exception and its immediate context, the raising function) and a count of any dropped;
+the final failure prints them as a second note. Refusals in child processes or other attached
+instances stay unknown.
 
 Controlled transport normalizes expected failures without retaining raw exception chains,
 including TLS certificate details. Cleanup failures retain sanitized initiating and cleanup

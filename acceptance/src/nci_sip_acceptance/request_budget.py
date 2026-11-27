@@ -9,6 +9,7 @@ import math
 import os
 import re
 import sqlite3
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -76,6 +77,57 @@ def _failure_detail(cause: BaseException | None) -> FailureDetail:
         if type(code) is int and code in SQLITE_NAMES and SQLITE_NAMES[code] == name:
             detail["sqlite_errorcode"], detail["sqlite_errorname"] = code, SQLITE_NAMES[code]
     return detail
+
+
+# Where a connection refusal was caught: before `sqlite3.connect`, before BEGIN, inside the
+# identity check, inside the caller's body, after the body returned (the transaction exit
+# commits or rolls back), or not attributable because the exit may have replaced the body's error.
+Stage = Literal["connect", "begin", "identity", "body", "transaction-exit", "unknown"]
+
+# A refusal is rare: the retained evidence shows one to three per run. Eight leaves margin and
+# bounds memory; re-measure when a run retains more. Overflow is counted, never silent.
+MAX_IMMEDIATE_REFUSALS = 8
+
+
+class ImmediateRefusal(TypedDict):
+    """The exception caught at the connection boundary, apart from the shared first failure."""
+
+    stage: Stage
+    write: bool
+    caught: FailureDetail
+    # The timeout passed to SQLite; 0 when the clock was unreadable or the deadline had passed.
+    timeout_s: NotRequired[float]
+    # From the start read to after the closure attempt, so it includes that attempt.
+    elapsed_with_closure_s: NotRequired[float]
+    # The caught exception's own `__context__`, one level only.
+    context: NotRequired[FailureDetail]
+    # The innermost function of this module on the traceback.
+    raised_in: NotRequired[str]
+
+
+class ImmediateRefusals(TypedDict):
+    records: list[ImmediateRefusal]
+    dropped: int
+
+
+_MODULE_FILE = _failure_detail.__code__.co_filename
+
+
+def _raised_in(error: BaseException) -> str | None:
+    site = None
+    frame = error.__traceback__
+    while frame is not None:
+        if frame.tb_frame.f_code.co_filename == _MODULE_FILE:
+            site = frame.tb_frame.f_code.co_name
+        frame = frame.tb_next
+    return site
+
+
+def _stage_of(stage: Stage, error: BaseException) -> Stage:
+    # The transaction exit may have replaced the body's error, which then survives as context.
+    if stage == "body" and isinstance(error, sqlite3.Error | OSError) and error.__context__:
+        return "unknown"
+    return stage
 
 
 def _validated_detail(value: object) -> FailureDetail | None:
@@ -151,6 +203,9 @@ class ControlledRun:
             str, tuple[PolicyReason, BaseException | None, BaseException | None]
         ] = {}
         self._marker_failure: BaseException | None = None
+        self._refusals: list[ImmediateRefusal] = []
+        self._refusals_dropped = 0
+        self._refusals_lock = threading.Lock()
 
     @classmethod
     def create(cls, authorization: Authorization, owned_directory: Path) -> Self:
@@ -347,28 +402,102 @@ class ControlledRun:
     @contextmanager
     def _connection(self, *, write: bool = True) -> Iterator[sqlite3.Connection]:
         connection = None
+        stage: Stage = "connect"
+        began: float | None = None
+        timeout: float | None = None
         try:
             try:
-                remaining = self.started + self.authorization.limits.seconds - _clock()
+                began = _clock()
+                remaining = self.started + self.authorization.limits.seconds - began
             except RequestPolicyError:
                 # Close admission, but allow identity-valid receipts without waiting.
                 self._mark_failed("accounting")
                 remaining = 0.0
+            timeout = max(0, min(BUSY_SECONDS, remaining))
             connection = sqlite3.connect(
-                (self.directory / "ledger.sqlite").as_uri() + "?mode=rw",
-                uri=True,
-                timeout=max(0, min(BUSY_SECONDS, remaining)),
+                (self.directory / "ledger.sqlite").as_uri() + "?mode=rw", uri=True, timeout=timeout
             )
             connection.row_factory = sqlite3.Row
             with connection:
+                stage = "begin"
                 connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+                stage = "identity"
                 self._identity(connection)
+                stage = "body"
                 yield connection
+                stage = "transaction-exit"
         except (sqlite3.Error, OSError, ValueError, TypeError, OverflowError) as error:
-            self._deny("accounting", cause=error)
+            self._refuse_connection(error, stage, write, timeout, began)
         finally:
             if connection is not None:
                 connection.close()
+
+    def _refuse_connection(
+        self,
+        error: BaseException,
+        stage: Stage,
+        write: bool,
+        timeout: float | None,
+        began: float | None,
+    ) -> NoReturn:
+        # Close first: the record is built only once the marker and detail are latched.
+        try:
+            self._deny("accounting", cause=error)
+        except RequestPolicyError:
+            self._remember_refusal(error, stage, write, timeout, began)
+            raise
+
+    def _remember_refusal(
+        self,
+        error: BaseException,
+        stage: Stage,
+        write: bool,
+        timeout: float | None,
+        began: float | None,
+    ) -> None:
+        try:
+            record = self._immediate_record(error, stage, write, timeout, began)
+        except Exception:  # noqa: BLE001 - a failed diagnostic must never replace the refusal; it is counted.
+            record = None
+        with self._refusals_lock:
+            stored = False
+            if record is not None and len(self._refusals) < MAX_IMMEDIATE_REFUSALS:
+                with suppress(
+                    Exception
+                ):  # Storage is diagnostic too: a failure is counted as loss.
+                    self._refusals.append(record)
+                    stored = True
+            if not stored:
+                self._refusals_dropped += 1
+
+    def _immediate_record(
+        self,
+        error: BaseException,
+        stage: Stage,
+        write: bool,
+        timeout: float | None,
+        began: float | None,
+    ) -> ImmediateRefusal:
+        record: ImmediateRefusal = {
+            "stage": _stage_of(stage, error),
+            "write": write,
+            "caught": _failure_detail(error),
+        }
+        if timeout is not None:
+            record["timeout_s"] = float(timeout)
+        if began is not None:
+            with suppress(RequestPolicyError):
+                record["elapsed_with_closure_s"] = _clock() - began
+        if error.__context__ is not None:
+            record["context"] = _failure_detail(error.__context__)
+        if (site := _raised_in(error)) is not None:
+            record["raised_in"] = site
+        return record
+
+    def immediate_refusals(self) -> ImmediateRefusals:
+        """The refusals caught by this instance's connection boundary, and how many were lost."""
+        with self._refusals_lock:
+            return {"records": list(self._refusals), "dropped": self._refusals_dropped}
 
     def _mark_failed(
         self,

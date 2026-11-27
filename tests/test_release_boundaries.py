@@ -1,8 +1,8 @@
 """Explicit release selection also works without adapter telemetry."""
 
+from fakes import captured, records
 from nci_sip_mcp.audit import audited
 from nci_sip_mcp.release_selection import select
-from test_audit import captured, records
 from test_server import ServerFixture
 
 

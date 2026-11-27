@@ -123,6 +123,24 @@ unit remains serial. Any baseline failure names its domain and fails the run. Th
 `baseline_domains` records freshly computed domain outcomes and seconds; imported PR-CI runs leave
 that list empty. Do not use the unselected local command to launch a second full catalogue.
 
+**Allowlist preflight.** `pdm run mutation-gate --base <B> --head <B>` (the same commit twice)
+validates `scripts/validation/mutation-allowlist.yaml` against the working tree with the gate's own
+validator and stops there: the diff is empty, so it runs no baseline and no mutant (once measured at
+about 14 s on one machine, not a promised cost). Exit 0 with `{"outcome": "EMPTY", ...}` means every
+entry still matches exactly one current candidate; exit 2 with an `INFRA` record names the first
+stale, duplicate or ambiguous entry. It is a recommended early diagnostic, for example before the
+pre-PR sample or when a change touches an allowlisted function, the allowlist itself, or the gate's
+candidate generation; it is not a required gate. Two different EMPTY results exist and are recorded
+separately. This preflight's EMPTY comes from an artificial empty diff and only says the allowlist
+and the source agree; it is never the source-bound selection of a candidate. The selection record
+for the pre-PR review comes from the real base and head of that candidate (for a milestone, against
+`main`), with those SHAs frozen. An issue compared against its milestone branch does not replace it.
+The preflight does not show that any mutant is equivalent. For a failing entry: re-key it only when
+the same intended mutation is still equivalent after the source change; remove it, with review, when
+the site is gone or the exemption is obsolete; when behaviour changed, the old reason cannot move to a
+new key and needs a fresh equivalence review. A test that drove the real working-tree allowlist could
+also catch this, but the preflight reuses the existing command and needs no new code.
+
 Ordinary `pdm run test` stores combined coverage in `tmp/coverage/unit/.coverage`;
 `pdm run acceptance-selftest` uses `tmp/coverage/harness/.coverage`. PDM supplies the required
 absolute root so children and xdist workers share their command's scratch destination even
@@ -365,6 +383,26 @@ native run/cancel forms. The worker is controlled in the browser tests; separate
 tests exercise real worker termination. See the
 [assurance record](docs/government-site-assurance.md#automated-browser-regression-journeys)
 for setup commands, manual checks and limitations.
+
+The migrated real-PDM tests (the mutation gate and coverage, the dependency audit's real export,
+the locked-release dry-run and the acceptance `run_expected`) launch through `pdm_run` and
+`pdm_command` in `test_support/pdm_launch.py`, which both pytest configurations reach through
+`pythonpath`; it is test-only: the root source distribution carries it with the tests that import
+it, and no wheel carries either. The launch selects an owned project (a copy of the
+checkout's `pyproject.toml` whose `.pdm-python` names the interpreter; the running one unless a
+test binds another), an allowlisted environment (the coverage keys a nested baseline needs are
+listed in `INHERITED`) and owned PDM configuration and cache, so an inherited `PDM_PROJECT`,
+`PDM_PYTHON`, `VIRTUAL_ENV` or configuration cannot redirect it to the suite's own project. The
+project selector `--project` follows the subcommand, never the forwarded arguments. The audit
+test's shell wrapper adds it before forwarding the workflow's `pdm export` arguments. The launch
+runs the absolute `pdm` found on the child's PATH, and on a timeout ends the process group it
+created, addressed by that process only: a descendant that leaves the group (a new session or
+`setpgid`) is not reached. For each launch it writes the argv, directory, project, interpreter
+identity, UTC times, outcome and captured output, never the environment, to stderr. With
+`junit_logging = "system-err"` in `pyproject.toml` and `acceptance/pyproject.toml`, the unit and
+self-test JUnit XML keep that text for a failing test (`tests/test_pdm_isolation.py` and
+`acceptance/selftests/test_pdm_evidence.py` run each configuration to show it). The
+dependency-update tests launch no PDM: they assert the argv of a patched `pdm lock`.
 
 Coverage includes lines, branches and Python subprocesses for the server and harness suites.
 It identifies execution gaps, not missing assertions: use a targeted mutation when an
@@ -729,6 +767,46 @@ A scope is optional, in lower case: `fix(index): …`. Choose the included commi
 care, and make the PR title reflect their client impact. Mark a breaking change with `!` in
 the relevant commit subject and PR title. Do not edit the selected title or add a body in the
 merge dialog.
+
+### Release notes
+
+Every pull request that can release (`feat`, `fix`, `perf` or a breaking `!` commit) adds one
+fragment, `release-notes/<slug>.md`, in plain prose and with exactly these headings, each
+non-empty (no HTML comments; the container-image marker belongs to the image job):
+
+```markdown
+# One-line title
+
+## Changes for users
+## Upgrade
+## Security
+```
+
+A fragment may contain only those heading lines: a line that begins with one to six `#` followed
+by whitespace or the end of the line counts as a heading, **also inside a fenced code example**,
+and the fragment is rejected. A `#` later in a line (`100% # not a heading`) is not a heading. Put
+shell comments and Markdown samples in prose, or indent the line.
+
+`## Upgrade` gives the actions a client must take, or "No action required."; `## Security`
+says "No security fixes in this release." or names the advisory or CVE identifiers. The release
+body is the fragments added since the last release tag, in path order, then semantic-release's
+generated change list collapsed in a `<details>` block. A fragment is identified by its
+committed path; edit it in place, and rename it freely before release (a rename of an already
+released fragment is never pending again). Check that the fragments cover every
+client-impacting change of the release range: that review is human, and no check proves it.
+
+`scripts/release_notes.py prepare` runs in the Release workflow before the tool: it checks every
+fragment in the tree, asks the tool whether a release is due, and, if one is, fails before any tag
+when no valid fragment is pending. The `Release notes preview` workflow shows the body a pull
+request would produce, with read-only permissions. If the tag exists but its GitHub release does
+not, check the tag out in a clean clone and run
+`pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>`: it verifies the
+tag, the commit, the remote tag of the named repository and its successful main CI run, refuses
+when a release exists or the lookup is anything but a clear HTTP 404, and creates only the missing
+release, in that repository, with the original body and the tag's own date (rendered by running semantic-release 10.7.0 with its
+clock at that date, a version-specific dependency that the `test_the_original_tag_date_is_kept_in_the_recovered_body`
+test guards and that a semantic-release upgrade must re-verify). The image retry still
+requires the tag to be main's tip.
 
 Review the exact PDM (including its bootstrap hishel, unearth and virtualenv constraints), Ruff,
 basedpyright, Zensical and python-semantic-release tool pins monthly,

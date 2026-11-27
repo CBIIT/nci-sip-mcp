@@ -1,6 +1,7 @@
 """Forms and CRDC maps against contract-crafted HTTP responses."""
 
 import json
+import sys
 from urllib.parse import parse_qs, urlsplit
 
 from fakes import code_map, form
@@ -76,6 +77,20 @@ class FormsTest(CaDSRFixture):
             with self.subTest(response=response):
                 result = self.call(self.serve(response), "get_form", publicId="123")
                 self.assertEqual(result["error"]["code"], "upstream_unavailable")
+
+    def test_a_form_body_with_an_integer_beyond_the_json_digit_limit_is_an_upstream_failure(self):
+        self.addCleanup(sys.set_int_max_str_digits, sys.get_int_max_str_digits())
+        sys.set_int_max_str_digits(1000)  # below the 5,000-digit payload, whatever the default
+        server = self.serve(Reply(200, b"1" * 5000))
+
+        try:
+            result = self.call(server, "get_form", publicId="123")
+        except ValueError as error:
+            result = {"error": {"code": type(error).__name__}}
+
+        self.assertEqual(result["error"]["code"], "upstream_unavailable")
+        self.assertIn("invalid JSON", result["error"]["message"])
+        self.assertEqual(len(server.seen), 1)
 
     def test_identical_form_error_from_another_operation_is_not_reinterpreted(self):
         result = self.call(
