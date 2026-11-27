@@ -19,6 +19,7 @@ from typing import ClassVar
 from unittest.mock import patch
 
 import yaml
+from pdm_launch import pdm_run
 from scripts.processes import stop, wait_until
 from scripts.validation import mutation_gate
 from scripts.validation import mutation_run as runner
@@ -32,8 +33,6 @@ from scripts.validation.mutation_source import (
     fingerprint_dump,
     scope,
 )
-
-from fakes import pdm_run
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORDED_WAIT_SOURCE = """class StdioOwner:
@@ -1770,7 +1769,7 @@ class MutationExecutionTest(unittest.TestCase):
             (root / "pyproject.toml").write_text(
                 '[project]\nname = "mapping-contract"\nversion = "0.0.0"\n'
                 'requires-python = ">=3.14"\n'
-                '[tool.pytest.ini_options]\npythonpath = ["src"]\n'
+                '[tool.pytest.ini_options]\npythonpath = ["src", "test_support"]\n'
                 '[tool.pdm.scripts]\nmutation-gate = "python -m scripts.validation.mutation_gate"\n'
             )
             (root / ".pdm-python").write_text(sys.executable)
@@ -1791,7 +1790,8 @@ class MutationExecutionTest(unittest.TestCase):
                 .read_text()
                 .split("class MutationOperatorsTest")[0]
             )
-            shutil.copy(ROOT / "tests/fakes.py", root / "tests/fakes.py")
+            (root / "test_support").mkdir()
+            shutil.copy(ROOT / "test_support/pdm_launch.py", root / "test_support/pdm_launch.py")
             shutil.copytree(ROOT / "scripts", root / "scripts")
             # This tiny independent project owns no reviewed production equivalents.
             (root / "allow.yaml").write_text("[]\n")

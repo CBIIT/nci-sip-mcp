@@ -384,20 +384,25 @@ tests exercise real worker termination. See the
 [assurance record](docs/government-site-assurance.md#automated-browser-regression-journeys)
 for setup commands, manual checks and limitations.
 
-The mutation-gate and mutation-coverage tests launch their real `pdm run` through `pdm_run` in
-`tests/fakes.py`; other real-PDM tests (dependency audit, locked release and the acceptance
-self-test `run_expected`) do not yet, and are tracked in #633. The launch selects an owned
-project (a copy of the checkout's `pyproject.toml` whose `.pdm-python` names the running
-interpreter, which the launch does not manage), an allowlisted environment (the coverage keys a
-nested baseline needs are listed in `INHERITED`) and owned PDM configuration and cache, so an
-inherited `PDM_PROJECT`, `PDM_PYTHON`, `VIRTUAL_ENV` or configuration cannot redirect it to the
-suite's own project. It runs the absolute `pdm` found on the child's PATH, and on a timeout ends
-the process group it created, addressed by that process only: a descendant that leaves the group
-(a new session or `setpgid`) is not reached. For each launch it writes the argv, directory,
-project, interpreter identity, UTC times, outcome and captured output, never the environment, to stderr. With
-`junit_logging = "system-err"` in `pyproject.toml`, the unit suite's JUnit XML keeps that text
-for a failing test (`tests/test_pdm_isolation.py` runs the project's own pytest flags to show
-it); the acceptance harness's own configuration is unchanged.
+The real-PDM tests (the mutation gate and coverage, the dependency audit's real export, the
+locked-release dry-run and the acceptance `run_expected`) launch through `pdm_run` and
+`pdm_command` in `test_support/pdm_launch.py`, which both pytest configurations reach through
+`pythonpath`; it is test-only: the root source distribution carries it with the tests that import
+it, and no wheel carries either. The launch selects an owned project (a copy of the
+checkout's `pyproject.toml` whose `.pdm-python` names the interpreter; the running one unless a
+test binds another), an allowlisted environment (the coverage keys a nested baseline needs are
+listed in `INHERITED`) and owned PDM configuration and cache, so an inherited `PDM_PROJECT`,
+`PDM_PYTHON`, `VIRTUAL_ENV` or configuration cannot redirect it to the suite's own project. The
+project selector `--project` follows the subcommand, never the forwarded arguments. The audit
+test's shell wrapper adds it before forwarding the workflow's `pdm export` arguments. The launch
+runs the absolute `pdm` found on the child's PATH, and on a timeout ends the process group it
+created, addressed by that process only: a descendant that leaves the group (a new session or
+`setpgid`) is not reached. For each launch it writes the argv, directory, project, interpreter
+identity, UTC times, outcome and captured output, never the environment, to stderr. With
+`junit_logging = "system-err"` in `pyproject.toml` and `acceptance/pyproject.toml`, the unit and
+self-test JUnit XML keep that text for a failing test (`tests/test_pdm_isolation.py` and
+`acceptance/selftests/test_pdm_evidence.py` run each configuration to show it). The
+dependency-update tests launch no PDM: they assert the argv of a patched `pdm lock`.
 
 Coverage includes lines, branches and Python subprocesses for the server and harness suites.
 It identifies execution gaps, not missing assertions: use a targeted mutation when an
