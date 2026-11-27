@@ -11,9 +11,11 @@ import venv
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import tomli_w
 import yaml
+from pdm_stand_in import changed, hostile_selectors, outer_stand_in, tree
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / ".github/workflows/release.yml"
@@ -467,6 +469,18 @@ class LockedReleaseCliTest(unittest.TestCase):
                 )
 
     def test_release_sync_selects_no_project_or_unrelated_groups(self):
+        self.assert_dry_run_selects_only_the_release_group()
+
+    def test_release_dry_run_ignores_inherited_pdm_selectors(self):
+        with TemporaryDirectory() as directory:
+            outer = outer_stand_in(Path(directory).resolve())
+            before = tree(outer)
+            with patch.dict(os.environ, hostile_selectors(outer)):
+                os.environ.pop("PDM_IGNORE_ACTIVE_VENV", None)
+                self.assert_dry_run_selects_only_the_release_group()
+            self.assertEqual(changed(before, tree(outer)), {})
+
+    def assert_dry_run_selects_only_the_release_group(self):
         setup = yaml.safe_load((ROOT / ".github/actions/setup/action.yml").read_text())
         command = setup["runs"]["steps"][-1]["run"].splitlines()[-1].split()
         with TemporaryDirectory() as directory:

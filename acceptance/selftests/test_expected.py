@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pdm_stand_in import changed, hostile_selectors, outer_stand_in, tree
 
 from nci_sip_acceptance.expected import (
     ABSENT_FROM_EXPECTED,
@@ -82,6 +83,24 @@ def run_expected(arguments):
         text=True,
         capture_output=True,
         check=False,
+    )
+
+
+def test_the_entry_point_ignores_inherited_pdm_selectors(files, tmp_path, monkeypatch):
+    arguments = files({"t.py::a": "passed"}, {"t.py::a": "passed"})
+    outer = outer_stand_in(tmp_path)
+    before = tree(outer)
+    for name, value in hostile_selectors(outer).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("PDM_IGNORE_ACTIVE_VENV", raising=False)
+
+    ran = run_expected(arguments)
+
+    assert changed(before, tree(outer)) == {}, ran.stderr
+    assert (ran.returncode, ran.stdout, ran.stderr) == (
+        0,
+        "All 1 tests have the outcome expected.\n",
+        "",
     )
 
 

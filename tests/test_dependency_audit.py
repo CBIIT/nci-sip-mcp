@@ -15,6 +15,7 @@ from unittest.mock import patch
 import yaml
 from packaging.utils import canonicalize_name
 from packaging.version import Version
+from pdm_stand_in import changed, hostile_selectors, outer_stand_in, tree
 from pip_audit._cli import audit
 from pip_audit._service.interface import Dependency, VulnerabilityID, VulnerabilityResult
 
@@ -109,18 +110,36 @@ class OfflineAdvisories:
 
 
 class DependencyAuditInputTest(unittest.TestCase):
-    def test_every_external_locked_version_reaches_the_real_auditor(self):
+    def locked_inventory(self):
         packages = tomllib.loads((ROOT / "pdm.lock").read_text())["package"]
         local = [package for package in packages if "path" in package]
         self.assertEqual(
             [(p["name"], p["path"], p.get("editable")) for p in local],
             [("nci-sip-acceptance", "./acceptance", True)],
         )
-        expected = {
+        return {
             (canonicalize_name(package["name"]), package["version"])
             for package in packages
             if "path" not in package
         }
+
+    def test_real_export_ignores_inherited_pdm_selectors(self):
+        with TemporaryDirectory() as directory:
+            outer = outer_stand_in(Path(directory).resolve())
+            before = tree(outer)
+            with patch.dict(os.environ, hostile_selectors(outer)):
+                os.environ.pop("PDM_IGNORE_ACTIVE_VENV", None)
+                result, _requirements, _ = execute_audit(mode="real")
+            self.assertEqual(changed(before, tree(outer)), {}, result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            actual = {
+                (canonicalize_name(dependency["name"]), dependency["version"])
+                for dependency in json.loads(result.stdout)["dependencies"]
+            }
+            self.assertEqual(actual, self.locked_inventory())
+
+    def test_every_external_locked_version_reaches_the_real_auditor(self):
+        expected = self.locked_inventory()
 
         result, requirements, _ = execute_audit(mode="real")
 
