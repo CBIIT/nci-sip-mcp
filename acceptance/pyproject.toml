@@ -29,6 +29,8 @@ fallback_version = "0.0.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The launcher shared with the unit tests: test-only, outside every wheel.
+pythonpath = ["../test_support"]
 markers = [
     "mcp_session: use a handshake session for remote session-retention assertions",
     "tool(name): the required tool the test is for, in the per-tool report",
