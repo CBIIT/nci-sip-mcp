@@ -1184,10 +1184,15 @@ def test_later_marker_publication_keeps_earlier_local_latch(tmp_path, monkeypatc
         with owner:
             with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as lock:
                 if reason == "accounting":
+                    assert owner.run.snapshot().state == "open"
                     lock.execute("BEGIN IMMEDIATE")
                 try:
                     with pytest.raises(RequestPolicyError) as inner:
-                        owner.run.check_wait(delay)
+                        if reason == "accounting":
+                            with owner.run.logical(owner.run.authorization.grants[0]):
+                                pass
+                        else:
+                            owner.run.check_wait(delay)
                 finally:
                     lock.rollback()
             assert inner.value.reason == "accounting"
@@ -1702,7 +1707,8 @@ def test_competing_failure_writes_the_detail_of_the_first_latched_cause(tmp_path
                 pytest.raises(RequestPolicyError) as inner,
             ):
                 blocker.execute("BEGIN IMMEDIATE")
-                run.check_wait(0)
+                with run.logical(run.authorization.grants[0]):
+                    pass
             assert inner.value.reason == "accounting"
         finally:
             release.set()
