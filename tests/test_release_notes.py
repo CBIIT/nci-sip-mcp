@@ -480,6 +480,12 @@ class ReleaseNotesFlowTest(unittest.TestCase):
         self.assertEqual(project.git("ls-files", ".release-notes"), "")
 
 
+TAG_ONLY_COMMAND = [
+    "pdm", "run", "semantic-release", "-c", CONFIG, "-v", "version", "--no-commit", "--tag",
+    "--push", "--no-changelog", "--no-vcs-release", "--skip-build",
+]  # fmt: skip
+
+
 def workflow_version_command():
     """The release job's exact semantic-release argv, as the workflow writes it."""
     workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text("utf-8"))
@@ -489,7 +495,12 @@ def workflow_version_command():
 
 class WorkflowVersionCommandTest(unittest.TestCase):
     def test_the_workflow_command_pushes_the_tag_and_reports_it_without_a_github_release(self):
-        """Real semantic-release pushes to a local bare remote; no token, no GitHub call."""
+        """Real semantic-release tags and pushes to a local bare remote, with no token.
+
+        The complete tag-only command is asserted before launch: a command that still asks
+        the tool to create the GitHub release would otherwise reach the GitHub API directly,
+        which the gh stub cannot see.
+        """
         project = Scratch(self)
         bare = Path(project.directory.name) / "remote.git"
         project.git("init", "-q", "--bare", str(bare))
@@ -498,7 +509,7 @@ class WorkflowVersionCommandTest(unittest.TestCase):
         self.assertEqual(project.notes_tool("prepare").returncode, 0)
         project.output.unlink(missing_ok=True)
         command = workflow_version_command()
-        self.assertEqual(command[:3], ["pdm", "run", "semantic-release"])
+        self.assertEqual(command, TAG_ONLY_COMMAND)
         released = project.run(sys.executable, "-m", "semantic_release", *command[3:])
         self.assertEqual(released.returncode, 0, released.stderr)
         outputs = dict(
