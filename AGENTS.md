@@ -343,6 +343,16 @@ those kinds, without overlapping intervals or retrospective precision.
       sample timing/outliers and the projection in the issue when a sample exists. This pre-PR
       review does not establish a mutation verdict or review PR-CI raw evidence.
 
+      An owner-granted local timing-sample exception is rebound to a new exact head without
+      asking the owner again only when the head changed solely through reviewer-requested or
+      reviewer-approved corrections within the same issue or milestone scope. Before the push,
+      record the old and new H, B, the actual source-bound selection and its keys, the measured
+      size, the correction or review reference and the original exception. The rebinding covers
+      only that local timing-sample exception: not code approval, gate waivers, mutation results,
+      CI retries or merge clearance, and not a changed base, toolchain or scope, a first exception
+      for another issue or milestone, or a size above the accepted figure. New-head evidence and
+      exact-head clearance stay required.
+
       The existing PR-CI mutation job is the one campaign over the full changed-site catalogue for a frozen candidate;
       do not run a second full catalogue locally or as reviewer. Once that campaign exists,
       independently review its raw results and retain their exact provenance
