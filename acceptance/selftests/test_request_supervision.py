@@ -510,38 +510,6 @@ def test_failed_initial_publication_never_admits_work(tmp_path, monkeypatch):
     assert not (owner.run.directory / "summary.json").exists()
 
 
-def test_stale_owner_cannot_revive_admission(tmp_path, monkeypatch):
-    owner = supervisor(tmp_path)
-    with pytest.raises(RequestPolicyError), owner:
-        now = request_budget._clock()
-        with monkeypatch.context() as clock:
-            clock.setattr(request_budget, "_clock", lambda: now + 3)
-            with pytest.raises(RequestPolicyError):
-                owner.run.check_wait(0)
-        with pytest.raises(RequestPolicyError):
-            owner.run.check_wait(0)
-    assert json.loads((owner.run.directory / "summary.json").read_text())["state"] == "failed"
-
-
-@pytest.mark.parametrize("elapsed", [0, 1.5, 2])
-def test_heartbeat_refresh_preserves_inclusive_freshness_window(tmp_path, monkeypatch, elapsed):
-    owner = supervisor(tmp_path)
-    with owner:
-        now = request_budget._clock()
-        with monkeypatch.context() as clock:
-            clock.setattr(request_budget, "_clock", lambda: now + 1)
-            owner.run.heartbeat()
-            clock.setattr(request_budget, "_clock", lambda: now + 1 + elapsed)
-            refused = False
-            try:
-                with owner.run.logical(authorization().grants[0]):
-                    pass
-            except RequestPolicyError:
-                refused = True
-            assert refused is False
-            assert owner.run.snapshot().logical == 1
-
-
 def test_terminal_refusal_cannot_publish_completed(tmp_path):
     owner = supervisor(tmp_path)
     with pytest.raises(RequestPolicyError), owner, pytest.raises(RequestPolicyError):
@@ -1838,24 +1806,6 @@ def test_matching_identity_cannot_hide_invalid_supervision(tmp_path, enabled, he
     with pytest.raises(RequestPolicyError) as failure:
         run.snapshot()
     assert failure.value.reason == "accounting"
-
-
-def test_future_heartbeat_refuses_admission(tmp_path, monkeypatch):
-    owner = supervisor(tmp_path)
-    with pytest.raises(RequestPolicyError) as outer, owner:
-        now = request_budget._clock()
-        with monkeypatch.context() as clock:
-            clock.setattr(request_budget, "_clock", lambda: now + 1)
-            owner.run.heartbeat()
-            clock.setattr(request_budget, "_clock", lambda: now + 0.5)
-            with (
-                pytest.raises(RequestPolicyError) as failure,
-                owner.run.logical(authorization().grants[0]),
-            ):
-                pytest.fail("Future heartbeat authorized a logical request")
-            assert failure.value.reason == "accounting"
-    assert outer.value.reason == "accounting"
-    assert owner.run.snapshot().logical == 0
 
 
 @pytest.mark.parametrize("fault", ["nonowner", "enabled", "open", "closed", "failed"])

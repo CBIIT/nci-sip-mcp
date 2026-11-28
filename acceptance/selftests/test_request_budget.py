@@ -43,6 +43,7 @@ from nci_sip_acceptance.request_budget import (
     ControlledRun,
     LedgerSnapshot,
 )
+from nci_sip_acceptance.request_summary import project, publish
 from nci_sip_mcp.http_client import RequestPolicyError
 
 # This explicit local consumer exercises shared accounting through the real HttpClient.
@@ -1051,6 +1052,54 @@ def test_finite_monotonic_origins_are_supported(tmp_path, monkeypatch, clock):
             assert (snapshot.state, snapshot.logical, snapshot.attempts) == ("open", 0, 0)
         finally:
             run.close()
+
+
+@pytest.mark.parametrize(
+    ("now", "admitted"),
+    [(1001.0, True), (1002.5, True), (1003.0, True), (1003.5, False), (1000.5, False)],
+)
+def test_supervision_freshness_at_the_ledger_boundary(tmp_path, monkeypatch, now, admitted):
+    """A supervised run admits work only within STALE_SECONDS after its last heartbeat.
+
+    The clock is fixed before the run exists and no observer thread runs, so the heartbeat and
+    the admission read exactly the times this test sets. The initial summary is published as
+    SupervisedRun.__enter__ publishes it, without starting the observer.
+    """
+    clock = [1000.0]
+    monkeypatch.setattr(request_budget_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    with retirement_run(tmp_path, opened=False) as (run, grant):
+        run.enable_supervision()
+        publish(
+            run.directory / "summary.json",
+            project(run.snapshot(), run.authorization.limits, "incomplete"),
+        )
+        run.open()
+        clock[0] = 1001.0
+        run.heartbeat()
+        clock[0] = now
+        if admitted:
+            with run.logical(grant):
+                pass
+            snapshot = run.snapshot()
+            assert (snapshot.state, snapshot.logical, snapshot.failure) == ("open", 1, None)
+            return
+        with pytest.raises(RequestPolicyError) as refused, run.logical(grant):
+            pytest.fail("A stale or future heartbeat admitted a logical request")
+        assert refused.value.reason == "accounting"
+        snapshot = run.snapshot()
+        assert (snapshot.state, snapshot.logical, snapshot.failure) == ("failed", 0, "accounting")
+        # A fresh clock afterwards does not revive admission; the first failure stays.
+        clock[0] = 1001.0
+
+        def admit():
+            with run.logical(grant):
+                pytest.fail("A failed run admitted a logical request")
+
+        for operation in (partial(run.check_wait, 0), admit):
+            with pytest.raises(RequestPolicyError):
+                operation()
+        snapshot = run.snapshot()
+        assert (snapshot.state, snapshot.logical, snapshot.failure) == ("failed", 0, "accounting")
 
 
 @pytest.mark.parametrize("invalid", [False, True])
