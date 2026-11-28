@@ -339,7 +339,9 @@ jobs:
           if [ "$current" = "$GITHUB_SHA" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"
           else
-            echo "main has moved past $GITHUB_SHA to $current; this run does not deploy."
+            reason="main has moved past $GITHUB_SHA to $current; this run does not deploy."
+            echo "$reason"
+            echo "$reason" >> "$GITHUB_STEP_SUMMARY"
             echo "deploy=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Deploy the same-run site
