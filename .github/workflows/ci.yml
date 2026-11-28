@@ -310,7 +310,8 @@ jobs:
   pages-deploy:
     name: pages deploy
     needs: [pages-package, required]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.required.result == 'success' && needs.pages-package.result == 'success'
+    # !cancelled() replaces the implicit success(), which skipped this job after the PR-only mutation job.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.required.result == 'success' && needs.pages-package.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -361,7 +362,7 @@ jobs:
   pages-deploy-schedule:
     name: pages deploy schedule twin
     needs: [pages-package, required]
-    if: github.event_name == 'workflow_dispatch' && needs.required.result == 'success' && needs.pages-package.result == 'success'
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.required.result == 'success' && needs.pages-package.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
