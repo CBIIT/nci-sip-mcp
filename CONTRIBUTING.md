@@ -706,6 +706,7 @@ Fixture checks never establish live-service assurance.
 | `release/release` | ci/test and pr-title/conventional; privileged mutation: create real tags and releases only after validated main. |
 | `release/image` | ci/image uses the same image action; privileged mutation: registry and release publication; post-publication digest availability requires the published digest. |
 | `release/local-installer` | local-installer/prepare and local-installer/local-installer use the same reusable verification; actual release tag identity is checked after tagging. |
+| `release/publish` | ci/test covers the `release_notes publish` checks at the CLI boundary and the exact publish-job contract; privileged mutation: publish the assembled draft only after validated main. |
 | `acceptance-live/acceptance-live` | Live drift exemption: measures real services, not fixture behavior; operationally disabled, no PR live run. |
 | `scorecard/analysis` | ci/test exact offline workflow contract; first run after the milestone merge, reported in step 9. |
 
