@@ -36,3 +36,12 @@ tmp/
 
 # Generated release-notes template and configuration (scripts/release_notes.py), never committed
 /.release-notes/
+
+# IntelliJ IDEA project files and its default project-root output (owner request, #646)
+.idea/
+.idea_modules/
+.run/
+*.iml
+*.ipr
+*.iws
+/out/

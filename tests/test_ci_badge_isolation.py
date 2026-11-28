@@ -47,7 +47,7 @@ class BadgeTokenBoundaryTest(unittest.TestCase):
             for name, job in WORKFLOW["jobs"].items()
             if "write" in job.get("permissions", {}).values()
         }
-        self.assertEqual(writers, {"coverage-badges"})
+        self.assertEqual(writers, {"coverage-badges", "pages-deploy"})
         writer = WORKFLOW["jobs"]["coverage-badges"]
         self.assertEqual(
             writer.get("if"), "github.event_name == 'push' && github.ref == 'refs/heads/main'"
@@ -70,7 +70,15 @@ class BadgeTokenBoundaryTest(unittest.TestCase):
         )
         self.assertEqual(
             set(writer["needs"]),
-            set(WORKFLOW["jobs"]) - {"selftest", "coverage-badges", "mutation", "required"},
+            set(WORKFLOW["jobs"])
+            - {
+                "selftest",
+                "coverage-badges",
+                "mutation",
+                "required",
+                "pages-package",
+                "pages-deploy",
+            },
         )
         self.assertEqual(WORKFLOW["jobs"]["coverage"]["needs"], "selftest")
         self.assertEqual(
