@@ -37,7 +37,9 @@ fi
 if [ "$current" = "$GITHUB_SHA" ]; then
   echo "deploy=true" >> "$GITHUB_OUTPUT"
 else
-  echo "main has moved past $GITHUB_SHA to $current; this run does not deploy."
+  reason="main has moved past $GITHUB_SHA to $current; this run does not deploy."
+  echo "$reason"
+  echo "$reason" >> "$GITHUB_STEP_SUMMARY"
   echo "deploy=false" >> "$GITHUB_OUTPUT"
 fi
 """
@@ -180,8 +182,14 @@ class PackageCheckTest(unittest.TestCase):
         self.assertNotIn("contains symbolic links", result.stdout)
 
 
+def workflow_step(job, step_id):
+    """The step's run text as the workflow holds it, not this module's expected constant."""
+    return next(step["run"] for step in JOBS[job]["steps"] if step.get("id") == step_id)
+
+
 class FreshMainTest(unittest.TestCase):
     def decide(self, gh_body):
+        """Run the workflow's own decision step; return exit code, output and summary."""
         with tempfile.TemporaryDirectory() as root:
             stub = Path(root) / "bin"
             stub.mkdir()
@@ -189,30 +197,34 @@ class FreshMainTest(unittest.TestCase):
             (stub / "gh").chmod(0o755)
             output = Path(root) / "output"
             output.touch()
+            summary = Path(root) / "summary"
+            summary.touch()
             result = subprocess.run(  # noqa: S603 - exact repository-owned shell contract
-                ["/bin/bash", "-c", FRESH],
+                ["/bin/bash", "-c", workflow_step("pages-deploy", "fresh")],
                 env={
                     "PATH": f"{stub}:{os.environ['PATH']}",
                     "GITHUB_SHA": SHA,
                     "GITHUB_REPOSITORY": "CBIIT/nci-sip-mcp",
                     "GITHUB_OUTPUT": str(output),
+                    "GITHUB_STEP_SUMMARY": str(summary),
                 },
                 capture_output=True,
                 text=True,
                 timeout=10,
                 check=False,
             )
-            return result.returncode, output.read_text()
+            return result.returncode, output.read_text(), summary.read_text()
 
     def test_current_main_deploys(self):
-        self.assertEqual(self.decide(f"echo {SHA}\n"), (0, "deploy=true\n"))
+        self.assertEqual(self.decide(f"echo {SHA}\n"), (0, "deploy=true\n", ""))
 
-    def test_moved_main_does_not_deploy(self):
-        self.assertEqual(self.decide(f"echo {OTHER}\n"), (0, "deploy=false\n"))
+    def test_moved_main_does_not_deploy_and_says_why_in_the_summary(self):
+        reason = f"main has moved past {SHA} to {OTHER}; this run does not deploy.\n"
+        self.assertEqual(self.decide(f"echo {OTHER}\n"), (0, "deploy=false\n", reason))
 
     def test_a_failed_or_malformed_lookup_fails_without_a_decision(self):
         for body in ("exit 2\n", "echo\n", "echo null\n", "echo abc\n", f"echo {SHA.upper()}\n"):
             with self.subTest(body=body):
-                code, written = self.decide(body)
+                code, written, summary = self.decide(body)
                 self.assertNotEqual(code, 0)
-                self.assertEqual(written, "")
+                self.assertEqual((written, summary), ("", ""))
