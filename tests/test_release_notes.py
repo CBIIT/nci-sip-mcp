@@ -1106,12 +1106,12 @@ class PublishTest(unittest.TestCase):
         project.gh_log.unlink(missing_ok=True)
         return project
 
-    def publish(self, project, commit=None):
+    def publish(self, project, commit=None, repository="example/scratch"):
         return project.notes_tool(
             "publish",
             "v0.2.0",
             "--repository",
-            "example/scratch",
+            repository,
             "--commit",
             commit or project.git("rev-parse", "HEAD"),
             "--digest",
@@ -1180,6 +1180,51 @@ class PublishTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(message, result.stderr)
                 self.assertNotIn("edit", [c[1] for c in self.release_calls(project)])
+
+    def test_non_string_body_is_refused_before_download_or_publish(self):
+        """A body that merely contains the container line as a list member is not a body."""
+        project = self.draft(body=[MARKER])
+        result = self.publish(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (
+                1,
+                "release notes: could not read a valid release record of v0.2.0 in "
+                "example/scratch\n",
+            ),
+        )
+        self.assertEqual([c[1] for c in self.release_calls(project)], ["view"])
+
+    def test_missing_publication_arguments_are_usage_errors_without_gh_calls(self):
+        project = self.draft()
+        full = {
+            "--repository": "example/scratch",
+            "--commit": project.git("rev-parse", "HEAD"),
+            "--digest": DIGEST,
+        }
+        for missing in full:
+            with self.subTest(missing=missing):
+                project.gh_log.unlink(missing_ok=True)
+                given = [part for name, value in full.items() if name != missing
+                         for part in (name, value)]  # fmt: skip
+                result = project.notes_tool("publish", "v0.2.0", *given)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(
+                    result.stderr.splitlines()[-1],
+                    "python -m scripts.release_notes publish: error: the following arguments "
+                    "are required: " + missing,
+                )
+                self.assertEqual(project.gh_calls(), [])
+
+    def test_invalid_repository_is_refused_without_gh_calls(self):
+        """Every other input would publish, so only the repository check can refuse."""
+        project = self.draft()
+        result = self.publish(project, repository="malformed")
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (1, "release notes: 'malformed' is not an owner/name repository\n"),
+        )
+        self.assertEqual(project.gh_calls(), [])
 
     def test_non_list_release_assets_are_refused_before_download_or_publish(self):
         project = self.draft(assets="x")

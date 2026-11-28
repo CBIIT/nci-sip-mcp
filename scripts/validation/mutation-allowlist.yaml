@@ -1367,6 +1367,15 @@
   original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
   mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
   reason: "Equivalent for the present consumers only: frozen=False or slots=False changes behaviour only for attribute assignment, hashing, __dict__/vars/asdict or copying, and scripts/release_notes.py does none of them for this record; it is built once, keyed by its string path or read, and no other file imports it. The decorator arguments stay. Reassess if any consumer mutates, hashes (set member or dict key), copies or serialises it, if it leaves the module, or if a thread boundary shares it."
+# Approved: #661 reviewer 7235165629 (ReleaseRecord frozen=False only); recorded SURVIVED in PR #661 CI run 46113317302 attempt 1 at 3cd850d.
+- file: "scripts/release_notes.py"
+  qualname: "ReleaseRecord"
+  operator: "boolean:literal"
+  site: "/decorator_list/0/keywords/0/value/0"
+  context: "6dc5abe816b9af5b3c521be48d7b2ca3da783a19d9b6eed0c69a2a7647a74e8b"
+  original: "fc49e3ff31db631b11fdae65c1243eea50afe64ff7f1cddca82c434c55e40498"
+  mutated: "4ea452198b8a9e3a518725a04c0294ecccdcfe575822eeaacf94532a6a03055f"
+  reason: "Equivalent for the present consumers only: frozen=False changes only mutability and hashability. The current consumers in scripts/release_notes.py construct the record and read its attributes; they neither assign its attributes nor hash it, no other file references it and the CLI does not expose it. frozen=True stays in production. Reassess if a consumer mutates or hashes it, if another frozen-dependent operation is introduced, or if it leaves the module."
 # Approved: #659 reviewer 7232442089 (ReleaseRecord slots=False only); recorded SURVIVED in the #659 readiness sample at 6f4926c, shard 3/5 (release659/66-sample.log, confirmation unreached).
 - file: "scripts/release_notes.py"
   qualname: "ReleaseRecord"
