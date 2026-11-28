@@ -692,6 +692,18 @@ declared conditions. Their dependencies are also gate inputs, so a failed produc
 the gate. Local run and Local installer remain unrequired because their PR triggers are
 path-filtered. CodeQL is GitHub-managed default setup, not a workflow file in this checkout.
 
+### Public documentation site
+
+GitHub Pages serves the documentation that CI's `documentation` job built and validated in the
+same run. `pages-package` checks that artifact's `build.json` names the run's commit and that it
+holds no symbolic links, then packages it on every event. `pages-deploy` publishes it only for
+a push to `main` whose `required` check succeeded, and only if a lookup just before deployment
+still finds that commit at `main`; a run already superseded at that check skips deployment and
+says so in its run summary. The check and the deployment are separate steps, so this is not an
+atomic guarantee. Pages serves static files: the companion container's health route, custom
+headers and application logs do not apply there; GitHub's own Pages logging is GitHub's, not this
+repository's.
+
 ### Verification before merge
 
 Every verification has a pull-request run or a bounded exemption below. The test derives
@@ -702,6 +714,7 @@ Fixture checks never establish live-service assurance.
 | Postmerge-only job | Pull-request verifier or exemption |
 | --- | --- |
 | `ci/coverage-badges` | ci/coverage-badges-render; privileged mutation: publish rendered badge data only on main. |
+| `ci/pages-deploy` | ci/pages-package; privileged mutation: deploy the same-run validated site only on fresh main. |
 | `branch-cleanup/cleanup` | ci/test; privileged mutation: delete merged branches only after merge. |
 | `release/release` | ci/test and pr-title/conventional; privileged mutation: create real tags and releases only after validated main. |
 | `release/image` | ci/image uses the same image action; privileged mutation: registry and release publication; post-publication digest availability requires the published digest. |

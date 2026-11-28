@@ -75,6 +75,7 @@ class ScorecardWorkflowTest(unittest.TestCase):
             {
                 "scorecard/analysis": {"security-events": "write", "id-token": "write"},
                 "release/image": {"id-token": "write", "attestations": "write"},
+                "ci/pages-deploy": {"id-token": "write"},
             },
         )
 

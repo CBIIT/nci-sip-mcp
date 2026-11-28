@@ -18,6 +18,7 @@ CONDITIONS = {
     "github.event_name != 'pull_request' || needs.changes.outputs.image == 'true'": True,
     "${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.companions == 'true') }}": True,
     "github.event_name == 'push' && github.ref == 'refs/heads/main'": False,
+    "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.required.result == 'success' && needs.pages-package.result == 'success'": False,
     "needs.release.outputs.image_tag != ''": True,
     "github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' &&\n github.event.workflow_run.event == 'push' &&\n github.event.workflow_run.head_branch == 'main')": False,
     "github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'milestone/') && github.event.pull_request.head.repo.full_name == github.repository": False,
@@ -25,6 +26,7 @@ CONDITIONS = {
 ROWS = {
     "scorecard/analysis": "ci/test exact offline workflow contract; first run after the milestone merge, reported in step 9.",
     "ci/coverage-badges": "ci/coverage-badges-render; privileged mutation: publish rendered badge data only on main.",
+    "ci/pages-deploy": "ci/pages-package; privileged mutation: deploy the same-run validated site only on fresh main.",
     "branch-cleanup/cleanup": "ci/test; privileged mutation: delete merged branches only after merge.",
     "release/release": "ci/test and pr-title/conventional; privileged mutation: create real tags and releases only after validated main.",
     "release/image": "ci/image uses the same image action; privileged mutation: registry and release publication; post-publication digest availability requires the published digest.",
