@@ -6,7 +6,6 @@ import os
 import signal
 import subprocess
 import sys
-import time
 import unittest
 from contextlib import redirect_stderr, suppress
 from pathlib import Path
@@ -46,40 +45,45 @@ EXCERPT = 8192  # bytes kept from each diagnostic file, so a failure report stay
 
 
 def _tail(path: Path) -> str:
-    data = path.read_bytes()
-    clipped = "" if len(data) <= EXCERPT else f"[first {len(data) - EXCERPT} bytes omitted]\n"
-    return clipped + data[-EXCERPT:].decode(errors="replace")
+    """The last EXCERPT bytes of `path`, read without loading the rest of the file."""
+    with path.open("rb") as stream:
+        size = stream.seek(0, os.SEEK_END)
+        start = max(0, size - EXCERPT)
+        stream.seek(start)
+        data = stream.read(EXCERPT)
+    clipped = f"[first {start} bytes omitted]\n" if start else ""
+    return clipped + data.decode(errors="replace")
 
 
 def stack_note(worker: subprocess.Popen[bytes], stderr: Path, directory: Path) -> str:
-    """Ask the owned worker for its thread stacks and collect bounded excerpts; never raises."""
-    lines = []
-    try:
-        before = stderr.stat().st_size
-        os.kill(worker.pid, signal.SIGUSR1)
-        grown = wait_until(lambda: stderr.stat().st_size > before, 5, interval=0.05)
-        lines.append(
-            "worker stacks requested (SIGUSR1); " + ("received" if grown else "none within 5 s")
-        )
-        lines.append("worker stderr:\n" + _tail(stderr))
-    except Exception as error:  # noqa: BLE001 - a diagnostic must never replace the original failure
-        lines.append(f"worker stacks unavailable: {type(error).__name__}: {error}")
-    for log in sorted(directory.glob("worker-*/server.log")):
-        try:
-            lines.append(f"{log.name}:\n" + _tail(log))
-        except OSError as error:
-            lines.append(f"{log.name} unavailable: {type(error).__name__}")
+    """Ask the owned worker for its thread stacks and collect bounded excerpts."""
+    before = stderr.stat().st_size
+    os.kill(worker.pid, signal.SIGUSR1)
+    grew = wait_until(lambda: stderr.stat().st_size > before, 5, interval=0.05)
+    # Growth shows only that something was written; the excerpt shows whether it is a stack.
+    lines = [
+        "worker stacks requested (SIGUSR1); stderr "
+        + ("grew afterwards (possibly partial)" if grew else "did not grow within 5 s"),
+        "worker stderr:\n" + _tail(stderr),
+    ]
+    lines += [
+        f"{log.name}:\n" + _tail(log) for log in sorted(directory.glob("worker-*/server.log"))
+    ]
     return "\n".join(lines)
 
 
 def wait_or_diagnose(
     worker: subprocess.Popen[bytes], seconds: float, stderr: Path, directory: Path
 ) -> int:
-    """Wait as before; on timeout, attach the worker's stacks to the original exception."""
+    """Wait as before; on timeout, attach what the diagnostic found and re-raise that timeout."""
     try:
         return worker.wait(timeout=seconds)
     except subprocess.TimeoutExpired as timeout:
-        timeout.add_note(stack_note(worker, stderr, directory))
+        try:
+            note = stack_note(worker, stderr, directory)
+        except Exception as error:  # noqa: BLE001 - the original timeout stays the failure
+            note = f"worker diagnostic unavailable: {type(error).__name__}: {error}"
+        timeout.add_note(note)
         raise
 
 
@@ -177,45 +181,63 @@ class OperatorEnvironmentTest(unittest.TestCase):
         with self.assertRaises(ProcessLookupError):
             os.kill(children[0], 0)
 
-    def test_a_worker_timeout_keeps_its_exception_and_carries_the_workers_stacks(self):
-        with TemporaryDirectory() as directory:
-            stderr = Path(directory) / "child.stderr"
-            sleeper = (
-                "import faulthandler, signal, time; "
-                "faulthandler.register(signal.SIGUSR1, all_threads=True); time.sleep(300)"
-            )
-            with stderr.open("wb") as stream:
-                child = subprocess.Popen([sys.executable, "-c", sleeper], stderr=stream)  # noqa: S603
-            try:
-                time.sleep(0.5)  # let the child register its handler; a slow start shows as "none"
-                with self.assertRaises(subprocess.TimeoutExpired) as raised:
-                    wait_or_diagnose(child, 0.1, stderr, Path(directory))
-                self.assertEqual(raised.exception.timeout, 0.1)
-                [note] = raised.exception.__notes__
-                self.assertIn("worker stacks requested (SIGUSR1); received", note)
-                self.assertIn("most recent call first", note)
-                self.assertIsNone(child.poll())  # the stack request is not fatal
-            finally:
-                child.kill()
-                child.wait(timeout=10)
+    def registered_child(self, directory: Path, stderr: Path) -> subprocess.Popen[bytes]:
+        """A small owned child that announces readiness only after registering its handler."""
+        ready = directory / "ready"
+        code = (
+            "import faulthandler, signal, sys, time; "
+            "faulthandler.register(signal.SIGUSR1, all_threads=True); "
+            "open(sys.argv[1], 'w').close(); time.sleep(300)"
+        )
+        with stderr.open("wb") as stream:
+            child = subprocess.Popen([sys.executable, "-c", code, str(ready)], stderr=stream)  # noqa: S603
+        self.addCleanup(child.wait, timeout=10)
+        self.addCleanup(child.kill)
+        self.assertTrue(wait_until(ready.exists, 10, interval=0.05))
+        return child
 
-    def test_a_failed_stack_request_still_raises_the_original_timeout(self):
-        with TemporaryDirectory() as directory:
-            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
-            try:
-                missing = Path(directory) / "absent.stderr"
-                with self.assertRaises(subprocess.TimeoutExpired) as raised:
-                    wait_or_diagnose(child, 0.1, missing, Path(directory))
-                [note] = raised.exception.__notes__
-                self.assertEqual(
-                    note,
-                    "worker stacks unavailable: FileNotFoundError: "
-                    f"[Errno 2] No such file or directory: '{missing}'",
-                )
-                self.assertIsNone(child.poll())  # no signal was sent
-            finally:
-                child.kill()
-                child.wait(timeout=10)
+    def test_a_worker_timeout_keeps_its_exception_and_carries_the_workers_stacks(self):
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            stderr = directory / "child.stderr"
+            child = self.registered_child(directory, stderr)
+            with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                wait_or_diagnose(child, 0.1, stderr, directory)
+            self.assertEqual(raised.exception.timeout, 0.1)
+            [note] = raised.exception.__notes__
+            self.assertIn("stderr grew afterwards (possibly partial)", note)
+            self.assertIn("most recent call first", note)  # faulthandler's own header
+            self.assertIsNone(child.poll())  # the stack request is not fatal
+
+    def test_a_diagnostic_excerpt_keeps_the_tail_and_says_what_it_omitted(self):
+        with TemporaryDirectory() as temporary:
+            log = Path(temporary) / "server.log"
+            log.write_bytes(b"h" * 10 + b"t" * EXCERPT)
+            self.assertEqual(_tail(log), "[first 10 bytes omitted]\n" + "t" * EXCERPT)
+            log.write_bytes(b"short")
+            self.assertEqual(_tail(log), "short")
+
+    def test_a_failed_diagnostic_still_raises_the_original_timeout(self):
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            stderr = directory / "child.stderr"
+            child = self.registered_child(directory, stderr)
+            missing = directory / "absent.stderr"
+            cases = {
+                "stderr missing": (missing, None, "FileNotFoundError: [Errno 2] No such file "
+                                   f"or directory: '{missing}'"),
+                "log listing fails": (stderr, PermissionError("listing denied"),
+                                      "PermissionError: listing denied"),
+            }  # fmt: skip
+            for name, (path, listing, expected) in cases.items():
+                with self.subTest(name), patch.object(Path, "glob", side_effect=listing):
+                    with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                        wait_or_diagnose(child, 0.1, path, directory)
+                    self.assertEqual(raised.exception.timeout, 0.1)
+                    self.assertEqual(
+                        raised.exception.__notes__, [f"worker diagnostic unavailable: {expected}"]
+                    )
+                    self.assertIsNone(child.poll())
 
     def test_fixed_benchmark_command_writes_report_and_returns_success(self):
         with TemporaryDirectory() as directory:
