@@ -17,8 +17,7 @@ from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 from test_request_supervision import (
     CLEANUP_WORKER,
     STALL_BEFORE_READY,
-    assert_worker_ready,
-    assert_worker_stalled_before_ready,
+    assert_scenario_start,
     authorization,
     child_stream_state,
     failure_leaves,
@@ -527,10 +526,7 @@ def run_controlled_worker_scenario(
     actual_wait = child.wait
     custody.update(child=child, children=[(child, actual_wait)], release=release, helper=None)
     try:
-        if failure_point == "readiness":
-            assert_worker_stalled_before_ready(child, custody)
-        else:
-            assert_worker_ready(child)
+        assert_scenario_start(child, custody, failure_point)
         helper = threading.Thread(
             target=release_controlled_worker,
             args=(child, release, release_sent, helper_done, helper_errors),

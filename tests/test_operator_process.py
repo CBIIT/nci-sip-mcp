@@ -177,26 +177,39 @@ class OperatorProcessTest(unittest.TestCase):
                 child.wait(timeout=5)
 
     def test_deadline_reaps_owned_worker_and_does_not_claim_success(self):
+        # The worker's identity comes from the real launch, so the proof does not depend on how
+        # quickly a new interpreter starts (#660; it once failed waiting for a child-written PID).
+        started = []
+
+        class Recording(subprocess.Popen):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                started.append(self)
+
         with TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            marker = directory / "pid.json"
-            code = (
-                f"import os,json,time; open({str(marker)!r},'w').write(json.dumps(os.getpid())); "
-                "time.sleep(300)"
-            )
-            result = run_owned(
-                [sys.executable, "-c", code],
-                directory=directory,
-                environment=clean_environment(directory),
-                seconds=1,
-                cancelled=threading.Event(),
-            )
-            pid = json.loads(marker.read_text())
-        self.assertEqual(result["state"], "failed")
-        self.assertEqual(result["reason"], "deadline")
-        self.assertNotEqual(result["exit_code"], 0)
-        with self.assertRaises(ProcessLookupError):
-            os.kill(pid, 0)
+            try:
+                with patch("scripts.operator_process.subprocess.Popen", Recording):
+                    result = run_owned(
+                        [sys.executable, "-c", "import time; time.sleep(300)"],
+                        directory=directory,
+                        environment=clean_environment(directory),
+                        seconds=1,
+                        cancelled=threading.Event(),
+                    )
+                self.assertEqual(result["state"], "failed")
+                self.assertEqual(result["reason"], "deadline")
+                self.assertNotEqual(result["exit_code"], 0)
+                self.assertEqual(len(started), 1)
+                # Reaped by run_owned: the handle has a return code and the PID is gone.
+                self.assertIsNotNone(started[0].returncode)
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(started[0].pid, 0)
+            finally:
+                for process in started:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
 
     def test_already_cancelled_job_starts_no_process(self):
         cancelled = threading.Event()
