@@ -1181,6 +1181,19 @@ class PublishTest(unittest.TestCase):
                 self.assertIn(message, result.stderr)
                 self.assertNotIn("edit", [c[1] for c in self.release_calls(project)])
 
+    def test_non_list_release_assets_are_refused_before_download_or_publish(self):
+        project = self.draft(assets="x")
+        result = self.publish(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (
+                1,
+                "release notes: could not read a valid release record of v0.2.0 in "
+                "example/scratch\n",
+            ),
+        )
+        self.assertEqual([c[1] for c in self.release_calls(project)], ["view"])
+
     def test_a_failed_digest_download_is_refused_before_any_edit(self):
         project = self.draft()
         project.env["FAKE_GH_DOWNLOAD"] = "fail"
