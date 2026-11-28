@@ -310,7 +310,8 @@ jobs:
   pages-deploy:
     name: pages deploy
     needs: [pages-package, required]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.required.result == 'success' && needs.pages-package.result == 'success'
+    # !cancelled() replaces the implicit success(), which skipped this job after the PR-only mutation job.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.required.result == 'success' && needs.pages-package.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -354,6 +355,24 @@ jobs:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           echo "Deployed $GITHUB_SHA to $PAGE_URL" >> "$GITHUB_STEP_SUMMARY"
+
+  # Non-publishing scheduling twin of pages-deploy: the same needs and condition with only the
+  # push-to-main clause replaced by a branch dispatch, where mutation is skipped as on main. A run
+  # of this job shows that the deploy condition schedules after that skipped ancestor.
+  pages-deploy-schedule:
+    name: pages deploy schedule twin
+    needs: [pages-package, required]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.required.result == 'success' && needs.pages-package.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Record the scheduling decision
+        env:
+          REQUIRED: ${{ needs.required.result }}
+          PACKAGE: ${{ needs.pages-package.result }}
+        run: |
+          echo "Scheduled on $GITHUB_EVENT_NAME: required=$REQUIRED, pages-package=$PACKAGE" >> "$GITHUB_STEP_SUMMARY"
 
   image:
     name: container (amd64)

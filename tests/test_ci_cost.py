@@ -68,6 +68,7 @@ class CiCostTest(unittest.TestCase):
                     "documentation": "ubuntu-24.04",
                     "pages-package": "ubuntu-24.04",
                     "pages-deploy": "ubuntu-24.04",
+                    "pages-deploy-schedule": "ubuntu-24.04",
                     "image": "ubuntu-24.04",
                     "quality": "ubuntu-24.04",
                     "test": "ubuntu-24.04",
