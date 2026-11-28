@@ -168,10 +168,3 @@ repos:
 
       # The commit hooks stay fast enough for each commit. The complete suite
       # guards the branch at the point where commits leave the checkout.
-      - id: full-test-suite
-        name: whole test suite before push
-        entry: pdm run test
-        language: system
-        stages: [pre-push]
-        pass_filenames: false
-        always_run: true

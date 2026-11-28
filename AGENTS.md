@@ -682,3 +682,19 @@ Verified live on 2026-10-01 against release 26.09d.
   releases with `latest: false`; the current monthly row can carry both `monthly` and `weekly` tags.
 - `/descendants` items are ordered by name, not by level.
 - A batch of 100 concepts with all six relation lists took 1.3 s and 625 KB for ordinary concepts.
+
+## Temporary #646 diagnostic pre-push exception
+
+Owner approval recorded by the reviewer in
+https://github.com/CBIIT/nci-sip-mcp/pull/663#issuecomment-7241784032 permits omission of only
+the `full-test-suite` pre-push hook entry from this branch's `.pre-commit-config.yaml` on the
+never-merged `diagnostic/646-hosted-verify` candidate. The concrete mechanism is approved in
+https://github.com/CBIIT/nci-sip-mcp/pull/663#issuecomment-7241849193. Every other hook remains
+verbatim; all normal commit-stage hooks apply. Installed/shared hooks, default main, other
+branches, repository settings and production tests are unchanged.
+
+Only one reviewer-bound publication is permitted, using Git normally. No retries, `SKIP=`,
+`--no-verify`, `core.hooksPath` override or alternative API publication. One publication is
+the allocation limit, enforced by the authorized command and retained evidence, not an atomic
+marker or new gate program. This exception ends with this diagnostic allocation. All other
+rules and the original failure, evidence-custody and cleanup obligations remain in force.

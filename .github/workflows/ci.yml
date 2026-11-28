@@ -1,822 +1,161 @@
-name: CI
-
+name: Pages 646 one-off verification
 on:
   workflow_dispatch:
-    inputs:
-      base_sha:
-        description: Full ancestor commit for acceptance regression comparison
-        required: true
-        type: string
-  push:
-    branches: [main]
-  pull_request:
-
-permissions:
-  contents: read
-
-# A newer push to a pull request replaces the run in progress. Every commit on
-# main gets its own run, which is never cancelled or replaced: it validates the
-# commit that a release is cut from.
-concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
+permissions: {}
 jobs:
-  mutation:
-    name: mutation (diff)
-    timeout-minutes: 300
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
-    permissions:
-      contents: read
-    runs-on: ubuntu-24.04
-    needs: [test, unit-coverage, selftest, coverage, acceptance]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          pattern: mutation-coverage-${{ github.sha }}-*
-          path: tmp/mutation-coverage
-      - name: Mutate every changed Python site
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.sha }}
-          SHARD: ${{ matrix.shard }}/6
-        run: pdm run mutation-gate --base "$BASE_SHA" --head "$HEAD_SHA" --shard "$SHARD" -n 2 --coverage-dir tmp/mutation-coverage
-      - name: Retain raw mutation results
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: mutation-results-${{ github.sha }}-${{ matrix.shard }}
-          path: tmp/mutation-runs/
-          # An EMPTY shard never starts a scheduler; nonempty evidence is checked before clearance.
-          if-no-files-found: warn
-          retention-days: 30
-
-  changes:
-    name: image selection
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      image: ${{ steps.select.outputs.image }}
-      companions: ${{ steps.select.outputs.companions }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
-        with:
-          python-version: "3.14"
-      - name: Select images from the event change set
-        id: select
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 -m scripts.ci_images "$EVENT_NAME" "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
-
-  companions:
-    name: companion containers (amd64)
-    needs: [changes, documentation]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.companions == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: Require the documentation producer
-        if: needs.documentation.result != 'success'
-        run: |
-          echo "::error::The documentation artifact producer did not succeed."
-          exit 1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          name: documentation-preview-${{ github.sha }}
-          path: tmp/docs-site
-      - run: pdm run python -m scripts.companion_context --site tmp/docs-site
-      - name: Build isolated local images
-        run: |
-          docker build --platform linux/amd64 --load -t nci-si-docs:local tmp/companion-context/docs
-          docker build --platform linux/amd64 --load -t nci-si-admin:local tmp/companion-context/admin
-      - name: Verify real runtime boundaries and fixture results
-        run: pdm run python -m scripts.companion_smoke
-      - name: Scan every companion and retain SBOMs
-        run: |
-          mkdir -p tmp/companion-security
-          for image in docs admin; do
-            docker save --output "tmp/companion-security/$image.tar" "nci-si-$image:local"
-            docker run --rm -v "$PWD/tmp/companion-security:/evidence" -v nci-si-trivy-cache:/root/.cache/trivy docker.io/aquasec/trivy@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image --input "/evidence/$image.tar" --scanners vuln --format json --output "/evidence/$image-scan.json"
-            docker run --rm -v "$PWD/tmp/companion-security:/evidence" -v nci-si-trivy-cache:/root/.cache/trivy docker.io/aquasec/trivy@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image --input "/evidence/$image.tar" --format cyclonedx --output "/evidence/$image-sbom.cdx.json"
-          done
-          pdm run python scripts/image_scan.py tmp/companion-security/docs-scan.json
-          pdm run python scripts/image_scan.py tmp/companion-security/admin-scan.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        if: ${{ always() }}
-        with:
-          name: companion-security-evidence
-          path: tmp/companion-security/*.json
-          if-no-files-found: warn
-          retention-days: 30
-
-  documentation:
-    name: documentation artifact
-    runs-on: ubuntu-24.04
-    # Thirteen minutes of capped steps plus two minutes for action/post-action overhead.
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        timeout-minutes: 1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-        timeout-minutes: 2
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
-        timeout-minutes: 1
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - name: Prepare cold browser verification
-        timeout-minutes: 1
-        env: &documentation-browser
-          DEBUG: pw:browser
-          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/nci-si-documentation-browsers-${{ github.run_id }}-${{ github.run_attempt }}
-          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/tmp/documentation-ci/browser-junit.xml
-        shell: bash
-        run: |
-          mkdir -p tmp/documentation-ci
-          test ! -e "$PLAYWRIGHT_BROWSERS_PATH"
-          printf 'browser_directory_initially_absent=true\n' > tmp/documentation-ci/phase-timings.txt
-          time npm ci --prefix docs/site-assets --ignore-scripts
-          time npm audit --prefix docs/site-assets --audit-level high
-          time npm run build --prefix docs/site-assets
-          node <<'JS'
-          const fs = require('node:fs');
-          const prefix = './docs/site-assets/';
-          const lock = JSON.parse(fs.readFileSync(prefix + 'package-lock.json', 'utf8'));
-          const versions = {};
-          for (const name of ['@playwright/test', 'playwright', 'playwright-core']) {
-            const file = prefix + 'node_modules/' + name + '/package.json';
-            const installed = JSON.parse(fs.readFileSync(file, 'utf8')).version;
-            if (installed !== lock.packages['node_modules/' + name].version)
-              throw new Error('Installed Playwright version differs from package-lock: ' + name);
-            versions[name] = installed;
-          }
-          const identity = {
-            runnerImageOS: process.env.ImageOS,
-            runnerImageVersion: process.env.ImageVersion,
-            runnerOS: process.platform,
-            runnerArchitecture: process.arch,
-            nodeVersion: process.version,
-            versions,
-            browsers: JSON.parse(fs.readFileSync(
-              prefix + 'node_modules/playwright-core/browsers.json', 'utf8')).browsers,
-            browserDirectory: process.env.PLAYWRIGHT_BROWSERS_PATH,
-            browserDirectoryInitiallyAbsent: true,
-          };
-          fs.writeFileSync('tmp/documentation-ci/identity.json', JSON.stringify(identity, null, 2) + '\n');
-          console.log(JSON.stringify(identity));
-          JS
-      - name: Build validated site
-        timeout-minutes: 1
-        shell: bash
-        run: |
-          time pdm run acceptance-stories --check
-          time pdm run docs-build
-      - name: Install pinned Chromium
-        timeout-minutes: 2
-        env: *documentation-browser
-        shell: bash
-        run: |
-          started=$SECONDS
-          set +e
-          { time npm exec --prefix docs/site-assets -- playwright install chromium; } > tmp/documentation-ci/browser-install.log 2>&1
-          gate_status=$?
-          cat tmp/documentation-ci/browser-install.log
-          display_status=$?
-          printf 'install exit=%d elapsed_seconds=%d\n' "$gate_status" "$((SECONDS - started))" >> tmp/documentation-ci/phase-timings.txt
-          timing_status=$?
-          if [ "$gate_status" -ne 0 ]; then exit "$gate_status"; fi
-          if [ "$display_status" -ne 0 ]; then exit "$display_status"; fi
-          exit "$timing_status"
-      - name: Run browser journeys
-        timeout-minutes: 2
-        env: *documentation-browser
-        shell: bash
-        run: |
-          started=$SECONDS
-          set +e
-          { time npm run test:browser --prefix docs/site-assets -- --global-timeout=90000 --reporter=list,junit; } > tmp/documentation-ci/browser-test.log 2>&1
-          gate_status=$?
-          cat tmp/documentation-ci/browser-test.log
-          display_status=$?
-          printf 'test exit=%d elapsed_seconds=%d\n' "$gate_status" "$((SECONDS - started))" >> tmp/documentation-ci/phase-timings.txt
-          timing_status=$?
-          if [ "$gate_status" -ne 0 ]; then exit "$gate_status"; fi
-          if [ "$display_status" -ne 0 ]; then exit "$display_status"; fi
-          exit "$timing_status"
-      - name: Record browser identity
-        env: *documentation-browser
-        if: ${{ always() }}
-        timeout-minutes: 1
-        shell: bash
-        run: |
-          node <<'JS'
-          const fs = require('node:fs');
-          const path = require('node:path');
-          const { chromium } = require('./docs/site-assets/node_modules/playwright');
-          const file = 'tmp/documentation-ci/identity.json';
-          const identity = JSON.parse(fs.readFileSync(file, 'utf8'));
-          const executable = chromium.executablePath();
-          const relative = path.relative(process.env.PLAYWRIGHT_BROWSERS_PATH, executable);
-          if (!relative || relative.startsWith('..') || path.isAbsolute(relative))
-            throw new Error('Chromium executable is outside the owned browser directory');
-          fs.accessSync(executable, fs.constants.X_OK);
-          identity.installedChromiumExecutable = executable;
-          fs.writeFileSync(file, JSON.stringify(identity, null, 2) + '\n');
-          console.log(JSON.stringify(identity));
-          JS
-      - name: Retain documentation diagnostics
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        if: ${{ always() }}
-        timeout-minutes: 1
-        with:
-          name: documentation-diagnostics-${{ github.sha }}
-          path: |
-            tmp/documentation-ci/identity.json
-            tmp/documentation-ci/phase-timings.txt
-            tmp/documentation-ci/browser-install.log
-            tmp/documentation-ci/browser-test.log
-            tmp/documentation-ci/browser-junit.xml
-          if-no-files-found: warn
-          retention-days: 30
-      # Preview only: a successful complete site, never operational evidence or diagnostics.
-      - name: Upload validated site
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        if: ${{ success() }}
-        timeout-minutes: 1
-        with:
-          name: documentation-preview-${{ github.sha }}
-          path: tmp/docs-site/
-          if-no-files-found: error
-          retention-days: 30
-
-  # Packages the same run's validated site for Pages on every event; deploys nothing.
-  pages-package:
-    name: pages package
-    needs: [documentation]
-    if: ${{ !cancelled() }}
+  verify:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/diagnostic/646-hosted-verify' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
-    steps:
-      - name: Require the documentation producer
-        if: needs.documentation.result != 'success'
-        run: |
-          echo "::error::The documentation artifact producer did not succeed."
-          exit 1
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          name: documentation-preview-${{ github.sha }}
-          path: tmp/pages-site
-      - name: Check the artifact's source and symbolic links
+      actions: read
+    defaults:
+      run:
         shell: bash
+    env:
+      PY: /opt/hostedtoolcache/Python/3.14.10/x64/bin/python3
+    steps:
+      - name: Initialize evidence
+        run: mkdir -p tmp/pages646-hosted
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        timeout-minutes: 1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          clean: false
+      - name: Record checkout and default strict runtime
+        timeout-minutes: 1
         run: |
           set -euo pipefail
-          jq -e --arg sha "$GITHUB_SHA" '.source_commit == $sha' tmp/pages-site/build.json > /dev/null
-          links="$(find tmp/pages-site -type l -print)"
-          if [ -n "$links" ]; then
-            echo "::error::The documentation artifact contains symbolic links: $links"
-            exit 1
-          fi
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
-        with:
-          path: tmp/pages-site
+          git rev-parse HEAD > tmp/pages646-hosted/checkout.txt
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -x "$PY"
+          "$PY" - <<'PYTHON' > tmp/pages646-hosted/runtime.log 2>&1
+          import json
+          import os
+          import ssl
+          import sys
+          import urllib.request
+          from pathlib import Path
 
-  # Privileged: deploys the packaged site for a successful push run whose commit a lookup just
-  # before deployment still finds at main (a check, not an atomic guarantee).
-  pages-deploy:
-    name: pages deploy
-    needs: [pages-package, required]
-    # !cancelled() replaces the implicit success(), which skipped this job after the PR-only mutation job.
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.required.result == 'success' && needs.pages-package.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read  # the commits/main lookup
-      pages: write  # create the deployment
-      id-token: write  # OIDC proof of the deployment source
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    concurrency:
-      group: pages-main
-      cancel-in-progress: false
-    steps:
-      - name: Deploy only the current main
-        id: fresh
+          ctx = ssl.create_default_context()
+          trust_names = {
+              "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
+              "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS",
+          }
+          overrides = sorted(k for k in os.environ if k.upper() in trust_names)
+          proxies = urllib.request.getproxies()
+          route_keys = sorted(proxies)
+          record = {
+              "executable": sys.executable,
+              "python": sys.version,
+              "openssl": ssl.OPENSSL_VERSION,
+              "verify_paths": ssl.get_default_verify_paths()._asdict(),
+              "verify_flags": int(ctx.verify_flags),
+              "verify_mode": int(ctx.verify_mode),
+              "check_hostname": ctx.check_hostname,
+              "trust_override_names": overrides,
+              "proxy_keys": route_keys,
+              "identity": {k: os.environ.get(k) for k in (
+                  "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_SHA",
+                  "RUNNER_OS", "RUNNER_ARCH", "ImageOS", "ImageVersion",
+              )},
+          }
+          Path("tmp/pages646-hosted/runtime.json").write_text(json.dumps(record, indent=2))
+          print(json.dumps(record, indent=2))
+          assert sys.flags.optimize == 0
+          assert sys.version_info[:3] == (3, 14, 10)
+          assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
+          assert ctx.verify_flags & ssl.VERIFY_X509_STRICT
+          assert not overrides
+          assert not ({"https", "http", "all"} & set(route_keys))
+          PYTHON
+          gh --version > tmp/pages646-hosted/gh-version.txt
+      - name: Obtain and validate exact source metadata
+        timeout-minutes: 2
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
-          current="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-          if ! [[ "$current" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::The main branch lookup returned no commit SHA."
-            exit 1
-          fi
-          if [ "$current" = "$GITHUB_SHA" ]; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-          else
-            reason="main has moved past $GITHUB_SHA to $current; this run does not deploy."
-            echo "$reason"
-            echo "$reason" >> "$GITHUB_STEP_SUMMARY"
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Deploy the same-run site
-        id: deployment
-        if: steps.fresh.outputs.deploy == 'true'
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
-      - name: Record the deployment
-        if: steps.fresh.outputs.deploy == 'true'
-        env:
-          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
-        run: |
-          echo "Deployed $GITHUB_SHA to $PAGE_URL" >> "$GITHUB_STEP_SUMMARY"
+          timeout 30s gh api repos/CBIIT/nci-sip-mcp/actions/runs/46149129262 > tmp/pages646-hosted/source-run.json
+          timeout 30s gh api repos/CBIIT/nci-sip-mcp/actions/artifacts/15264289307 > tmp/pages646-hosted/source-artifact.json
+          "$PY" - <<'PYTHON'
+          import json
+          from pathlib import Path
 
-  # Non-publishing scheduling twin of pages-deploy: the same needs and condition with only the
-  # push-to-main clause replaced by a branch dispatch, where mutation is skipped as on main. A run
-  # of this job shows that the deploy condition schedules after that skipped ancestor.
-  pages-deploy-schedule:
-    name: pages deploy schedule twin
-    needs: [pages-package, required]
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.required.result == 'success' && needs.pages-package.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Record the scheduling decision
-        env:
-          REQUIRED: ${{ needs.required.result }}
-          PACKAGE: ${{ needs.pages-package.result }}
-        run: |
-          echo "Scheduled on $GITHUB_EVENT_NAME: required=$REQUIRED, pages-package=$PACKAGE" >> "$GITHUB_STEP_SUMMARY"
-
-  image:
-    name: container (amd64)
-    needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.image == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: $/.github/actions/image
-
-  # The pre-commit hooks, on all files. A commit checks only the files it changes,
-  # so this also catches a file that a change elsewhere (a rule, a pin) put in breach.
-  quality:
-    name: quality
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # the package version is derived from the nearest tag
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
-      - run: pdm run pre-commit run --all-files --show-diff-on-failure
-
-  test:
-    name: test (3.14, ${{ matrix.shard }})
-    runs-on: ubuntu-24.04
-    # Serial partitions preserve child/phase ownership; the complete suite exceeded 10 minutes.
-    # This is a hang guard, not a speed target. On 2026-11-25 one shard needed about 580 s of
-    # tests plus about 40 s of setup (PR #624, run 45519973640, shard 2/4, cancelled at 10:00
-    # after "748 passed"), and main's shard 3 took 9:37. 518f8ac set 10 minutes when the shards
-    # were introduced; stride sharding reshuffles them whenever tests are added. Re-measure the
-    # slowest shard's pytest time and revisit the balancing when any shard passes 12 minutes.
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ["1/4", "2/4", "3/4", "4/4"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # the package version is derived from the nearest tag
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      # The minimum applies to the combined partitions in unit-coverage, not each partition.
-      # Includes the recorded retrieval sample and activation gate with a test-only hashing
-      # calibration. It tests execution and arithmetic, not real-model retrieval quality.
-      - name: Configure shared unit coverage
-        run: pdm run python -m scripts.validation.mutation_coverage configure unit --output tmp/mutation-config
-      - name: Test, including recorded retrieval evaluation
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          COVERAGE_PROCESS_START: ${{ github.workspace }}/tmp/mutation-config/.coveragerc
-          UNIT_SHARD: ${{ matrix.shard }}
-        run: pdm run test --unit-shard "$UNIT_SHARD" -n 0 -p scripts.validation.mutation_probe --cov-config=tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= --junitxml=tmp/test-results/unit.xml -vv --durations=20 -o faulthandler_timeout=60
-      - name: Summarize test results
-        if: ${{ !cancelled() }}
-        run: pdm run python scripts/junit_summary.py tmp/test-results/unit.xml "Unit tests" >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload test results
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: unit-test-results-${{ strategy.job-index }}
-          path: tmp/test-results/unit.xml
-          if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: unit-coverage-${{ strategy.job-index }}
-          path: .coverage
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-      - name: Export shared unit coverage
-        env:
-          UNIT_SHARD: ${{ matrix.shard }}
-        run: pdm run python -m scripts.validation.mutation_coverage export unit --data .coverage --shard "$UNIT_SHARD" --output tmp/mutation-coverage/unit.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: mutation-coverage-${{ github.sha }}-unit-${{ strategy.job-index }}
-          path: tmp/mutation-coverage/unit.json
-          if-no-files-found: error
-          retention-days: 1
-
-  unit-coverage:
-    name: unit coverage
-    needs: test
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          pattern: unit-coverage-*
-          path: unit-coverage
-      - name: Combine every unit shard and enforce the minimum
-        run: |
-          shards=(unit-coverage/unit-coverage-*)
-          test "${#shards[@]}" -eq 4
-          pdm run coverage combine unit-coverage/unit-coverage-{0,1,2,3}/.coverage
-          pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=95
-          pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*' --fail-under=95
-      # Falling short of the aim is reported, not enforced (CONTRIBUTING.md, standard 3).
-      - name: Report coverage against the aim
-        run: |
-          total="$(pdm run coverage report --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*,*/scripts/*' --omit='*/scripts/companion_entry.py' --fail-under=0 --format=total)"
-          echo "Coverage ${total}% (the aim is above 98%)" >> "$GITHUB_STEP_SUMMARY"
-          if awk -v total="$total" 'BEGIN { exit !(total <= 98) }'; then
-            echo "::warning title=Coverage is not above 98%::${total}%. Cover the untested behaviour; do not pad."
-          fi
-      - name: Export measured server coverage
-        run: pdm run coverage json --include='*/src/nci_sip_mcp/*,*/src/ncit_index/*' -o tmp/coverage/server.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: badge-coverage-server
-          path: tmp/coverage/server.json
-          if-no-files-found: error
-          retention-days: 30
-
-  # The acceptance suite against the server built from this checkout, on the recorded and crafted
-  # upstream answers: a ratchet over individual tests. Every test must have the outcome in
-  # acceptance/expected/fixture.json, so the job stays green while tools are NOT IMPLEMENTED or
-  # FAIL and fails when a test changes its outcome; a change that moves outcomes on purpose
-  # updates that file in the same pull request. A base pass that regresses or is removed also
-  # requires its exact base-bound transition in expected/regressions.yaml. It depends on no other
-  # job.
-  acceptance:
-    name: acceptance (fixture)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # the package version is derived from the nearest tag
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      # Pytest's exit status 0 (all passed) and 1 (some failed) are both a run; the verdict is the
-      # comparison below. Any other status (usage error, interruption, a crash) or a missing
-      # report is a run that did not happen.
-      - name: Configure shared fixture coverage
-        run: pdm run python -m scripts.validation.mutation_coverage configure fixture --output tmp/mutation-config
-      - name: Run the suite against the fixtures
-        id: fixture
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          COVERAGE_PROCESS_START: ${{ github.workspace }}/tmp/mutation-config/.coveragerc
-          NCI_SIP_ACCEPTANCE_REGISTRY_RELEASE: required
-          NCI_SIP_ACCEPTANCE_SECURITY_SERVER: python ../scripts/permissions_fixture.py
-          # The README's prepare step: it builds the interim NCIt index every server starts from.
-          NCI_SIP_ACCEPTANCE_PREPARE: 'nci-sip-mcp index-sample $(cat "$NCI_SIP_ACCEPTANCE_INDEX_CODES")'
-        run: |
-          status=0
-          started="$(date +%s)"
-          pdm run acceptance -n 4 --dist worksteal -p scripts.validation.mutation_probe --cov --cov-config=../tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= --report=fixture.json || status=$?
-          seconds=$(( $(date +%s) - started ))
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          echo "Fixture run: ${seconds} s of the 600 s limit, exit status ${status}." >> "$GITHUB_STEP_SUMMARY"
-          if [ "$seconds" -ge 420 ]; then
-            echo "::warning title=The acceptance run is slow::It took ${seconds} s; shard it before the 10-minute limit."
-          fi
-          if [ "$status" -gt 1 ]; then
-            echo "::error title=The acceptance run did not finish::pytest exited with status ${status}."
-            exit "$status"
-          fi
-          if [ ! -s acceptance/fixture.json ]; then
-            echo "::error title=No report::The run wrote no acceptance/fixture.json."
-            exit 1
-          fi
-      - name: Compare the outcomes with the expected ones
-        if: ${{ always() && hashFiles('acceptance/fixture.json') != '' }}
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          DISPATCH_BASE_SHA: ${{ inputs.base_sha }}
-        run: |
-          status=0
-          arguments=()
-          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            if [ "$EVENT_NAME" = "pull_request" ]; then BASE_SHA="$PR_BASE_SHA"; else BASE_SHA="$DISPATCH_BASE_SHA"; fi
-            if ! [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error title=Invalid base SHA::Supply a full lowercase 40-character commit SHA."
-              exit 1
-            fi
-            if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
-              echo "::error title=Unknown base commit::$BASE_SHA is not available in this checkout."
-              exit 1
-            fi
-            if [ "$(git cat-file -t "$BASE_SHA")" != "commit" ]; then
-              echo "::error title=Base is not a commit object::$BASE_SHA must identify a commit object directly."
-              exit 1
-            fi
-            if ! git merge-base --is-ancestor "$BASE_SHA" HEAD; then
-              echo "::error title=Base is not an ancestor::$BASE_SHA must be an ancestor of HEAD."
-              exit 1
-            fi
-            git show "$BASE_SHA:acceptance/expected/fixture.json" > tmp/base-fixture.json
-            arguments=(--base tmp/base-fixture.json --base-sha "$BASE_SHA" --approvals acceptance/expected/regressions.yaml)
-          fi
-          pdm run acceptance-expected check acceptance/fixture.json "${arguments[@]}" > acceptance/difference.md || status=$?
-          { echo "### Outcomes against acceptance/expected/fixture.json"; echo; cat acceptance/difference.md; } >> "$GITHUB_STEP_SUMMARY"
-          cat acceptance/difference.md
-          exit "$status"
-      - name: Render the per-tool report
-        if: ${{ always() && hashFiles('acceptance/fixture.json') != '' }}
-        run: |
-          pdm run python -m nci_sip_acceptance.report acceptance/fixture.json > acceptance/report.md
-          { echo "### Per-tool report (fixture mode)"; echo; cat acceptance/report.md; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        if: ${{ always() && hashFiles('acceptance/fixture.json') != '' }}
-        with:
-          name: acceptance-fixture
-          path: |
-            acceptance/fixture.json
-            acceptance/report.md
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Export shared fixture coverage
-        env:
-          FIXTURE_STATUS: ${{ steps.fixture.outputs.status }}
-        run: |
-          test "$FIXTURE_STATUS" -eq 0
-          pdm run python -m scripts.validation.mutation_coverage export fixture --data acceptance/.coverage --shard 1/1 --output tmp/mutation-coverage/fixture.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: mutation-coverage-${{ github.sha }}-fixture
-          path: tmp/mutation-coverage/fixture.json
-          if-no-files-found: error
-          retention-days: 1
-
-  # Included in the aggregate required check alongside the stdio fixture run.
-  acceptance-http:
-    name: acceptance (HTTP fixture)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      - name: Run every applicable remote fixture case and report required skips
-        run: pdm run acceptance-http
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        if: ${{ always() && hashFiles('acceptance/http-fixture.json') != '' }}
-        with:
-          name: acceptance-http-fixture
-          path: acceptance/http-fixture.json
-          if-no-files-found: error
-          retention-days: 30
-
-  # The acceptance harness's own tests, shared out between eight jobs that run at once
-  # (selftests/conftest.py); each keeps its coverage data for the coverage job. They set the
-  # pace of CI: add a shard when one takes more than about four minutes.
-  # Shared coverage (d80d18b) adds per-test contexts requiring CTracer, measured
-  # about 1.4–1.7x slower than the ordinary SysMonitor self-test run.
-  selftest:
-    name: selftest (${{ matrix.shard }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ["1/8", "2/8", "3/8", "4/8", "5/8", "6/8", "7/8", "8/8"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # the package version is derived from the nearest tag
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      # The minimum applies to the shards together, in the coverage job.
-      - name: Configure shared selftest coverage
-        run: pdm run python -m scripts.validation.mutation_coverage configure selftest --output tmp/mutation-config
-      - run: pdm run acceptance-selftest -p scripts.validation.mutation_probe --cov-config=../tmp/mutation-config/.coveragerc --cov-context=test --cov-fail-under=0 --cov-report= --junitxml=tmp/test-results/selftest.xml
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          COVERAGE_PROCESS_START: ${{ github.workspace }}/tmp/mutation-config/.coveragerc
-          SELFTEST_SHARD: ${{ matrix.shard }}
-      - name: Summarize test results
-        if: ${{ !cancelled() }}
-        run: pdm run python scripts/junit_summary.py acceptance/tmp/test-results/selftest.xml "Harness self-tests" >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload test results
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: selftest-results-${{ strategy.job-index }}
-          path: acceptance/tmp/test-results/selftest.xml
-          if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: selftest-coverage-${{ strategy.job-index }}
-          path: acceptance/.coverage
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-      - name: Export shared selftest coverage
-        env:
-          SELFTEST_SHARD: ${{ matrix.shard }}
-        run: pdm run python -m scripts.validation.mutation_coverage export selftest --data acceptance/.coverage --shard "$SELFTEST_SHARD" --output tmp/mutation-coverage/selftest.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: mutation-coverage-${{ github.sha }}-selftest-${{ strategy.job-index }}
-          path: tmp/mutation-coverage/selftest.json
-          if-no-files-found: error
-          retention-days: 1
-
-  # The self-tests' coverage over all eight shards, with the harness's minimum
-  # (acceptance/pyproject.toml); falling short of the aim is reported, not enforced.
-  coverage:
-    name: coverage
-    needs: selftest
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # the package version is derived from the nearest tag
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          pattern: selftest-coverage-*
-          path: selftest-coverage
-      - name: Combine the shards and enforce the minimum
-        run: |
-          pdm run coverage combine --rcfile=acceptance/pyproject.toml --data-file=.coverage-selftest selftest-coverage/*/.coverage
-          pdm run coverage report --rcfile=acceptance/pyproject.toml --data-file=.coverage-selftest --include='*/acceptance/src/*'
-          total="$(pdm run coverage report --rcfile=acceptance/pyproject.toml --data-file=.coverage-selftest --include='*/acceptance/src/*' --format=total)"
-          echo "Self-test coverage ${total}% (the aim is above 98%)" >> "$GITHUB_STEP_SUMMARY"
-          if awk -v total="$total" 'BEGIN { exit !(total <= 98) }'; then
-            echo "::warning title=Self-test coverage is not above 98%::${total}%. Cover the untested behaviour; do not pad."
-          fi
-      - name: Export measured harness coverage
-        run: pdm run coverage json --rcfile=acceptance/pyproject.toml --data-file=.coverage-selftest --include='*/acceptance/src/*' -o tmp/coverage/harness.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: badge-coverage-harness
-          path: tmp/coverage/harness.json
-          if-no-files-found: error
-          retention-days: 30
-
-  coverage-badges-render:
-    name: render coverage badges
-    needs: [unit-coverage, coverage]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: $/.github/actions/setup
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          pattern: badge-coverage-*
-          merge-multiple: true
-          path: tmp/coverage
-      - name: Render badges and source measurements
-        run: pdm run python scripts/coverage_badges.py tmp/coverage tmp/coverage-badges
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: badge-data-${{ github.sha }}
-          path: |
-            tmp/coverage-badges/server.json
-            tmp/coverage-badges/harness.json
-            tmp/coverage-badges/provenance.json
-          if-no-files-found: error
-          retention-days: 1
-
-  required:
-    name: required
-    needs: [mutation, changes, companions, documentation, pages-package, image, quality, test, unit-coverage, acceptance, acceptance-http, selftest, coverage, coverage-badges-render, coverage-badges]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
-        with:
-          python-version: "3.14"
-      - name: Require every CI result
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: python3 -m scripts.ci_required
-
-  coverage-badges:
-    name: publish coverage badges
-    # mutation is PR-only; its deliberate main skip must not suppress publication.
-    needs: [changes, quality, test, unit-coverage, coverage, acceptance, acceptance-http, image, documentation, companions, coverage-badges-render]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write  # only fixed data publication; no checkout or repository execution
-    concurrency:
-      group: coverage-badges-main
-      cancel-in-progress: false
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          name: badge-data-${{ github.sha }}
-          path: tmp/coverage-badges
-      - name: Publish generated badge data
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          out = Path("tmp/pages646-hosted")
+          run = json.loads((out / "source-run.json").read_bytes())
+          artifact = json.loads((out / "source-artifact.json").read_bytes())
+          sha = "88cb67812f7ff9773b9bea364c19259d25cd0423"
+          digest = "sha256:5c42eff8536594e103fc417d530edd2ac368596f12caf516d024fa8610f566f0"
+          assert run["id"] == 46149129262 and run["run_attempt"] == 1
+          assert run["event"] == "push" and run["head_branch"] == "main"
+          assert run["head_sha"] == sha and run["conclusion"] == "success"
+          assert run["status"] == "completed"
+          assert run["repository"]["full_name"] == "CBIIT/nci-sip-mcp"
+          assert artifact["id"] == 15264289307 and artifact["name"] == "github-pages"
+          assert artifact["size_in_bytes"] == 3292265 and artifact["digest"] == digest
+          assert artifact["expired"] is False
+          assert artifact["workflow_run"]["id"] == 46149129262
+          assert artifact["workflow_run"]["head_sha"] == sha
+          assert artifact["workflow_run"]["head_branch"] == "main"
+          PYTHON
+          timeout 30s gh api repos/CBIIT/nci-sip-mcp/actions/artifacts/15264289307/zip > tmp/pages646-hosted/github-pages.zip
+      - name: Check frozen bytes before extracting
+        timeout-minutes: 1
         run: |
           set -euo pipefail
-          current="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-          if [ "$current" != "$GITHUB_SHA" ]; then
-            echo "main has moved; leave publication to its successful CI run."
-            exit 0
-          fi
-          gh auth setup-git
-          directory="$RUNNER_TEMP/coverage-badges"
-          git init --quiet --initial-branch=coverage-badges "$directory"
-          git -C "$directory" remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
-          existing="$(git -C "$directory" ls-remote --heads origin coverage-badges)"
-          if [ -n "$existing" ]; then
-            git -C "$directory" fetch --depth=1 origin coverage-badges
-            git -C "$directory" reset --hard FETCH_HEAD
-          fi
-          cp tmp/coverage-badges/server.json tmp/coverage-badges/harness.json tmp/coverage-badges/provenance.json "$directory/"
-          git -C "$directory" config user.name "Coverage CI"
-          git -C "$directory" config user.email "github-actions[bot]@users.noreply.github.com"
-          git -C "$directory" add server.json harness.json provenance.json
-          if git -C "$directory" diff --cached --quiet; then exit 0; fi
-          git -C "$directory" commit -m "ci: refresh coverage badges"
-          git -C "$directory" push origin HEAD:refs/heads/coverage-badges
+          "$PY" - <<'PYTHON' > tmp/pages646-hosted/input-check.log 2>&1
+          import base64
+          import hashlib
+          import io
+          import json
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          out = Path("tmp/pages646-hosted")
+          archive = (out / "github-pages.zip").read_bytes()
+          assert len(archive) == 3292265
+          assert hashlib.sha256(archive).hexdigest() == "5c42eff8536594e103fc417d530edd2ac368596f12caf516d024fa8610f566f0"
+          with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+              assert zipped.namelist() == ["artifact.tar"]
+              tar_bytes = zipped.read("artifact.tar")
+          assert hashlib.sha256(tar_bytes).hexdigest() == "eaaa0ff212e18dda274241b6d531aea6322de542641299c11a4830943d1d9544"
+          (out / "pages-artifact.tar").write_bytes(tar_bytes)
+          site = out / "site"
+          site.mkdir()
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
+              tar.extractall(site, filter="data")
+          build = json.loads((site / "build.json").read_bytes())
+          assert build["source_commit"] == "88cb67812f7ff9773b9bea364c19259d25cd0423"
+          assert build["dirty"] is False
+          encoded = Path("tmp/pages646-hosted-input/verifier.b64").read_bytes()
+          (out / "verifier.b64").write_bytes(encoded)
+          verifier = base64.b64decode(encoded.strip(), validate=True)
+          assert hashlib.sha256(verifier).hexdigest() == "cd0fb5cdad5eb6791fef80a66184c6bc4dc1338a479b5dca813f2df8bdd136e4"
+          (out / "220-verify-site.py").write_bytes(verifier)
+          print("Frozen ZIP, tar, build identity and unchanged verifier validated.")
+          PYTHON
+      - name: Execute unchanged verifier once
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          set +e
+          "$PY" tmp/pages646-hosted/220-verify-site.py https://cbiit.github.io/nci-sip-mcp/ tmp/pages646-hosted/site 88cb67812f7ff9773b9bea364c19259d25cd0423 tmp/pages646-hosted/responses > tmp/pages646-hosted/verify.log 2>&1
+          exit_code=$?
+          set -e
+          printf '%s\n' "$exit_code" > tmp/pages646-hosted/verifier-exit.txt
+          cat tmp/pages646-hosted/verify.log
+          exit "$exit_code"
+      - name: Retain first-attempt evidence on failure too
+        if: ${{ always() }}
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: pages646-hosted-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tmp/pages646-hosted/
+          if-no-files-found: error
+          retention-days: 30
