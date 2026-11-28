@@ -21,6 +21,7 @@ def main() -> None:
     tag = sys.argv[1]
     if not re.fullmatch(RELEASE_TAG, tag):
         raise ValueError("Expected a release tag")
+    require_draft(tag)
     repository = os.environ["GITHUB_REPOSITORY"]
     image = "ghcr.io/" + repository.lower()
     subprocess.run(  # noqa: S603 - token is stdin only; fixed executable and arguments
@@ -74,6 +75,16 @@ def main() -> None:
             name, subject_digest = digest.split("@")
             stream.write(f"subject-name={name}\nsubject-digest={subject_digest}\n")
     print(f"Published and verified public image: {digest}")
+
+
+def require_draft(tag: str) -> None:
+    """Refuse before any registry action: a published release is immutable (#659)."""
+    release = json.loads(run("gh", "release", "view", tag, "--json", "isDraft"))
+    if not isinstance(release, dict) or release.get("isDraft") is not True:
+        raise ValueError(
+            f"{tag} is not a draft release; a published release is immutable and cannot "
+            "take image assets"
+        )
 
 
 def published_digest(image: str, values: object) -> str:

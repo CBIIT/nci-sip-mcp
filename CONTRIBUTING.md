@@ -706,6 +706,7 @@ Fixture checks never establish live-service assurance.
 | `release/release` | ci/test and pr-title/conventional; privileged mutation: create real tags and releases only after validated main. |
 | `release/image` | ci/image uses the same image action; privileged mutation: registry and release publication; post-publication digest availability requires the published digest. |
 | `release/local-installer` | local-installer/prepare and local-installer/local-installer use the same reusable verification; actual release tag identity is checked after tagging. |
+| `release/publish` | ci/test covers the `release_notes publish` checks at the CLI boundary and the exact publish-job contract; privileged mutation: publish the assembled draft only after validated main. |
 | `acceptance-live/acceptance-live` | Live drift exemption: measures real services, not fixture behavior; operationally disabled, no PR live run. |
 | `scorecard/analysis` | ci/test exact offline workflow contract; first run after the milestone merge, reported in step 9. |
 
@@ -800,12 +801,20 @@ client-impacting change of the release range: that review is human, and no check
 `scripts/release_notes.py prepare` runs in the Release workflow before the tool: it checks every
 fragment in the tree, asks the tool whether a release is due, and, if one is, fails before any tag
 when no valid fragment is pending. The `Release notes preview` workflow shows the body a pull
-request would produce, with read-only permissions. If the tag exists but its GitHub release does
-not, check the tag out in a clean clone and run
+request would produce, with read-only permissions. The tool only tags (`--no-vcs-release`);
+`recover` is the one creator of GitHub releases, always as a draft, and the Release workflow
+calls it for each newly pushed tag. The image job assembles the draft, and the `publish release`
+job runs `release_notes publish`: it refuses unless the release is still a draft with all three
+image assets, its body names the image digest, the `image-digest.txt` bytes equal that digest and
+the remote tag is the image's source commit, then publishes. A failed create or publish request
+may still have taken effect: read `gh release view <tag>` and compare it with the tag commit and
+digest before any retry. If the tag exists but its draft does not, check the tag out in a clean
+clone and run
 `pdm run python -m scripts.release_notes recover <tag> --repository <owner/repo>`: it verifies the
 tag, the commit, the remote tag of the named repository and its successful main CI run, refuses
-when a release exists or the lookup is anything but a clear HTTP 404, and creates only the missing
-release, in that repository, with the original body and the tag's own date (rendered by running semantic-release 10.7.0 with its
+when a published or draft release exists (the tag lookup sees only published ones, so the
+release list is read too) or a lookup is anything but a clear answer, and creates only the missing
+release, as a draft, in that repository, with the original body and the tag's own date (rendered by running semantic-release 10.7.0 with its
 clock at that date, a version-specific dependency that the `test_the_original_tag_date_is_kept_in_the_recovered_body`
 test guards and that a semantic-release upgrade must re-verify). The image retry still
 requires the tag to be main's tip.
@@ -814,8 +823,8 @@ Review the exact PDM (including its bootstrap hishel, unearth and virtualenv con
 basedpyright, Zensical and python-semantic-release tool pins monthly,
 using a separate reviewed dependency refresh and the release-age/security gates above.
 
-When CI passes on `main`, the release workflow tags that commit `vX.Y.Z` and creates a GitHub
-release using semantic-release from the hash-locked `release` dependency group, not a third-party
+When CI passes on `main`, the release workflow tags that commit `vX.Y.Z` with semantic-release,
+then creates its draft GitHub release; the tool comes from the hash-locked `release` dependency group, not a third-party
 action. The release job installs only that group, without the project. No file holds the
 version, and the workflow never commits to `main`. If a release is missing although `main`
 is green, start the Release workflow by hand

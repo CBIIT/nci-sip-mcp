@@ -168,6 +168,50 @@ class ReleaseAttestationContractTest(unittest.TestCase):
                     "attestations": "write",
                 },
                 "local-installer": {"contents": "read"},
+                "publish": {"contents": "write"},
+            },
+        )
+
+    def test_the_assembled_draft_is_published_last_and_bound_to_its_source(self):
+        jobs = release_workflow()["jobs"]
+        self.assertEqual(
+            jobs["image"]["outputs"],
+            {
+                "digest": "${{ steps.publish.outputs.subject-name }}"
+                "@${{ steps.publish.outputs.subject-digest }}"
+            },
+        )
+        self.assertEqual(
+            jobs["publish"],
+            {
+                "name": "publish release",
+                "needs": ["release", "image", "local-installer"],
+                "if": "needs.release.outputs.image_tag != ''",
+                "runs-on": "ubuntu-24.04",
+                "timeout-minutes": 10,
+                "permissions": {"contents": "write"},
+                "steps": [
+                    {
+                        "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+                        "with": {
+                            "ref": "${{ needs.release.outputs.image_sha }}",
+                            "persist-credentials": False,
+                        },
+                    },
+                    {"uses": "$/.github/actions/setup", "with": {"release-only": "true"}},
+                    {
+                        "name": "Publish the assembled draft",
+                        "env": {
+                            "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
+                            "RELEASE_TAG": "${{ needs.release.outputs.image_tag }}",
+                            "RELEASE_SHA": "${{ needs.release.outputs.image_sha }}",
+                            "IMAGE_DIGEST": "${{ needs.image.outputs.digest }}",
+                        },
+                        "run": "pdm run python -m scripts.release_notes publish "
+                        '"$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" '
+                        '--commit "$RELEASE_SHA" --digest "$IMAGE_DIGEST"',
+                    },
+                ],
             },
         )
 

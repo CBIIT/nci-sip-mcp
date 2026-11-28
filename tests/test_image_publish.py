@@ -13,8 +13,9 @@ from scripts import image_publish
 class PublicationService:
     digest = "ghcr.io/new-org/project@sha256:" + "a" * 64
 
-    def __init__(self, *, public=True, fail=None):
-        self.public, self.fail = public, fail
+    def __init__(self, *, public=True, fail=None, draft=True):
+        self.public, self.fail, self.draft = public, fail, draft
+        self.operations = []
         self.image = None
         self.local_images = {
             "nci-sip-mcp:verified": self.digest,
@@ -25,6 +26,7 @@ class PublicationService:
 
     def command(self, *args):
         operation = args[2] if args[0] == "gh" else args[1]
+        self.operations.append(f"{args[0]} {operation}")
         if operation == self.fail:
             raise subprocess.CalledProcessError(1, operation)
         commands = {
@@ -65,7 +67,7 @@ class PublicationService:
         return ""
 
     def run_view(self, *args):
-        return json.dumps({"body": self.notes})
+        return json.dumps({"isDraft": self.draft, "body": self.notes})
 
     def run_edit(self, *args):
         self.notes = Path(args[-1]).read_text()
@@ -104,8 +106,8 @@ class ImagePublicationTest(unittest.TestCase):
         (evidence / "sbom.cdx.json").write_text('{"bomFormat": "CycloneDX"}')
         return evidence
 
-    def publish(self, *, public, fail=None):
-        self.service = PublicationService(public=public, fail=fail)
+    def publish(self, *, public, fail=None, draft=True):
+        self.service = PublicationService(public=public, fail=fail, draft=draft)
         env = {
             "GITHUB_REPOSITORY": "New-Org/Project",
             "GITHUB_ACTOR": "release-bot",
@@ -117,7 +119,11 @@ class ImagePublicationTest(unittest.TestCase):
             patch.dict("os.environ", env),
             patch("sys.argv", ["image_publish.py", "v0.15.0"]),
             patch.object(image_publish, "run", side_effect=self.service.command),
-            patch.object(image_publish.subprocess, "run"),
+            patch.object(
+                image_publish.subprocess,
+                "run",
+                side_effect=lambda *a, **k: self.service.operations.append("docker login"),
+            ),
             redirect_stdout(self.output),
         ):
             image_publish.main()
@@ -169,6 +175,36 @@ class ImagePublicationTest(unittest.TestCase):
                     self.publish(public=True, fail=operation)
                 self.assertNotIn("verified public image", self.output.getvalue())
                 self.assertEqual(self.service.notes, "Release description\n")
+
+    def test_a_published_release_is_refused_before_login_and_push(self):
+        """An immutable published release cannot take assets: refuse before touching GHCR."""
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
+            self.evidence()
+            with self.assertRaisesRegex(ValueError, "^v0.15.0 is not a draft release; a published"):
+                self.publish(public=True, draft=False)
+            self.assertEqual(self.service.operations, ["gh view"])
+            self.assertIsNone(self.service.image)
+            self.assertEqual(self.service.assets, {})
+            self.assertFalse(Path("outputs").exists())
+
+    def test_a_draft_is_checked_first_and_then_assembled(self):
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
+            self.evidence()
+            self.publish(public=True)
+            self.assertEqual(
+                self.service.operations,
+                [
+                    "gh view",
+                    "docker login",
+                    "docker tag",
+                    "docker push",
+                    "docker image",
+                    "gh upload",
+                    "docker --config",
+                    "gh view",
+                    "gh edit",
+                ],
+            )
 
     def test_invalid_tag_fails_before_publication(self):
         with (
