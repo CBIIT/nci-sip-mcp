@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 import unittest
 from contextlib import redirect_stderr, suppress
 from pathlib import Path
@@ -32,6 +33,54 @@ def kill_tree(worker: subprocess.Popen[bytes], children: list[int]) -> None:
         with suppress(ProcessLookupError):
             os.kill(pid, signal.SIGKILL)
     worker.wait(timeout=10)
+
+
+# Test-only bootstrap: the same worker module and argv, plus a nonfatal on-request stack dump
+# (SIGUSR1). The worker still installs its own SIGTERM handler in its `__main__` block (#661).
+WORKER_BOOTSTRAP = (
+    "import faulthandler, runpy, signal, sys; "
+    "faulthandler.register(signal.SIGUSR1, all_threads=True); "
+    "runpy.run_module('scripts.operator_worker', run_name='__main__', alter_sys=True)"
+)
+EXCERPT = 8192  # bytes kept from each diagnostic file, so a failure report stays bounded
+
+
+def _tail(path: Path) -> str:
+    data = path.read_bytes()
+    clipped = "" if len(data) <= EXCERPT else f"[first {len(data) - EXCERPT} bytes omitted]\n"
+    return clipped + data[-EXCERPT:].decode(errors="replace")
+
+
+def stack_note(worker: subprocess.Popen[bytes], stderr: Path, directory: Path) -> str:
+    """Ask the owned worker for its thread stacks and collect bounded excerpts; never raises."""
+    lines = []
+    try:
+        before = stderr.stat().st_size
+        os.kill(worker.pid, signal.SIGUSR1)
+        grown = wait_until(lambda: stderr.stat().st_size > before, 5, interval=0.05)
+        lines.append(
+            "worker stacks requested (SIGUSR1); " + ("received" if grown else "none within 5 s")
+        )
+        lines.append("worker stderr:\n" + _tail(stderr))
+    except Exception as error:  # noqa: BLE001 - a diagnostic must never replace the original failure
+        lines.append(f"worker stacks unavailable: {type(error).__name__}: {error}")
+    for log in sorted(directory.glob("worker-*/server.log")):
+        try:
+            lines.append(f"{log.name}:\n" + _tail(log))
+        except OSError as error:
+            lines.append(f"{log.name} unavailable: {type(error).__name__}")
+    return "\n".join(lines)
+
+
+def wait_or_diagnose(
+    worker: subprocess.Popen[bytes], seconds: float, stderr: Path, directory: Path
+) -> int:
+    """Wait as before; on timeout, attach the worker's stacks to the original exception."""
+    try:
+        return worker.wait(timeout=seconds)
+    except subprocess.TimeoutExpired as timeout:
+        timeout.add_note(stack_note(worker, stderr, directory))
+        raise
 
 
 class OperatorEnvironmentTest(unittest.TestCase):
@@ -98,18 +147,20 @@ class OperatorEnvironmentTest(unittest.TestCase):
     def test_sigterm_ends_a_running_worker_and_reaps_its_owned_server(self):
         with TemporaryDirectory() as directory:
             output = Path(directory) / "report.json"
-            worker = subprocess.Popen(  # noqa: S603 - fixed project worker in an owned directory
-                [
-                    sys.executable,
-                    "-m",
-                    "scripts.operator_worker",
-                    "benchmark-http-fixture",
-                    "--output",
-                    str(output),
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            stderr = Path(directory) / "worker.stderr"
+            with stderr.open("wb") as stream:
+                worker = subprocess.Popen(  # noqa: S603 - fixed project worker in an owned directory
+                    [
+                        sys.executable,
+                        "-c",
+                        WORKER_BOOTSTRAP,
+                        "benchmark-http-fixture",
+                        "--output",
+                        str(output),
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=stream,
+                )
             children: list[int] = []
             try:
                 # server.log is opened before the server starts, so wait for the child itself.
@@ -117,13 +168,54 @@ class OperatorEnvironmentTest(unittest.TestCase):
                 children = children_of(worker.pid)
                 worker.send_signal(signal.SIGTERM)
                 # Unwound as by Ctrl-C: Python then re-raises SIGINT for its own exit status.
-                self.assertEqual(worker.wait(timeout=30), -signal.SIGINT)
+                code = wait_or_diagnose(worker, 30, stderr, Path(directory))
+                self.assertEqual(code, -signal.SIGINT)
             except BaseException:
                 kill_tree(worker, children)
                 raise
         self.assertEqual(len(children), 1)
         with self.assertRaises(ProcessLookupError):
             os.kill(children[0], 0)
+
+    def test_a_worker_timeout_keeps_its_exception_and_carries_the_workers_stacks(self):
+        with TemporaryDirectory() as directory:
+            stderr = Path(directory) / "child.stderr"
+            sleeper = (
+                "import faulthandler, signal, time; "
+                "faulthandler.register(signal.SIGUSR1, all_threads=True); time.sleep(300)"
+            )
+            with stderr.open("wb") as stream:
+                child = subprocess.Popen([sys.executable, "-c", sleeper], stderr=stream)  # noqa: S603
+            try:
+                time.sleep(0.5)  # let the child register its handler; a slow start shows as "none"
+                with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                    wait_or_diagnose(child, 0.1, stderr, Path(directory))
+                self.assertEqual(raised.exception.timeout, 0.1)
+                [note] = raised.exception.__notes__
+                self.assertIn("worker stacks requested (SIGUSR1); received", note)
+                self.assertIn("most recent call first", note)
+                self.assertIsNone(child.poll())  # the stack request is not fatal
+            finally:
+                child.kill()
+                child.wait(timeout=10)
+
+    def test_a_failed_stack_request_still_raises_the_original_timeout(self):
+        with TemporaryDirectory() as directory:
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+            try:
+                missing = Path(directory) / "absent.stderr"
+                with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                    wait_or_diagnose(child, 0.1, missing, Path(directory))
+                [note] = raised.exception.__notes__
+                self.assertEqual(
+                    note,
+                    "worker stacks unavailable: FileNotFoundError: "
+                    f"[Errno 2] No such file or directory: '{missing}'",
+                )
+                self.assertIsNone(child.poll())  # no signal was sent
+            finally:
+                child.kill()
+                child.wait(timeout=10)
 
     def test_fixed_benchmark_command_writes_report_and_returns_success(self):
         with TemporaryDirectory() as directory:
