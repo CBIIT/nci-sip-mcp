@@ -67,9 +67,11 @@ PACKAGE = {
         },
     ],
 }
+# !cancelled() replaces the implicit success(), which skips the job whenever an ancestor such as
+# the pull-request-only mutation job was skipped; the explicit result clauses still decide.
 DEPLOY_CONDITION = (
-    "github.event_name == 'push' && github.ref == 'refs/heads/main' && "
-    "needs.required.result == 'success' && needs.pages-package.result == 'success'"
+    "${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && "
+    "needs.required.result == 'success' && needs.pages-package.result == 'success' }}"
 )
 DEPLOY = {
     "name": "pages deploy",
@@ -99,6 +101,26 @@ DEPLOY = {
             "if": "steps.fresh.outputs.deploy == 'true'",
             "env": {"PAGE_URL": "${{ steps.deployment.outputs.page_url }}"},
             "run": 'echo "Deployed $GITHUB_SHA to $PAGE_URL" >> "$GITHUB_STEP_SUMMARY"\n',
+        },
+    ],
+}
+MAIN_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+BRANCH_DISPATCH = "github.event_name == 'workflow_dispatch'"
+SCHEDULE_TWIN = {
+    "name": "pages deploy schedule twin",
+    "needs": ["pages-package", "required"],
+    "runs-on": "ubuntu-24.04",
+    "timeout-minutes": 5,
+    "permissions": {},
+    "steps": [
+        {
+            "name": "Record the scheduling decision",
+            "env": {
+                "REQUIRED": "${{ needs.required.result }}",
+                "PACKAGE": "${{ needs.pages-package.result }}",
+            },
+            "run": 'echo "Scheduled on $GITHUB_EVENT_NAME: required=$REQUIRED, '
+            'pages-package=$PACKAGE" >> "$GITHUB_STEP_SUMMARY"\n',
         },
     ],
 }
@@ -132,7 +154,19 @@ class PagesWorkflowTest(unittest.TestCase):
         self.assertEqual(holders, {"pages-deploy"})
 
     def test_required_waits_for_packaging_but_not_for_deployment(self):
-        self.assertEqual(set(JOBS["required"]["needs"]), set(JOBS) - {"required", "pages-deploy"})
+        self.assertEqual(
+            set(JOBS["required"]["needs"]),
+            set(JOBS) - {"required", "pages-deploy", "pages-deploy-schedule"},
+        )
+
+    def test_the_schedule_twin_is_the_deploy_condition_on_a_branch_dispatch(self):
+        # Derived from the production job, so the twin cannot drift from what main evaluates.
+        production = JOBS["pages-deploy"]
+        self.assertEqual(production["if"].count(MAIN_PUSH), 1)
+        twin = dict(JOBS["pages-deploy-schedule"])
+        self.assertEqual(twin.pop("if"), production["if"].replace(MAIN_PUSH, BRANCH_DISPATCH))
+        self.assertEqual(twin["needs"], production["needs"])
+        self.assertEqual(twin, SCHEDULE_TWIN)
 
 
 class PackageCheckTest(unittest.TestCase):
