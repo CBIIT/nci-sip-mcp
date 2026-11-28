@@ -282,11 +282,9 @@ def run_legacy_worker_scenario(
         )
         actual_second_wait = second.wait
         children.append((second, actual_second_wait))
-        if failure_point == "readiness":
-            assert_worker_stalled_before_ready(first, custody)
-        else:
-            assert_worker_ready(first)
-        assert_worker_ready(second)
+        assert_scenario_start(first, custody, failure_point)
+        if failure_point is None:
+            assert_worker_ready(second)
         finish_first = partial(finish_first_worker_wait, actual_first_wait, clock)
         public_second_wait = partial(
             wait_for_legacy_worker,
@@ -336,6 +334,18 @@ def assert_worker_ready(child, timeout=3):
         raise TimeoutError("worker did not announce readiness")
     assert child.stdout.readline() == b"ready\n"
     assert child.poll() is None
+
+
+def assert_scenario_start(child, custody, failure_point):
+    """Wait for readiness only where the scenario's claim involves it.
+
+    The helper-start injection proves cleanup of a real child without needing that child's
+    startup to win a deadline; the readiness case keeps its deliberate stall.
+    """
+    if failure_point == "readiness":
+        assert_worker_stalled_before_ready(child, custody)
+    elif failure_point is None:
+        assert_worker_ready(child)
 
 
 def assert_worker_stalled_before_ready(child, custody):
@@ -1184,10 +1194,15 @@ def test_later_marker_publication_keeps_earlier_local_latch(tmp_path, monkeypatc
         with owner:
             with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as lock:
                 if reason == "accounting":
+                    assert owner.run.snapshot().state == "open"
                     lock.execute("BEGIN IMMEDIATE")
                 try:
                     with pytest.raises(RequestPolicyError) as inner:
-                        owner.run.check_wait(delay)
+                        if reason == "accounting":
+                            with owner.run.logical(owner.run.authorization.grants[0]):
+                                pass
+                        else:
+                            owner.run.check_wait(delay)
                 finally:
                     lock.rollback()
             assert inner.value.reason == "accounting"
@@ -1702,7 +1717,8 @@ def test_competing_failure_writes_the_detail_of_the_first_latched_cause(tmp_path
                 pytest.raises(RequestPolicyError) as inner,
             ):
                 blocker.execute("BEGIN IMMEDIATE")
-                run.check_wait(0)
+                with run.logical(run.authorization.grants[0]):
+                    pass
             assert inner.value.reason == "accounting"
         finally:
             release.set()

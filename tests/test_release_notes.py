@@ -8,6 +8,8 @@ import contextlib
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import jinja2
+import yaml
 from scripts import release_notes
 
 ROOT = Path(__file__).parent.parent
@@ -53,9 +56,23 @@ if argv[:2] == ["release", "create"]:
     record["notes"] = open(argv[argv.index("--notes-file") + 1], encoding="utf-8").read()
 with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps(record) + "\\n")
-if argv[0] != "api" and argv[:2] != ["release", "create"]:
+RELEASE_COMMANDS = [["release", s] for s in ("create", "view", "download", "edit")]
+if argv[0] != "api" and argv[:2] not in RELEASE_COMMANDS:
     sys.exit(99)
-if argv[:2] == ["release", "create"]:
+if argv[:2] == ["release", "view"]:
+    print(os.environ["FAKE_GH_VIEW"])
+elif argv[:2] == ["release", "download"]:
+    if os.environ.get("FAKE_GH_DOWNLOAD") == "fail":
+        sys.stderr.write("HTTP 502")
+        sys.exit(1)
+    target = os.path.join(argv[argv.index("--dir") + 1], argv[argv.index("--pattern") + 1])
+    with open(target, "w", encoding="utf-8") as asset:
+        asset.write(os.environ["FAKE_GH_DIGEST"])
+elif argv[:2] == ["release", "edit"]:
+    if os.environ.get("FAKE_GH_EDIT") == "fail":
+        sys.stderr.write("HTTP 502")
+        sys.exit(1)
+elif argv[:2] == ["release", "create"]:
     if repo != KNOWN or os.environ.get("FAKE_GH_CREATE") == "fail":
         sys.stderr.write("HTTP 500")
         sys.exit(1)
@@ -96,6 +113,11 @@ elif "/git/commits/" in path:
     if mode == "nocommitdate":
         del payload["committer"]
     print(json.dumps(payload))
+elif path.split("?")[0].endswith("/releases"):
+    if os.environ.get("FAKE_GH_LIST") == "fail":
+        sys.stderr.write("HTTP 502")
+        sys.exit(1)
+    print(os.environ.get("FAKE_GH_RELEASE_TAGS", ""))
 elif "/releases/tags/" in path:
     state = os.environ["FAKE_GH_RELEASE"]
     head = "HTTP/2.0 {}\\r\\nContent-Type: application/json\\r\\n"
@@ -468,6 +490,77 @@ class ReleaseNotesFlowTest(unittest.TestCase):
         self.assertEqual(project.git("ls-files", ".release-notes"), "")
 
 
+TAG_ONLY_COMMAND = [
+    "pdm", "run", "semantic-release", "-c", CONFIG, "-v", "version", "--no-commit", "--tag",
+    "--push", "--no-changelog", "--no-vcs-release", "--skip-build",
+]  # fmt: skip
+
+
+def workflow_version_command():
+    """The release job's exact semantic-release argv, as the workflow writes it."""
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text("utf-8"))
+    [step] = [s for s in workflow["jobs"]["release"]["steps"] if s.get("id") == "release"]
+    return shlex.split(step["run"])
+
+
+class WorkflowVersionCommandTest(unittest.TestCase):
+    def test_the_workflow_command_pushes_the_tag_and_reports_it_without_a_github_release(self):
+        """Real semantic-release tags and pushes to a local bare remote, with no token.
+
+        The complete tag-only command is asserted before launch: a command that still asks
+        the tool to create the GitHub release would otherwise reach the GitHub API directly,
+        which the gh stub cannot see.
+        """
+        project = Scratch(self)
+        bare = Path(project.directory.name) / "remote.git"
+        project.git("init", "-q", "--bare", str(bare))
+        project.git("config", f"url.{bare.as_uri()}.insteadOf", REPOSITORY_URL)
+        project.history()
+        self.assertEqual(project.notes_tool("prepare").returncode, 0)
+        project.output.unlink(missing_ok=True)
+        command = workflow_version_command()
+        self.assertEqual(command, TAG_ONLY_COMMAND)
+        released = project.run(sys.executable, "-m", "semantic_release", *command[3:])
+        self.assertEqual(released.returncode, 0, released.stderr)
+        outputs = dict(
+            line.split("=", 1)
+            for line in project.output.read_text("utf-8").splitlines()
+            if re.fullmatch(r"(released|tag|version|is_prerelease)=.*", line)
+        )
+        self.assertEqual(
+            outputs,
+            {"released": "true", "tag": "v0.2.0", "version": "0.2.0", "is_prerelease": "false"},
+        )
+        pushed = project.git("--git-dir", str(bare), "rev-parse", "refs/tags/v0.2.0^{commit}")
+        self.assertEqual(pushed, project.git("rev-parse", "HEAD"))
+        self.assertEqual(project.gh_calls(), [])
+
+
+class InstalledGhFlagsTest(unittest.TestCase):
+    def test_the_installed_gh_parses_every_release_flag_the_tools_send(self):
+        """Help output of the real CLI, which makes no API call; mocks cannot prove this."""
+        gh = shutil.which("gh")
+        self.assertIsNotNone(gh, "the GitHub CLI is part of the release tool contract")
+        flags = {
+            "create": ("--repo", "--verify-tag", "--draft", "--notes-file"),
+            "view": ("--repo", "--json"),
+            "download": ("--repo", "--pattern", "--dir"),
+            "edit": ("--repo", "--draft", "--verify-tag"),
+        }
+        for command, expected in flags.items():
+            with self.subTest(command=command):
+                shown = subprocess.run(  # noqa: S603 - the installed CLI prints help; no API call
+                    [str(gh), "release", command, "--help"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=30,
+                )
+                self.assertEqual(shown.returncode, 0, shown.stderr)
+                listed = set(re.findall(r"--[a-z][a-z-]*", shown.stdout))
+                self.assertEqual(set(expected) - listed, set())
+
+
 class RepeatedPrepareTest(unittest.TestCase):
     def test_a_second_prepare_before_any_tag_renders_the_edited_pending_note(self):
         project = Scratch(self)
@@ -720,17 +813,25 @@ class RecoveryTest(unittest.TestCase):
                 ["api", f"repos/example/scratch/git/tags/{tag_object}"],
                 ["api", "-i", "repos/example/scratch/releases/tags/v0.2.0"],
                 [
+                    "api",
+                    "--paginate",
+                    "--jq",
+                    ".[].tag_name",
+                    "repos/example/scratch/releases?per_page=100",
+                ],
+                [
                     "release",
                     "create",
                     "v0.2.0",
                     "--repo",
                     "example/scratch",
                     "--verify-tag",
+                    "--draft",
                     "--notes-file",
                 ],
             ],
         )
-        self.assertEqual(calls[4]["notes"], original)
+        self.assertEqual(calls[5]["notes"], original)
         self.assertEqual(project.tags(), ["v0.1.0", "v0.2.0"])
 
     def test_a_lightweight_tag_is_checked_by_its_commit_and_date(self):
@@ -817,6 +918,33 @@ class RecoveryTest(unittest.TestCase):
         self.assertIn("the history at v0.3.0 no longer yields that release", result.stderr)
         self.assertNotIn("create", [call["argv"][1] for call in project.gh_calls()])
 
+    def test_an_existing_draft_is_refused_without_creating_a_second(self):
+        """The tag lookup sees published releases only; drafts must not be duplicated."""
+        project = Scratch(self)
+        self.release_and_notes(project)
+        project.env["FAKE_GH_RELEASE_TAGS"] = "v0.1.0\nv0.2.0"
+        result = self.recover(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (1, "release notes: v0.2.0 already has a release; notes are never overwritten\n"),
+        )
+        self.assertNotIn(["release", "create"], [c["argv"][:2] for c in project.gh_calls()])
+
+    def test_an_unreadable_release_list_refuses_without_creating(self):
+        project = Scratch(self)
+        self.release_and_notes(project)
+        project.env["FAKE_GH_LIST"] = "fail"
+        result = self.recover(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (
+                1,
+                "release notes: could not tell whether v0.2.0 has a release in example/scratch;"
+                " nothing was created\n",
+            ),
+        )
+        self.assertNotIn(["release", "create"], [c["argv"][:2] for c in project.gh_calls()])
+
     def test_a_failed_creation_is_reported(self):
         project = Scratch(self)
         project.history()
@@ -826,7 +954,11 @@ class RecoveryTest(unittest.TestCase):
         result = self.recover(project)
 
         self.assertEqual(result.returncode, 1)
-        self.assertIn("gh release create failed: HTTP 500", result.stderr)
+        self.assertEqual(
+            result.stderr,
+            "release notes: gh release create failed: HTTP 500; the draft may still exist: "
+            "check `gh release view v0.2.0` before running recover again\n",
+        )
 
     def run_arranged(self, project, setup):
         """Recover after the named change to the scratch project, if any."""
@@ -954,6 +1086,189 @@ class RecoveryTest(unittest.TestCase):
                     ["release", "create"], [call["argv"][:2] for call in project.gh_calls()]
                 )
                 self.assertEqual(project.tags(), ["v0.1.0", "v0.2.0"])
+
+
+DIGEST = "ghcr.io/example/scratch@sha256:" + "c" * 64
+MARKER = f"Container: `{DIGEST}` (tag `v0.2.0`)."
+ASSETS = [{"name": n} for n in ("scan.json", "sbom.cdx.json", "image-digest.txt")]
+
+
+class PublishTest(unittest.TestCase):
+    """The assembled draft is published last, bound to its tag commit and digest bytes."""
+
+    def draft(self, **view):
+        project = Scratch(self)
+        project.history()
+        outcome = project.release()
+        self.assertEqual(outcome.codes, (0, 0), outcome.prepared.stderr)
+        record = {"isDraft": True, "assets": ASSETS, "body": f"Notes\n{MARKER}\n"} | view
+        project.env.update(FAKE_GH_VIEW=json.dumps(record), FAKE_GH_DIGEST=DIGEST + "\n")
+        project.gh_log.unlink(missing_ok=True)
+        return project
+
+    def publish(self, project, commit=None, repository="example/scratch"):
+        return project.notes_tool(
+            "publish",
+            "v0.2.0",
+            "--repository",
+            repository,
+            "--commit",
+            commit or project.git("rev-parse", "HEAD"),
+            "--digest",
+            DIGEST,
+        )
+
+    def release_calls(self, project):
+        return [c["argv"] for c in project.gh_calls() if c["argv"][0] == "release"]
+
+    def test_a_bound_draft_is_published_with_one_final_edit(self):
+        project = self.draft()
+        result = self.publish(project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.release_calls(project)
+        self.assertEqual(
+            calls[0],
+            [
+                "release",
+                "view",
+                "v0.2.0",
+                "--repo",
+                "example/scratch",
+                "--json",
+                "isDraft,assets,body",
+            ],
+        )
+        self.assertEqual(
+            calls[1][:7],
+            [
+                "release",
+                "download",
+                "v0.2.0",
+                "--repo",
+                "example/scratch",
+                "--pattern",
+                "image-digest.txt",
+            ],
+        )
+        self.assertEqual(
+            calls[-1],
+            [
+                "release",
+                "edit",
+                "v0.2.0",
+                "--repo",
+                "example/scratch",
+                "--draft=false",
+                "--verify-tag",
+            ],
+        )
+        self.assertEqual(len(calls), 3)
+
+    def test_publication_is_refused_unless_every_binding_holds(self):
+        cases = {
+            "already published": ({"isDraft": False}, {}, "is not a draft"),
+            "missing asset": ({"assets": ASSETS[1:]}, {}, "lacks the asset scan.json"),
+            "no container line": ({"body": "Notes\n"}, {}, "does not name the container"),
+            "other digest bytes": ({}, {"FAKE_GH_DIGEST": DIGEST[:-1] + "d\n"}, "image-digest"),
+            "wrong record": ({"isDraft": "yes"}, {}, "release record"),
+        }
+        for name, (view, env, message) in cases.items():
+            with self.subTest(name):
+                project = self.draft(**view)
+                project.env.update(env)
+                result = self.publish(project)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn("edit", [c[1] for c in self.release_calls(project)])
+
+    def test_non_string_body_is_refused_before_download_or_publish(self):
+        """A body that merely contains the container line as a list member is not a body."""
+        project = self.draft(body=[MARKER])
+        result = self.publish(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (
+                1,
+                "release notes: could not read a valid release record of v0.2.0 in "
+                "example/scratch\n",
+            ),
+        )
+        self.assertEqual([c[1] for c in self.release_calls(project)], ["view"])
+
+    def test_missing_publication_arguments_are_usage_errors_without_gh_calls(self):
+        project = self.draft()
+        full = {
+            "--repository": "example/scratch",
+            "--commit": project.git("rev-parse", "HEAD"),
+            "--digest": DIGEST,
+        }
+        for missing in full:
+            with self.subTest(missing=missing):
+                project.gh_log.unlink(missing_ok=True)
+                given = [part for name, value in full.items() if name != missing
+                         for part in (name, value)]  # fmt: skip
+                result = project.notes_tool("publish", "v0.2.0", *given)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(
+                    result.stderr.splitlines()[-1],
+                    "python -m scripts.release_notes publish: error: the following arguments "
+                    "are required: " + missing,
+                )
+                self.assertEqual(project.gh_calls(), [])
+
+    def test_invalid_repository_is_refused_without_gh_calls(self):
+        """Every other input would publish, so only the repository check can refuse."""
+        project = self.draft()
+        result = self.publish(project, repository="malformed")
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (1, "release notes: 'malformed' is not an owner/name repository\n"),
+        )
+        self.assertEqual(project.gh_calls(), [])
+
+    def test_non_list_release_assets_are_refused_before_download_or_publish(self):
+        project = self.draft(assets="x")
+        result = self.publish(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (
+                1,
+                "release notes: could not read a valid release record of v0.2.0 in "
+                "example/scratch\n",
+            ),
+        )
+        self.assertEqual([c[1] for c in self.release_calls(project)], ["view"])
+
+    def test_a_failed_digest_download_is_refused_before_any_edit(self):
+        project = self.draft()
+        project.env["FAKE_GH_DOWNLOAD"] = "fail"
+        result = self.publish(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (1, "release notes: could not download image-digest.txt of v0.2.0\n"),
+        )
+        self.assertEqual([c[1] for c in self.release_calls(project)], ["view", "download"])
+
+    def test_a_failed_final_edit_is_reported_as_possibly_published_and_not_retried(self):
+        project = self.draft()
+        project.env["FAKE_GH_EDIT"] = "fail"
+        result = self.publish(project)
+        self.assertEqual(
+            (result.returncode, result.stderr),
+            (
+                1,
+                "release notes: gh release edit failed: HTTP 502; v0.2.0 may still have been "
+                "published: check `gh release view v0.2.0` against the tag commit and digest\n",
+            ),
+        )
+        self.assertEqual([c[1] for c in self.release_calls(project)], ["view", "download", "edit"])
+
+    def test_a_tag_on_another_commit_is_refused(self):
+        project = self.draft()
+        result = self.publish(project, commit="0" * 40)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is not the image source", result.stderr)
+        self.assertNotIn("edit", [c[1] for c in self.release_calls(project)])
 
 
 class PreviewTest(unittest.TestCase):

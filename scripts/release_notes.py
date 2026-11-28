@@ -1,4 +1,4 @@
-"""Reviewed release notes: validate fragments, render the complete body, recover a missing release.
+"""Reviewed release notes: validate fragments, render the body, create and publish the draft.
 
 A release is described by `release-notes/<slug>.md` fragments added since the last release tag.
 The body is the human section followed by semantic-release's own generated change list; the
@@ -359,21 +359,36 @@ def remote_tag(repository: str, tag: str) -> RemoteTag:
     return RemoteTag(sha, _text(commit, "committer", "date"))
 
 
-def release_exists(repository: str, tag: str) -> bool:
-    """Whether the release exists, from a complete lookup that ended as its status says.
+def _unknown(repository: str, tag: str) -> ReleaseNotesError:
+    return ReleaseNotesError(
+        f"could not tell whether {tag} has a release in {repository}; nothing was created"
+    )
 
-    gh exits 0 on 200 and 1 on 404, and prints its own diagnostic on stderr for the 404, so
-    stderr is not read; a failed or cut-off invocation carrying a header refuses.
+
+def release_exists(repository: str, tag: str) -> bool:
+    """Whether a published or draft release exists, from lookups that ended as they say.
+
+    The tag lookup sees published releases only (GitHub: "Get a published release with the
+    specified tag"); after its clear 404, the release list, which includes drafts for a caller
+    with push access, is read in full. gh exits 0 on 200 and 1 on 404 and prints its own
+    diagnostic on stderr for the 404, so stderr is not read; a failed or cut-off invocation
+    carrying a header refuses.
     """
     result = run("gh", "api", "-i", f"repos/{repository}/releases/tags/{tag}")
     status = _HTTP_STATUS.match(result.stdout)
     complete = _HEADERS_END.search(result.stdout) is not None
     outcome = {"200": 0, "404": 1}  # status -> the exit code gh ends with
-    if status and complete and outcome.get(status[1]) == result.returncode:
-        return status[1] == "200"
-    raise ReleaseNotesError(
-        f"could not tell whether {tag} has a release in {repository}; nothing was created"
-    )
+    if not (status and complete and outcome.get(status[1]) == result.returncode):
+        raise _unknown(repository, tag)
+    if status[1] == "200":
+        return True
+    listed = run(
+        "gh", "api", "--paginate", "--jq", ".[].tag_name",
+        f"repos/{repository}/releases?per_page=100",
+    )  # fmt: skip
+    if listed.returncode:
+        raise _unknown(repository, tag)
+    return tag in listed.stdout.splitlines()
 
 
 def frozen_notes(tag: str, commit: str, repository: str) -> str:
@@ -418,7 +433,11 @@ def verified_commit(tag: str, repository: str) -> str:
 
 
 def recover(tag: str, repository: str) -> None:
-    """Create the GitHub release of an existing tag whose release is missing."""
+    """Create the draft GitHub release of an existing tag whose release is missing.
+
+    The only creator of releases: the Release workflow calls it for a newly pushed tag, and a
+    maintainer for a tag whose draft is missing. `publish` alone makes the draft public.
+    """
     if not _REPOSITORY.fullmatch(repository):
         raise ReleaseNotesError(f"{repository!r} is not an owner/name repository")
     commit = verified_commit(tag, repository)
@@ -429,37 +448,119 @@ def recover(tag: str, repository: str) -> None:
         file = Path(directory) / "notes.md"
         file.write_text(notes, encoding="utf-8")
         created = run(
-            "gh", "release", "create", tag, "--repo", repository, "--verify-tag",
+            "gh", "release", "create", tag, "--repo", repository, "--verify-tag", "--draft",
             "--notes-file", str(file),
         )  # fmt: skip
     if created.returncode:
-        raise ReleaseNotesError(f"gh release create failed: {created.stderr.strip()}")
+        raise ReleaseNotesError(
+            f"gh release create failed: {created.stderr.strip()}; the draft may still exist: "
+            f"check `gh release view {tag}` before running recover again"
+        )
+
+
+IMAGE_ASSETS = ("scan.json", "sbom.cdx.json", "image-digest.txt")
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseRecord:
+    """The fields of `gh release view --json isDraft,assets,body` that publication checks."""
+
+    draft: bool
+    assets: frozenset[str]
+    body: str
+
+
+def _asset_names(value: object) -> frozenset[str] | None:
+    if not isinstance(value, list):
+        return None
+    names = [item.get("name") if isinstance(item, dict) else None for item in value]
+    return frozenset(name for name in names if isinstance(name, str))
+
+
+def release_record(tag: str, repository: str) -> ReleaseRecord:
+    viewed = run(
+        "gh", "release", "view", tag, "--repo", repository, "--json", "isDraft,assets,body"
+    )
+    try:
+        value: object = json.loads(viewed.stdout) if viewed.returncode == 0 else None
+    except ValueError:
+        value = None
+    if isinstance(value, dict):
+        draft, body = value.get("isDraft"), value.get("body")
+        assets = _asset_names(value.get("assets"))
+        if isinstance(draft, bool) and isinstance(body, str) and assets is not None:
+            return ReleaseRecord(draft, assets, body)
+    raise ReleaseNotesError(f"could not read a valid release record of {tag} in {repository}")
+
+
+def _check_assembled(record: ReleaseRecord, tag: str, digest: str) -> None:
+    if not record.draft:
+        raise ReleaseNotesError(f"{tag} is not a draft; a published release is never edited")
+    for name in IMAGE_ASSETS:
+        if name not in record.assets:
+            raise ReleaseNotesError(f"the draft {tag} lacks the asset {name}")
+    if f"Container: `{digest}` (tag `{tag}`)." not in record.body:
+        raise ReleaseNotesError(f"the draft {tag} does not name the container image {digest}")
+
+
+def _digest_asset(tag: str, repository: str) -> str:
+    with tempfile.TemporaryDirectory() as directory:
+        downloaded = run(
+            "gh", "release", "download", tag, "--repo", repository,
+            "--pattern", "image-digest.txt", "--dir", directory,
+        )  # fmt: skip
+        if downloaded.returncode:
+            raise ReleaseNotesError(f"could not download image-digest.txt of {tag}")
+        return (Path(directory) / "image-digest.txt").read_text(encoding="utf-8")
+
+
+def publish(tag: str, repository: str, commit: str, digest: str) -> None:
+    """Publish the assembled draft last, bound to its tag commit and its digest asset's bytes."""
+    if not _REPOSITORY.fullmatch(repository):
+        raise ReleaseNotesError(f"{repository!r} is not an owner/name repository")
+    _check_assembled(release_record(tag, repository), tag, digest)
+    if _digest_asset(tag, repository) != digest + "\n":
+        raise ReleaseNotesError(f"the image-digest.txt asset of {tag} is not {digest}")
+    remote = remote_tag(repository, tag)
+    if remote.commit != commit:
+        raise ReleaseNotesError(
+            f"the remote tag {tag} is {remote.commit}, which is not the image source {commit}"
+        )
+    edited = run(
+        "gh", "release", "edit", tag, "--repo", repository, "--draft=false", "--verify-tag"
+    )  # fmt: skip
+    if edited.returncode:
+        raise ReleaseNotesError(
+            f"gh release edit failed: {edited.stderr.strip()}; {tag} may still have been "
+            f"published: check `gh release view {tag}` against the tag commit and digest"
+        )
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("prepare")
+    commands.add_parser("prepare").set_defaults(act=lambda _: prepare())
     show = commands.add_parser("preview")
     for name in ("--base", "--head", "--repository-url"):
         show.add_argument(name, required=True)
+    show.set_defaults(act=lambda a: sys.stdout.write(preview(a.base, a.head, a.repository_url)))
     # Internal to `recover`; see `run_tool_as_of` (a semantic-release 10.7.0 dependency).
     clock = commands.add_parser("tool-as-of")
     clock.add_argument("moment")
     clock.add_argument("arguments", nargs=argparse.REMAINDER)
+    clock.set_defaults(act=lambda a: run_tool_as_of(a.moment, a.arguments[1:]))
     fix = commands.add_parser("recover")
     fix.add_argument("tag")
     fix.add_argument("--repository", required=True)
+    fix.set_defaults(act=lambda a: recover(a.tag, a.repository))
+    final = commands.add_parser("publish")
+    final.add_argument("tag")
+    for name in ("--repository", "--commit", "--digest"):
+        final.add_argument(name, required=True)
+    final.set_defaults(act=lambda a: publish(a.tag, a.repository, a.commit, a.digest))
     arguments = parser.parse_args(argv)
     try:
-        if arguments.command == "prepare":
-            prepare()
-        elif arguments.command == "tool-as-of":
-            run_tool_as_of(arguments.moment, arguments.arguments[1:])
-        elif arguments.command == "preview":
-            sys.stdout.write(preview(arguments.base, arguments.head, arguments.repository_url))
-        else:
-            recover(arguments.tag, arguments.repository)
+        arguments.act(arguments)
     except ReleaseNotesError as error:
         sys.stderr.write(f"release notes: {error}\n")
         return 1

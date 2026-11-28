@@ -23,7 +23,10 @@ MAX_BUSY_WAIT = 5
 
 def ledger(directory):
     grant = RequestGrant("GET", "http://127.0.0.1:9/owned", ())
-    return ControlledRun.create(Authorization((grant,), Limits(), "a" * 64), directory)
+    run = ControlledRun.create(Authorization((grant,), Limits(), "a" * 64), directory)
+    run.open()
+    assert run.snapshot().state == "open"
+    return run
 
 
 def retained(node):
@@ -36,7 +39,11 @@ def refuse_through_a_writer(run, monkeypatch):
     # Writer-versus-writer contention is forced here: a held BEGIN IMMEDIATE refuses the next
     # writer deterministically, whereas reader refusals (for example during last-connection
     # recovery) cannot be provoked on demand.
-    monkeypatch.setattr(run, "snapshot", lambda: run.check_wait(0))
+    def write():
+        with run.logical(run.authorization.grants[0]):
+            pass
+
+    monkeypatch.setattr(run, "snapshot", write)
 
 
 def test_real_ledger_refusal_is_retained_before_cleanup(tmp_path, request, capsys, monkeypatch):
@@ -87,7 +94,8 @@ def test_refused_ledger(tmp_path):
     with closing(sqlite3.connect(owner.run.directory / "ledger.sqlite")) as holder, owner:
         holder.execute("BEGIN IMMEDIATE")
         try:
-            owner.run.check_wait(0)
+            with owner.run.logical(grant):
+                pass
         except RequestPolicyError:
             pass
         holder.rollback()
@@ -128,7 +136,8 @@ def controlled_refusal(monkeypatch):
             with closing(sqlite3.connect(run.directory / "ledger.sqlite")) as blocker, blocker:
                 blocker.execute("BEGIN IMMEDIATE")
                 try:
-                    return run.check_wait(0)
+                    with run.logical(run.authorization.grants[0]):
+                        return None
                 except RequestPolicyError as error:
                     assert isinstance(error.__context__, sqlite3.OperationalError)
                     error.__context__.args = (PRIVATE_CANARY,)

@@ -26,6 +26,8 @@ class PublicationProcessTest(unittest.TestCase):
                     "import json, os, sys\n"
                     "from pathlib import Path\n"
                     "operation = sys.argv[1]\n"
+                    "if operation == 'release':\n"
+                    "    raise SystemExit(print(json.dumps({'isDraft': True})))\n"
                     "record = {'operation': operation, 'arguments': sys.argv[2:]}\n"
                     "if operation == 'login':\n"
                     "    token = sys.stdin.read()\n"

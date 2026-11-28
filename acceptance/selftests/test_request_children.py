@@ -17,8 +17,7 @@ from http_receiver import PRODUCT_USER_AGENT, WireReceiver
 from test_request_supervision import (
     CLEANUP_WORKER,
     STALL_BEFORE_READY,
-    assert_worker_ready,
-    assert_worker_stalled_before_ready,
+    assert_scenario_start,
     authorization,
     child_stream_state,
     failure_leaves,
@@ -64,14 +63,12 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
     resource = calls(lambda: b"owned completion finished")
     close_failure = RequestPolicyError("accounting")
     lock = sqlite3.connect(owner.run.directory / "ledger.sqlite")
-    summary = owner.run.directory / "summary.json"
-    actual_close, actual_finish, actual_snapshot, actual_check_wait = (
+    summary, facts = owner.run.directory / "summary.json", {}
+    actual_close, actual_finish, actual_snapshot = (
         owner.run.close,
         resource.finish,
         owner.run.snapshot,
-        owner.run.check_wait,
     )
-    facts = {}
 
     def close():
         actual_close()
@@ -81,7 +78,8 @@ def test_recovered_terminal_read_still_publishes_final_failure_summary(
         # The terminal read is refused by a real writer-versus-writer SQLITE_BUSY while the
         # writer lock is held; the lock is then released and later reads recover.
         try:
-            return actual_check_wait(0)
+            with owner.run.logical(owner.run.authorization.grants[0]):
+                return None
         except RequestPolicyError as error:
             facts["storage_refusal"] = error
             lock.rollback()
@@ -528,10 +526,7 @@ def run_controlled_worker_scenario(
     actual_wait = child.wait
     custody.update(child=child, children=[(child, actual_wait)], release=release, helper=None)
     try:
-        if failure_point == "readiness":
-            assert_worker_stalled_before_ready(child, custody)
-        else:
-            assert_worker_ready(child)
+        assert_scenario_start(child, custody, failure_point)
         helper = threading.Thread(
             target=release_controlled_worker,
             args=(child, release, release_sent, helper_done, helper_errors),
