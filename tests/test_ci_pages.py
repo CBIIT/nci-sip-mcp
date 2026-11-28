@@ -67,9 +67,11 @@ PACKAGE = {
         },
     ],
 }
+# !cancelled() replaces the implicit success(), which skips the job whenever an ancestor such as
+# the pull-request-only mutation job was skipped; the explicit result clauses still decide.
 DEPLOY_CONDITION = (
-    "github.event_name == 'push' && github.ref == 'refs/heads/main' && "
-    "needs.required.result == 'success' && needs.pages-package.result == 'success'"
+    "${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && "
+    "needs.required.result == 'success' && needs.pages-package.result == 'success' }}"
 )
 DEPLOY = {
     "name": "pages deploy",
