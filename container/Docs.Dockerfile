@@ -1,4 +1,4 @@
-FROM public.ecr.aws/amazonlinux/amazonlinux@sha256:5c38fd85b00ce8c094315d9b71f671f880052314a22bd25f1a027821bf61d9d7
+FROM public.ecr.aws/amazonlinux/amazonlinux@sha256:47a249649c57ca32b2d4bd5f46149383d5852610eb2c6230e33ce9c3ab8c8459
 RUN dnf -y upgrade --refresh
 RUN dnf -y install python3.14
 RUN dnf clean all
