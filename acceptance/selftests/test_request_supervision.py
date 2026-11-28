@@ -282,11 +282,9 @@ def run_legacy_worker_scenario(
         )
         actual_second_wait = second.wait
         children.append((second, actual_second_wait))
-        if failure_point == "readiness":
-            assert_worker_stalled_before_ready(first, custody)
-        else:
-            assert_worker_ready(first)
-        assert_worker_ready(second)
+        assert_scenario_start(first, custody, failure_point)
+        if failure_point is None:
+            assert_worker_ready(second)
         finish_first = partial(finish_first_worker_wait, actual_first_wait, clock)
         public_second_wait = partial(
             wait_for_legacy_worker,
@@ -336,6 +334,18 @@ def assert_worker_ready(child, timeout=3):
         raise TimeoutError("worker did not announce readiness")
     assert child.stdout.readline() == b"ready\n"
     assert child.poll() is None
+
+
+def assert_scenario_start(child, custody, failure_point):
+    """Wait for readiness only where the scenario's claim involves it.
+
+    The helper-start injection proves cleanup of a real child without needing that child's
+    startup to win a deadline; the readiness case keeps its deliberate stall.
+    """
+    if failure_point == "readiness":
+        assert_worker_stalled_before_ready(child, custody)
+    elif failure_point is None:
+        assert_worker_ready(child)
 
 
 def assert_worker_stalled_before_ready(child, custody):

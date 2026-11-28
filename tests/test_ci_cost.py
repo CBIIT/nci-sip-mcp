@@ -95,6 +95,7 @@ class CiCostTest(unittest.TestCase):
                     "release": "ubuntu-24.04",
                     "image": "ubuntu-24.04",
                     "local-installer": None,
+                    "publish": "ubuntu-24.04",
                 },
             },
         )

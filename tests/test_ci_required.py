@@ -223,6 +223,7 @@ class WorkflowHygieneTest(unittest.TestCase):
                     "attestations": "write",
                 },
                 "local-installer": {"contents": "read"},
+                "publish": {"contents": "write"},
             },
         )
         self.assertEqual(workflow("branch-cleanup")["permissions"], {})
