@@ -112,9 +112,12 @@ class RequiredWorkflowTest(unittest.TestCase):
         jobs = workflow("ci")["jobs"]
         self.assertIn("required", set(jobs), "CI must always report one aggregate required context")
         gate = jobs["required"]
-        # Pages deployment needs the aggregate itself, so it cannot be one of its inputs.
-        self.assertEqual(set(gate["needs"]), set(jobs) - {"required", "pages-deploy"})
-        self.assertEqual(len(gate["needs"]), len(jobs) - 2)
+        # Pages deployment and its scheduling twin need the aggregate itself, so neither can be
+        # one of its inputs.
+        self.assertEqual(
+            set(gate["needs"]), set(jobs) - {"required", "pages-deploy", "pages-deploy-schedule"}
+        )
+        self.assertEqual(len(gate["needs"]), len(jobs) - 3)
         self.assertEqual(
             {key: value for key, value in gate.items() if key != "needs"},
             {

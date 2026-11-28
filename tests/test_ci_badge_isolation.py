@@ -78,6 +78,7 @@ class BadgeTokenBoundaryTest(unittest.TestCase):
                 "required",
                 "pages-package",
                 "pages-deploy",
+                "pages-deploy-schedule",
             },
         )
         self.assertEqual(WORKFLOW["jobs"]["coverage"]["needs"], "selftest")
